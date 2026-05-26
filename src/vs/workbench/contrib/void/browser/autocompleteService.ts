@@ -10,10 +10,6 @@ import { EndOfLinePreference, ITextModel } from '../../../../editor/common/model
 import { Position } from '../../../../editor/common/core/position.js';
 import { InlineCompletion, } from '../../../../editor/common/languages.js';
 import { Range } from '../../../../editor/common/core/range.js';
-import { IEditorService } from '../../../services/editor/common/editorService.js';
-import { isCodeEditor } from '../../../../editor/browser/editorBrowser.js';
-import { EditorResourceAccessor } from '../../../common/editor.js';
-import { IModelService } from '../../../../editor/common/services/model.js';
 import { extractCodeFromRegular } from '../common/helpers/extractCodeFromResult.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
@@ -891,8 +887,6 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 	constructor(
 		@ILanguageFeaturesService private _langFeatureService: ILanguageFeaturesService,
 		@ILLMMessageService private readonly _llmMessageService: ILLMMessageService,
-		@IEditorService private readonly _editorService: IEditorService,
-		@IModelService private readonly _modelService: IModelService,
 		@IVoidSettingsService private readonly _settingsService: IVoidSettingsService,
 		@IConvertToLLMMessageService private readonly _convertToLLMMessageService: IConvertToLLMMessageService
 		// @IContextGatheringService private readonly _contextGatheringService: IContextGatheringService,
@@ -906,37 +900,11 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 				// console.log('item: ', items?.[0]?.insertText)
 				return { items: items, }
 			},
-			freeInlineCompletions: (completions) => {
-				// get the `docUriStr` and the `position` of the cursor
-				const activePane = this._editorService.activeEditorPane;
-				if (!activePane) return;
-				const control = activePane.getControl();
-				if (!control || !isCodeEditor(control)) return;
-				const position = control.getPosition();
-				if (!position) return;
-				const resource = EditorResourceAccessor.getCanonicalUri(this._editorService.activeEditor);
-				if (!resource) return;
-				const model = this._modelService.getModel(resource)
-				if (!model) return;
-				const docUriStr = resource.fsPath;
-				if (!this._autocompletionsOfDocument[docUriStr]) return;
-
-				const { prefix, } = getPrefixAndSuffixInfo(model, position)
-
-				// go through cached items and remove matching ones
-				// autocompletion.prefix + autocompletion.insertedText ~== insertedText
-				this._autocompletionsOfDocument[docUriStr].items.forEach((autocompletion: Autocompletion) => {
-
-					// we can do this more efficiently, I just didn't want to deal with all of the edge cases
-					const matchup = removeAllWhitespace(prefix) === removeAllWhitespace(autocompletion.prefix + autocompletion.insertText)
-
-					if (matchup) {
-						console.log('ACCEPT', autocompletion.id)
-						this._lastCompletionAccept = Date.now()
-						this._autocompletionsOfDocument[docUriStr].delete(autocompletion.id);
-					}
-				});
-
+			handleItemDidShow: (_completions: any, _item: any, _updatedInsertText: string) => {
+				// no-op: acceptance tracking handled elsewhere
+			},
+			disposeInlineCompletions: (_completions: any) => {
+				// no-op
 			},
 		}))
 	}

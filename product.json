@@ -42,5 +42,55 @@
 		"https://voideditor.dev",
 		"https://github.com/voideditor/void",
 		"https://ollama.com"
-	]
+	],
+	"sharedDataFolderName": ".void-editor-shared",
+	"defaultChatAgent": {
+		"extensionId": "void.void",
+		"chatExtensionId": "void.void",
+		"chatExtensionOutputId": "",
+		"chatExtensionOutputExtensionStateCommand": "",
+		"documentationUrl": "https://voideditor.com",
+		"skusDocumentationUrl": "https://voideditor.com",
+		"publicCodeMatchesUrl": "https://voideditor.com",
+		"managePlanUrl": "https://voideditor.com",
+		"upgradePlanUrl": "https://voideditor.com",
+		"signUpUrl": "https://voideditor.com",
+		"termsStatementUrl": "https://voideditor.com",
+		"privacyStatementUrl": "https://voideditor.com",
+		"provider": {
+			"default": {
+				"id": "void",
+				"name": "Void"
+			},
+			"enterprise": {
+				"id": "void",
+				"name": "Void"
+			},
+			"google": {
+				"id": "void",
+				"name": "Void"
+			},
+			"apple": {
+				"id": "void",
+				"name": "Void"
+			}
+		},
+		"providerExtensionId": "void.void",
+		"providerUriSetting": "",
+		"providerScopes": [],
+		"entitlementUrl": "https://voideditor.com",
+		"entitlementSignupLimitedUrl": "https://voideditor.com",
+		"tokenEntitlementUrl": "https://voideditor.com",
+		"mcpRegistryDataUrl": "https://voideditor.com",
+		"chatQuotaExceededContext": "",
+		"completionsQuotaExceededContext": "",
+		"walkthroughCommand": "",
+		"completionsMenuCommand": "",
+		"chatRefreshTokenCommand": "",
+		"generateCommitMessageCommand": "",
+		"resolveMergeConflictsCommand": "",
+		"completionsAdvancedSetting": "",
+		"completionsEnablementSetting": "",
+		"nextEditSuggestionsSetting": ""
+	}
 }

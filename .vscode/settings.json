@@ -212,5 +212,6 @@
 		".github/skills/.local": true,
 		".agents/skills/.local": true,
 		".claude/skills/.local": true,
-	}
+	},
+	"typescript.native-preview.tsdk": "/Users/jcommaret/Sites/void/node_modules/@typescript/native-preview"
 }

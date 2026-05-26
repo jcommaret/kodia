@@ -21,9 +21,7 @@ import { ICodeEditor } from '../../../../../editor/browser/editorBrowser.js';
 import { EditorAction2 } from '../../../../../editor/browser/editorExtensions.js';
 import { IRange } from '../../../../../editor/common/core/range.js';
 import { localize, localize2 } from '../../../../../nls.js';
-import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
-import { DropdownWithPrimaryActionViewItem } from '../../../../../platform/actions/browser/dropdownWithPrimaryActionViewItem.js';
-import { Action2, MenuId, MenuItemAction, registerAction2, SubmenuItemAction } from '../../../../../platform/actions/common/actions.js';
+import { Action2, ICommandPaletteOptions, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -1532,32 +1530,34 @@ export interface IToolFilteringResult {
 export function computeToolEnablementMap(options: IToolFilteringOptions): IToolFilteringResult {
 	const { allTools, allToolSets, toolsInclude, toolsExclude } = options;
 
-// // Add next to the command center if command center is disabled
-// Void commented this out with /* */ - copilot head
-/* MenuRegistry.appendMenuItem(MenuId.CommandCenter, {
-	submenu: MenuId.ChatTitleBarMenu,
-	title: localize('title4', "Copilot"),
-	icon: Codicon.copilot,
-	when: ContextKeyExpr.and(
-		ChatContextKeys.supported,
-		ContextKeyExpr.has('config.chat.commandCenter.enabled')
-	),
-	order: 10001 // to the right of command center
-});
+	const enablementMap = new Map<IToolData | IToolSet, boolean>();
+	const matchedIdentifiers = new Set<string>();
 
-// Add to the global title bar if command center is disabled
-MenuRegistry.appendMenuItem(MenuId.TitleBar, {
-	submenu: MenuId.ChatTitleBarMenu,
-	title: localize('title4', "Copilot"),
-	group: 'navigation',
-	icon: Codicon.copilot,
-	when: ContextKeyExpr.and(
-		ChatContextKeys.supported,
-		ContextKeyExpr.has('config.chat.commandCenter.enabled'),
-		ContextKeyExpr.has('config.window.commandCenter').negate(),
-	),
-	order: 1
-}); */
+	// Helper to check if a tool matches any identifier (by id or toolReferenceName)
+	const toolMatches = (tool: IToolData, identifiers: Set<string>): boolean => {
+		if (identifiers.has(tool.id)) {
+			matchedIdentifiers.add(tool.id);
+			return true;
+		}
+		if (tool.toolReferenceName && identifiers.has(tool.toolReferenceName)) {
+			matchedIdentifiers.add(tool.toolReferenceName);
+			return true;
+		}
+		return false;
+	};
+
+	// Helper to check if a toolset matches any identifier (by id or referenceName)
+	const toolSetMatches = (toolSet: IToolSet, identifiers: Set<string>): boolean => {
+		if (identifiers.has(toolSet.id)) {
+			matchedIdentifiers.add(toolSet.id);
+			return true;
+		}
+		if (identifiers.has(toolSet.referenceName)) {
+			matchedIdentifiers.add(toolSet.referenceName);
+			return true;
+		}
+		return false;
+	};
 
 	// Track which tools are explicitly referenced in toolsInclude
 	const explicitlyIncludedTools = new Set<IToolData>();

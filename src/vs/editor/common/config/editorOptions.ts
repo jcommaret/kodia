@@ -3766,7 +3766,7 @@ class EditorQuickSuggestions extends BaseEditorOption<EditorOption.quickSuggesti
 		const defaults: InternalQuickSuggestionsOptions = {
 			other: 'offWhenInlineCompletions',
 			comments: 'off',
-			strings: 'off'
+			strings: 'on' // Void changed this setting
 		};
 		const types: IJSONSchema[] = [
 			{ type: 'boolean' },

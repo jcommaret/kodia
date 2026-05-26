@@ -41,10 +41,10 @@ export default tseslint.config(
 		},
 		rules: {
 			'constructor-super': 'warn',
-			'curly': 'warn',
+			'curly': 'off', // <-- Void
 			'eqeqeq': 'warn',
 			'prefer-const': [
-				'warn',
+				'off', // <-- Void
 				{
 					'destructuring': 'all'
 				}
@@ -124,16 +124,17 @@ export default tseslint.config(
 					]
 				}
 			],
-			'header/header': [
-				2,
-				'block',
-				[
-					'---------------------------------------------------------------------------------------------',
-					' *  Copyright (c) Microsoft Corporation. All rights reserved.',
-					' *  Licensed under the MIT License. See License.txt in the project root for license information.',
-					' *--------------------------------------------------------------------------------------------'
-				]
-			]
+			// Void - this should only apply to workbench/void/
+			// 'header/header': [
+			// 	2,
+			// 	'block',
+			// 	[
+			// 		'/*--------------------------------------------------------------------------------------',
+			// 		'*  Copyright 2025 Glass Devtools, Inc. All rights reserved.',
+			// 		'*  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.',
+			// 		'*--------------------------------------------------------------------------------------*/',
+			// 	]
+			// ]
 		},
 	},
 	// TS

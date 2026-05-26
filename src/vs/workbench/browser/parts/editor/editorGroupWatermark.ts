@@ -3,17 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, clearNode, h } from '../../../../base/browser/dom.js';
-import { KeybindingLabel } from '../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
-import { coalesce, shuffle } from '../../../../base/common/arrays.js';
-import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
-import { isMacintosh, isWeb, OS } from '../../../../base/common/platform.js';
 import { localize } from '../../../../nls.js';
-import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
-import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { ContextKeyExpr, ContextKeyExpression, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
+import { isMacintosh, isNative, OS } from '../../../../base/common/platform.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
-import { IStorageService, StorageScope, StorageTarget, WillSaveStateReason } from '../../../../platform/storage/common/storage.js';
+import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { append, clearNode, $, h } from '../../../../base/browser/dom.js';
+import { KeybindingLabel } from '../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { defaultKeybindingLabelStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 
@@ -75,23 +73,24 @@ export class EditorGroupWatermark extends Disposable {
 
 	private readonly shortcuts: HTMLElement;
 	private readonly transientDisposables = this._register(new DisposableStore());
-	private readonly keybindingLabels = this._register(new DisposableStore());
-
-	private enabled = false;
+	// private enabled: boolean = false;
 	private workbenchState: WorkbenchState;
+	private currentDisposables = new Set<IDisposable>();
 
 	constructor(
 		container: HTMLElement,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+		// @IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
-		@IStorageService private readonly storageService: IStorageService
+		@IThemeService private readonly themeService: IThemeService,
+		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IHostService private readonly hostService: IHostService,
+		@ILabelService private readonly labelService: ILabelService,
+		@IViewsService private readonly viewsService: IViewsService,
 	) {
 		super();
-
-		this.cachedWhen = this.storageService.getObject(EditorGroupWatermark.CACHED_WHEN, StorageScope.PROFILE, Object.create(null));
-		this.workbenchState = this.contextService.getWorkbenchState();
 
 		const elements = h('.editor-group-watermark', [
 			h('.watermark-container', [
@@ -101,10 +100,24 @@ export class EditorGroupWatermark extends Disposable {
 		]);
 
 		append(container, elements.root);
-		this.shortcuts = elements.shortcuts;
+		this.shortcuts = elements.shortcuts; // shortcuts div is modified on render()
+
+		// void icon style
+		const updateTheme = () => {
+			const theme = this.themeService.getColorTheme().type
+			const isDark = theme === ColorScheme.DARK || theme === ColorScheme.HIGH_CONTRAST_DARK
+			elements.icon.style.maxWidth = '220px'
+			elements.icon.style.opacity = '50%'
+			elements.icon.style.filter = isDark ? '' : 'invert(1)' //brightness(.5)
+		}
+		updateTheme()
+		this._register(
+			this.themeService.onDidColorThemeChange(updateTheme)
+		)
 
 		this.registerListeners();
 
+		this.workbenchState = contextService.getWorkbenchState();
 		this.render();
 	}
 
@@ -119,11 +132,9 @@ export class EditorGroupWatermark extends Disposable {
 		}));
 
 		this._register(this.contextService.onDidChangeWorkbenchState(workbenchState => {
-			if (this.workbenchState !== workbenchState) {
-				this.workbenchState = workbenchState;
-				this.render();
+			if (this.workbenchState === workbenchState) {
+				return;
 			}
-		}));
 
 		this._register(this.storageService.onWillSaveState(e => {
 			if (e.reason === WillSaveStateReason.SHUTDOWN) {
@@ -146,9 +157,15 @@ export class EditorGroupWatermark extends Disposable {
 		clearNode(this.shortcuts);
 		this.transientDisposables.clear();
 
-		if (!this.enabled) {
-			return;
-		}
+		// const allEntriesWhenClauses = [...noFolderEntries, ...folderEntries].filter(entry => entry.when !== undefined).map(entry => entry.when!);
+		// const allKeys = new Set<string>();
+		// allEntriesWhenClauses.forEach(when => when.keys().forEach(key => allKeys.add(key)));
+		// this._register(this.contextKeyService.onDidChangeContext(e => {
+		// 	if (e.affectsSome(allKeys)) {
+		// 		this.render();
+		// 	}
+		// }));
+	}
 
 		const entries = this.filterEntries(this.workbenchState !== WorkbenchState.EMPTY ? workspaceEntries : emptyWindowEntries);
 		if (entries.length < EditorGroupWatermark.MINIMUM_ENTRIES) {
@@ -157,27 +174,172 @@ export class EditorGroupWatermark extends Disposable {
 			entries.push(...additionalEntries.slice(0, EditorGroupWatermark.MINIMUM_ENTRIES - entries.length));
 		}
 
-		const box = append(this.shortcuts, $('.watermark-box'));
 
-		const update = () => {
-			clearNode(box);
-			this.keybindingLabels.clear();
+	private render(): void {
 
-			for (const entry of entries) {
-				const keys = this.keybindingService.lookupKeybinding(entry.id);
-				if (!keys) {
-					continue;
+		this.clear();
+		const voidIconBox = append(this.shortcuts, $('.watermark-box'));
+		const recentsBox = append(this.shortcuts, $('div'));
+		recentsBox.style.display = 'flex'
+		recentsBox.style.flex = 'row'
+		recentsBox.style.justifyContent = 'center'
+
+
+		const update = async () => {
+
+			// put async at top so don't need to wait (this prevents a jitter on load)
+			const recentlyOpened = await this.workspacesService.getRecentlyOpened()
+				.catch(() => ({ files: [], workspaces: [] })).then(w => w.workspaces);
+
+			clearNode(voidIconBox);
+			clearNode(recentsBox);
+
+			this.currentDisposables.forEach(label => label.dispose());
+			this.currentDisposables.clear();
+
+
+			// Void - if the workbench is empty, show open
+			if (this.contextService.getWorkbenchState() === WorkbenchState.EMPTY) {
+
+				// Create a flex container for buttons with vertical direction
+				const buttonContainer = $('div');
+				buttonContainer.style.display = 'flex';
+				buttonContainer.style.flexDirection = 'column'; // Change to column for vertical stacking
+				buttonContainer.style.alignItems = 'center'; // Center the buttons horizontally
+				buttonContainer.style.gap = '8px'; // Reduce gap between buttons from 16px to 8px
+				buttonContainer.style.marginBottom = '16px';
+				voidIconBox.appendChild(buttonContainer);
+
+				// Open a folder
+				const openFolderButton = h('button')
+				openFolderButton.root.classList.add('void-openfolder-button')
+				openFolderButton.root.style.display = 'block'
+				openFolderButton.root.style.width = '124px' // Set width to 124px as requested
+				openFolderButton.root.textContent = 'Open Folder'
+				openFolderButton.root.onclick = () => {
+					this.commandService.executeCommand(isMacintosh && isNative ? OpenFileFolderAction.ID : OpenFolderAction.ID)
+					// if (this.contextKeyService.contextMatchesRules(ContextKeyExpr.and(WorkbenchStateContext.isEqualTo('workspace')))) {
+					// 	this.commandService.executeCommand(OpenFolderViaWorkspaceAction.ID);
+					// } else {
+					// 	this.commandService.executeCommand(isMacintosh ? 'workbench.action.files.openFileFolder' : 'workbench.action.files.openFolder');
+					// }
+				}
+				buttonContainer.appendChild(openFolderButton.root);
+
+				// Open SSH button
+				const openSSHButton = h('button')
+				openSSHButton.root.classList.add('void-openssh-button')
+				openSSHButton.root.style.display = 'block'
+				openSSHButton.root.style.backgroundColor = '#5a5a5a' // Made darker than the default gray
+				openSSHButton.root.style.width = '124px' // Set width to 124px as requested
+				openSSHButton.root.textContent = 'Open SSH'
+				openSSHButton.root.onclick = () => {
+					this.viewsService.openViewContainer(REMOTE_EXPLORER_VIEWLET_ID);
+				}
+				buttonContainer.appendChild(openSSHButton.root);
+
+
+				// Recents
+				if (recentlyOpened.length !== 0) {
+
+					voidIconBox.append(
+						...recentlyOpened.map((w, i) => {
+
+							let fullPath: string;
+							let windowOpenable: IWindowOpenable;
+							if (isRecentFolder(w)) {
+								windowOpenable = { folderUri: w.folderUri };
+								fullPath = w.label || this.labelService.getWorkspaceLabel(w.folderUri, { verbose: Verbosity.LONG });
+							}
+							else {
+								return null
+								// fullPath = w.label || this.labelService.getWorkspaceLabel(w.workspace, { verbose: Verbosity.LONG });
+								// windowOpenable = { workspaceUri: w.workspace.configPath };
+							}
+
+
+							const { name, parentPath } = splitRecentLabel(fullPath);
+
+							const linkSpan = $('span');
+							linkSpan.classList.add('void-link')
+							linkSpan.style.display = 'flex'
+							linkSpan.style.gap = '4px'
+							linkSpan.style.padding = '8px'
+
+							linkSpan.addEventListener('click', e => {
+								this.hostService.openWindow([windowOpenable], {
+									forceNewWindow: e.ctrlKey || e.metaKey,
+									remoteAuthority: w.remoteAuthority || null // local window if remoteAuthority is not set or can not be deducted from the openable
+								});
+								e.preventDefault();
+								e.stopPropagation();
+							});
+
+							const nameSpan = $('span');
+							nameSpan.innerText = name;
+							nameSpan.title = fullPath;
+							linkSpan.appendChild(nameSpan);
+
+							const dirSpan = $('span');
+							dirSpan.style.paddingLeft = '4px';
+							dirSpan.style.whiteSpace = 'nowrap';
+							dirSpan.style.overflow = 'hidden';
+							dirSpan.style.maxWidth = '300px';
+							dirSpan.innerText = parentPath;
+							dirSpan.title = fullPath;
+
+							linkSpan.appendChild(dirSpan);
+
+							return linkSpan
+						})
+							.filter(v => !!v)
+							.slice(0, 5) // take 5 most recent
+					)
 				}
 
-				const dl = append(box, $('dl'));
-				const dt = append(dl, $('dt'));
-				dt.textContent = entry.text;
-
-				const dd = append(dl, $('dd'));
-
-				const label = this.keybindingLabels.add(new KeybindingLabel(dd, OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles }));
-				label.set(keys);
 			}
+			else {
+
+				// show them Void keybindings
+				const keys = this.keybindingService.lookupKeybinding(VOID_CTRL_L_ACTION_ID);
+				const dl = append(voidIconBox, $('dl'));
+				const dt = append(dl, $('dt'));
+				dt.textContent = 'Chat'
+				const dd = append(dl, $('dd'));
+				const label = new KeybindingLabel(dd, OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles });
+				if (keys)
+					label.set(keys);
+				this.currentDisposables.add(label);
+
+
+				const keys2 = this.keybindingService.lookupKeybinding(VOID_CTRL_K_ACTION_ID);
+				const dl2 = append(voidIconBox, $('dl'));
+				const dt2 = append(dl2, $('dt'));
+				dt2.textContent = 'Quick Edit'
+				const dd2 = append(dl2, $('dd'));
+				const label2 = new KeybindingLabel(dd2, OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles });
+				if (keys2)
+					label2.set(keys2);
+				this.currentDisposables.add(label2);
+
+				// const keys3 = this.keybindingService.lookupKeybinding('workbench.action.openGlobalKeybindings');
+				// const button3 = append(recentsBox, $('button'));
+				// button3.textContent = `Void Settings`
+				// button3.style.display = 'block'
+				// button3.style.marginLeft = 'auto'
+				// button3.style.marginRight = 'auto'
+				// button3.classList.add('void-settings-watermark-button')
+
+				// const label3 = new KeybindingLabel(button3, OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles });
+				// if (keys3)
+				// 	label3.set(keys3);
+				// button3.onclick = () => {
+				// 	this.commandService.executeCommand(VOID_OPEN_SETTINGS_ACTION_ID)
+				// }
+				// this.currentDisposables.add(label3);
+
+			}
+
 		};
 
 		update();

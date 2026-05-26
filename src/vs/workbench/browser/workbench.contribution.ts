@@ -651,12 +651,12 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 				'type': 'string',
 				'enum': ['default', 'top', 'bottom', 'hidden'],
 				'default': 'default',
-				'markdownDescription': localize({ comment: ['This is the description for a setting'], key: 'activityBarLocation' }, "Controls the location of the Activity Bar relative to the Primary and Secondary Side Bars."),
+				'markdownDescription': localize({ comment: ['This is the description for a setting'], key: 'activityBarLocation' }, "Controls the location of the Activity Bar relative to the Primary and Void Side Bars."), // Void side bar
 				'enumDescriptions': [
-					localize('workbench.activityBar.location.default', "Show the Activity Bar on the side of the Primary Side Bar and on top of the Secondary Side Bar."),
-					localize('workbench.activityBar.location.top', "Show the Activity Bar on top of the Primary and Secondary Side Bars."),
-					localize('workbench.activityBar.location.bottom', "Show the Activity Bar at the bottom of the Primary and Secondary Side Bars."),
-					localize('workbench.activityBar.location.hide', "Hide the Activity Bar in the Primary and Secondary Side Bars.")
+					localize('workbench.activityBar.location.default', "Show the Activity Bar on the side of the Primary Side Bar and on top of the Void Side Bar."), // Void side bar
+					localize('workbench.activityBar.location.top', "Show the Activity Bar on top of the Primary and Void Side Bars."), // Void side bar
+					localize('workbench.activityBar.location.bottom', "Show the Activity Bar at the bottom of the Primary and Void Side Bars."), // Void side bar
+					localize('workbench.activityBar.location.hide', "Hide the Activity Bar in the Primary and Void Side Bars.") // Void side bar
 				],
 				agentsWindow: { default: 'default', readOnly: true },
 			},
@@ -735,7 +735,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 				'description': localize('workbench.hover.delay', "Controls the delay in milliseconds after which the hover is shown for workbench items (ex. some extension provided tree view items). Already visible items may require a refresh before reflecting this setting change."),
 				// Testing has indicated that on Windows and Linux 500 ms matches the native hovers most closely.
 				// On Mac, the delay is 1500.
-				'default': isMacintosh ? 1500 : 500,
+				'default': 300, // Void changed this from isMacintosh ? 1500 : 500,
 				'minimum': 0
 			},
 			'workbench.hover.reducedDelay': {

@@ -143,6 +143,20 @@ import { AgentNetworkFilterService, IAgentNetworkFilterService } from '../../pla
 import { ITerminalSandboxService, NullTerminalSandboxService } from '../../platform/sandbox/common/terminalSandboxService.js';
 import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetry.js';
 
+// in theory this is not allowed
+// ignore the eslint errors below
+import { IMetricsService } from '../../workbench/contrib/void/common/metricsService.js';
+import { IVoidUpdateService } from '../../workbench/contrib/void/common/voidUpdateService.js';
+import { MetricsMainService } from '../../workbench/contrib/void/electron-main/metricsMainService.js';
+import { VoidMainUpdateService } from '../../workbench/contrib/void/electron-main/voidUpdateMainService.js';
+import { LLMMessageChannel } from '../../workbench/contrib/void/electron-main/sendLLMMessageChannel.js';
+import { VoidSCMService } from '../../workbench/contrib/void/electron-main/voidSCMMainService.js';
+import { AppleFoundationModelsMainService } from '../../workbench/contrib/void/electron-main/appleFoundationModelsMainService.js';
+import { IAppleFoundationModelsMainService } from '../../workbench/contrib/void/common/appleFoundationModelsTypes.js';
+import { MlxMainService } from '../../workbench/contrib/void/electron-main/mlxMainService.js';
+import { IMlxMainService } from '../../workbench/contrib/void/common/mlxTypes.js';
+import { IVoidSCMService } from '../../workbench/contrib/void/common/voidSCMTypes.js';
+import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
 /**
  * The main VS Code application. There will only ever be one instance,
  * even if the user starts many instances (e.g. from the command line).
@@ -1151,6 +1165,13 @@ export class CodeApplication extends Disposable {
 			services.set(ITelemetryService, NullTelemetryService);
 		}
 
+		// Void main process services (required for services with a channel for comm between browser and electron-main (node))
+		services.set(IMetricsService, new SyncDescriptor(MetricsMainService, undefined, false));
+		services.set(IVoidUpdateService, new SyncDescriptor(VoidMainUpdateService, undefined, false));
+		services.set(IVoidSCMService, new SyncDescriptor(VoidSCMService, undefined, false));
+		services.set(IAppleFoundationModelsMainService, new SyncDescriptor(AppleFoundationModelsMainService, undefined, false));
+		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
+
 		// Default Extensions Profile Init
 		services.set(IExtensionsProfileScannerService, new SyncDescriptor(ExtensionsProfileScannerService, undefined, true));
 		services.set(IExtensionsScannerService, new SyncDescriptor(ExtensionsScannerService, undefined, true));
@@ -1306,6 +1327,30 @@ export class CodeApplication extends Disposable {
 		const loggerChannel = new LoggerChannel(accessor.get(ILoggerMainService),);
 		mainProcessElectronServer.registerChannel('logger', loggerChannel);
 		sharedProcessClient.then(client => client.registerChannel('logger', loggerChannel));
+
+		// Void - use loggerChannel as reference
+		const metricsChannel = ProxyChannel.fromService(accessor.get(IMetricsService), disposables);
+		mainProcessElectronServer.registerChannel('void-channel-metrics', metricsChannel);
+
+		const voidUpdatesChannel = ProxyChannel.fromService(accessor.get(IVoidUpdateService), disposables);
+		mainProcessElectronServer.registerChannel('void-channel-update', voidUpdatesChannel);
+
+		const sendLLMMessageChannel = new LLMMessageChannel(accessor.get(IMetricsService));
+		mainProcessElectronServer.registerChannel('void-channel-llmMessage', sendLLMMessageChannel);
+
+		// Void added this
+		const voidSCMChannel = ProxyChannel.fromService(accessor.get(IVoidSCMService), disposables);
+		mainProcessElectronServer.registerChannel('void-channel-scm', voidSCMChannel);
+
+		const appleFoundationModelsChannel = ProxyChannel.fromService(accessor.get(IAppleFoundationModelsMainService), disposables);
+		mainProcessElectronServer.registerChannel('void-channel-appleFoundationModels', appleFoundationModelsChannel);
+
+		const mlxChannel = ProxyChannel.fromService(accessor.get(IMlxMainService), disposables);
+		mainProcessElectronServer.registerChannel('void-channel-mlx', mlxChannel);
+
+		// Void added this
+		const mcpChannel = new MCPChannel();
+		mainProcessElectronServer.registerChannel('void-channel-mcp', mcpChannel);
 
 		// Extension Host Debug Broadcasting
 		const electronExtensionHostDebugBroadcastChannel = new ElectronExtensionHostDebugBroadcastChannel(accessor.get(IWindowsMainService));

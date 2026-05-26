@@ -18,7 +18,7 @@ export function runEsbuildTranspile(outDir: string, excludeTests: boolean): Prom
 			args.push('--exclude-tests');
 		}
 
-		const proc = cp.spawn(process.execPath, args, {
+		const proc = cp.spawn(process.execPath, ['--max-old-space-size=8192', ...args], {
 			cwd: root,
 			stdio: 'inherit'
 		});
@@ -49,7 +49,7 @@ export function runEsbuildBundle(outDir: string, minify: boolean, nls: boolean, 
 			args.push('--source-map-base-url', sourceMapBaseUrl);
 		}
 
-		const proc = cp.spawn(process.execPath, args, {
+		const proc = cp.spawn(process.execPath, ['--max-old-space-size=8192', ...args], {
 			cwd: root,
 			stdio: 'inherit'
 		});

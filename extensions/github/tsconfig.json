@@ -6,6 +6,8 @@
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
 		"skipLibCheck": true,
+		"lib": ["ES2024", "dom"],
+		"types": ["node"],
 		"typeRoots": [
 			"../../../node_modules/@types",
 			"./node_modules/@types"

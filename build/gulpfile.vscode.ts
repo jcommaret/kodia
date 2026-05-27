@@ -522,6 +522,72 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 	return task;
 }
 
+// Rebuilds native Node.js modules (@vscode/spdlog) against the bundled Electron
+// version and ensures @vscode/ripgrep/bin exists (for copilot in dev mode and
+// for builds that don't use the new platform-specific ripgrep packages).
+// Must run BEFORE packageTask so the compiled .node file is picked up
+// and placed outside the ASAR by the "**/*.node" exclusion rule.
+function rebuildElectronNativeModulesTask(platform: string, arch: string) {
+	return async () => {
+		const electronVersionFile = path.join(root, '.build', 'electron', 'version');
+		if (!fs.existsSync(electronVersionFile)) {
+			console.warn('[rebuildElectronNativeModules] .build/electron/version not found, skipping native module rebuild');
+			return;
+		}
+		const electronVersion = fs.readFileSync(electronVersionFile, 'utf8').trim();
+
+		const spdlogDir = path.join(root, 'node_modules', '@vscode', 'spdlog');
+		if (!fs.existsSync(spdlogDir)) {
+			console.warn('[rebuildElectronNativeModules] @vscode/spdlog not found in node_modules, skipping');
+		} else {
+			const nodeGypBin = path.join(root, 'build', 'npm', 'gyp', 'node_modules', '.bin', 'node-gyp');
+			const nodeGypCmd = fs.existsSync(nodeGypBin) ? nodeGypBin : 'node-gyp';
+			const nodeArch = arch === 'armhf' ? 'arm' : arch;
+
+			await new Promise<void>((resolve, reject) => {
+				const proc = require('child_process').spawn(
+					nodeGypCmd,
+					[
+						'rebuild',
+						`--target=${electronVersion}`,
+						`--arch=${nodeArch}`,
+						'--dist-url=https://electronjs.org/headers',
+						'--runtime=electron',
+					],
+					{ cwd: spdlogDir, stdio: 'inherit', shell: process.platform === 'win32' }
+				);
+				proc.on('close', (code: number) => {
+					if (code === 0) {
+						console.log(`[rebuildElectronNativeModules] spdlog rebuilt for Electron ${electronVersion} (${platform}-${nodeArch})`);
+						resolve();
+					} else {
+						reject(new Error(`[rebuildElectronNativeModules] node-gyp exited with code ${code}`));
+					}
+				});
+				proc.on('error', reject);
+			});
+		}
+
+		// Ensure @vscode/ripgrep/bin exists (new ripgrep uses platform-specific packages)
+		const ripgrepBin = path.join(root, 'node_modules', '@vscode', 'ripgrep', 'bin');
+		if (!fs.existsSync(ripgrepBin)) {
+			const nodeArch = arch === 'armhf' ? 'arm' : arch;
+			const nodePlatform = platform === 'alpine' ? 'linux' : platform;
+			const platformRipgrepBin = path.join(root, 'node_modules', '@vscode', `ripgrep-${nodePlatform}-${nodeArch}`, 'bin');
+			if (fs.existsSync(platformRipgrepBin)) {
+				fs.mkdirSync(ripgrepBin, { recursive: true });
+				for (const file of fs.readdirSync(platformRipgrepBin)) {
+					const src = path.join(platformRipgrepBin, file);
+					const dest = path.join(ripgrepBin, file);
+					fs.copyFileSync(src, dest);
+					fs.chmodSync(dest, 0o755);
+				}
+				console.log(`[rebuildElectronNativeModules] Created @vscode/ripgrep/bin from ${platformRipgrepBin}`);
+			}
+		}
+	};
+}
+
 function patchWin32DependenciesTask(destinationFolderName: string) {
 	const cwd = path.join(path.dirname(root), destinationFolderName);
 
@@ -598,6 +664,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 
 		const packageTasks: task.Task[] = [
 			compileNativeExtensionsBuildTask,
+			task.define(`rebuild-electron-native-${platform}-${arch}${dashed(minified)}`, rebuildElectronNativeModulesTask(platform, arch)),
 			util.rimraf(path.join(buildRoot, destinationFolderName)),
 			packageTask(platform, arch, sourceFolderName, destinationFolderName, opts),
 			prepareCopilotRipgrepShimTask(platform, arch, destinationFolderName)

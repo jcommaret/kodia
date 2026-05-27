@@ -34,7 +34,12 @@
 	"urlProtocol": "void",
 	"extensionsGallery": {
 		"serviceUrl": "https://marketplace.visualstudio.com/_apis/public/gallery",
-		"itemUrl": "https://marketplace.visualstudio.com/items"
+		"itemUrl": "https://marketplace.visualstudio.com/items",
+		"publisherUrl": "https://marketplace.visualstudio.com/publishers",
+		"resourceUrlTemplate": "https://{publisher}.vscode-unpkg.net/{publisher}/{name}/{version}/{path}",
+		"controlUrl": "https://az764295.vo.msecnd.net/extensions/marketplace.json",
+		"nlsBaseUrl": "https://download.visualstudio.microsoft.com/download/pr/",
+		"extensionUrlTemplate": "https://marketplace.visualstudio.com/items?itemName={publisher}.{name}"
 	},
 	"builtInExtensions": [],
 	"linkProtectionTrustedDomains": [
@@ -92,5 +97,7 @@
 		"completionsAdvancedSetting": "",
 		"completionsEnablementSetting": "",
 		"nextEditSuggestionsSetting": ""
-	}
+	},
+	"quality": "stable",
+	"builtInExtensionsEnabledWithAutoUpdates": []
 }

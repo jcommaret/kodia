@@ -331,6 +331,28 @@ async function main() {
 		log('.', `Created ${claudeSkillsLinkType} .claude/skills -> .agents/skills`);
 	}
 
+	// Ensure @vscode/ripgrep/bin exists: since @vscode/ripgrep >= 1.18.0, the rg
+	// binary lives in a platform-specific optional dependency
+	// (@vscode/ripgrep-{platform}-{arch}/bin/rg) rather than @vscode/ripgrep/bin/rg.
+	// Several scripts (e.g. undo_telemetry.sh) still reference the old path, so we
+	// populate it from the platform-specific package when it is missing.
+	const ripgrepBin = path.join(root, 'node_modules', '@vscode', 'ripgrep', 'bin');
+	if (!fs.existsSync(ripgrepBin)) {
+		const nodePlatform = process.platform;
+		const nodeArch = process.arch;
+		const platformRipgrepBin = path.join(root, 'node_modules', '@vscode', `ripgrep-${nodePlatform}-${nodeArch}`, 'bin');
+		if (fs.existsSync(platformRipgrepBin)) {
+			fs.mkdirSync(ripgrepBin, { recursive: true });
+			for (const file of fs.readdirSync(platformRipgrepBin)) {
+				const src = path.join(platformRipgrepBin, file);
+				const dest = path.join(ripgrepBin, file);
+				fs.copyFileSync(src, dest);
+				fs.chmodSync(dest, 0o755);
+			}
+			log('.', `Created @vscode/ripgrep/bin from @vscode/ripgrep-${nodePlatform}-${nodeArch}/bin`);
+		}
+	}
+
 	// Temporary: patch @github/copilot-sdk session.js to fix ESM import
 	// (missing .js extension on vscode-jsonrpc/node). Fixed upstream in v0.1.32.
 	// TODO: Remove once @github/copilot-sdk is updated to >=0.1.32

@@ -123,16 +123,10 @@ export class MetricsMainService extends Disposable implements IMetricsService {
 			properties: this._initProperties,
 		}
 
-		const didOptOut = this._appStorage.getBoolean(OPT_OUT_KEY, StorageScope.APPLICATION, false)
+	const didOptOut = true // Force opt-out for AI Stats
 
-		console.log('User is opted out of basic Void metrics?', didOptOut)
-		if (didOptOut) {
-			this.client.optOut()
-		}
-		else {
-			this.client.optIn()
-			this.client.identify(identifyMessage)
-		}
+	console.log('User is opted out of basic Void metrics?', didOptOut)
+	this.client.optOut()
 
 
 		console.log('Void posthog metrics info:', JSON.stringify(identifyMessage, null, 2))

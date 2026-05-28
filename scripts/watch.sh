@@ -14,4 +14,4 @@ fi
 ROOT=$(dirname "$(dirname "$(realpath "$0" 2>/dev/null || readlink -f "$0")")")
 cd "$ROOT"
 
-exec npm-run-all2 -lp watch-client-transpile watch-client watch-extensions watch-copilot "$@"
+exec npm-run-all2 -lp watch-client-transpile watch-client watch-extensions "$@"

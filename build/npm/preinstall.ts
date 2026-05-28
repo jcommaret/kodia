@@ -135,12 +135,12 @@ function installHeaders() {
 
 	if (local !== undefined) {
 		// Both disturl and target come from a file checked into our repository
-		child_process.execFileSync(node_gyp, ['install', '--dist-url', local.disturl, local.target], { shell: true });
+		child_process.execFileSync(node_gyp, ['install', '--loglevel=silent', '--dist-url', local.disturl, local.target], { shell: true, stdio: 'pipe' });
 	}
 
 	if (remote !== undefined) {
 		// Both disturl and target come from a file checked into our repository
-		child_process.execFileSync(node_gyp, ['install', '--dist-url', remote.disturl, remote.target], { shell: true });
+		child_process.execFileSync(node_gyp, ['install', '--loglevel=silent', '--dist-url', remote.disturl, remote.target], { shell: true, stdio: 'pipe' });
 	}
 
 	// On Linux, apply a patch to the downloaded headers

@@ -136,7 +136,25 @@ export class DefaultAccountService extends Disposable implements IDefaultAccount
 		@IProductService productService: IProductService,
 	) {
 		super();
-		this.defaultAccountConfig = toDefaultAccountConfig(productService.defaultChatAgent);
+		if (productService.defaultChatAgent && productService.defaultChatAgent.provider.default.id !== 'void') {
+			this.defaultAccountConfig = toDefaultAccountConfig(productService.defaultChatAgent);
+		} else {
+			// Void: no GitHub/Copilot account integration
+			this.defaultAccountConfig = {
+				preferredExtensions: [],
+				authenticationProvider: {
+					default: { id: 'void', name: 'Void' },
+					enterprise: { id: 'void', name: 'Void' },
+					enterpriseProviderConfig: '',
+					enterpriseProviderUriSetting: '',
+					scopes: [],
+				},
+				entitlementUrl: '',
+				tokenEntitlementUrl: '',
+				mcpRegistryDataUrl: '',
+			};
+			this.initBarrier.open();
+		}
 	}
 
 	async getDefaultAccount(): Promise<IDefaultAccount | null> {
@@ -951,6 +969,9 @@ class DefaultAccountProviderContribution extends Disposable implements IWorkbenc
 		@IDefaultAccountService defaultAccountService: IDefaultAccountService,
 	) {
 		super();
+		if (!productService.defaultChatAgent || productService.defaultChatAgent.provider.default.id === 'void') {
+			return; // Void: no GitHub/Copilot sign-in provider
+		}
 		const defaultAccountProvider = this._register(instantiationService.createInstance(DefaultAccountProvider, toDefaultAccountConfig(productService.defaultChatAgent)));
 		defaultAccountService.setDefaultAccountProvider(defaultAccountProvider);
 	}

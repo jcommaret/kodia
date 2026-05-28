@@ -55,6 +55,9 @@ import './tooltipService.js'
 // register onboarding service
 import './voidOnboardingService.js'
 
+// disable built-in GitHub Copilot extension and sign-in UI
+import './disableCopilotContribution.js'
+
 // register misc service
 import './miscWokrbenchContrib.js'
 

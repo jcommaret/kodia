@@ -40,9 +40,6 @@
 		"watch-extensions": "npm run gulp watch-extensions watch-extension-media",
 		"watch-extensionsd": "deemon npm run watch-extensions",
 		"kill-watch-extensionsd": "deemon --kill npm run watch-extensions",
-		"watch-copilot": "npm --prefix extensions/copilot run watch",
-		"watch-copilotd": "deemon npm run watch-copilot",
-		"kill-watch-copilotd": "deemon --kill npm run watch-copilot",
 		"precommit": "node --experimental-strip-types build/hygiene.ts",
 		"gulp": "node --experimental-strip-types --max-old-space-size=8192 ./node_modules/gulp/bin/gulp.js",
 		"electron": "node build/lib/electron.ts",
@@ -81,13 +78,11 @@
 		"perf": "node scripts/code-perf.js",
 		"perf:chat": "node scripts/chat-simulation/test-chat-perf-regression.js",
 		"perf:chat-leak": "node scripts/chat-simulation/test-chat-mem-leaks.js",
-		"copilot:setup": "npm --prefix extensions/copilot run setup",
-		"copilot:get_token": "npm --prefix extensions/copilot run get_token",
 		"update-build-ts-version": "npm install -D typescript@next && npm install -D @typescript/native-preview && (cd build && npm run typecheck)",
 		"install-local-component-explorer": "npm install ../vscode-packages/js-component-explorer/dist/vscode-component-explorer-0.1.0.tgz ../vscode-packages/js-component-explorer/dist/vscode-component-explorer-cli-0.1.0.tgz --no-save && cd build/rspack && npm install ../../../vscode-packages/js-component-explorer/dist/vscode-component-explorer-webpack-plugin-0.1.0.tgz --no-save && cd ../vite && npm install ../../../vscode-packages/js-component-explorer/dist/vscode-component-explorer-vite-plugin-0.1.0.tgz --no-save",
 		"symlink-local-component-explorer": "npm install ../vscode-packages/js-component-explorer/packages/explorer ../vscode-packages/js-component-explorer/packages/cli --no-save && cd build/rspack && npm install ../../../vscode-packages/js-component-explorer/packages/webpack-plugin ../../../vscode-packages/js-component-explorer/packages/explorer --no-save && cd ../vite && npm install ../../../vscode-packages/js-component-explorer/packages/vite-plugin ../../../vscode-packages/js-component-explorer/packages/explorer --no-save",
 		"install-latest-component-explorer": "npm install @vscode/component-explorer@next @vscode/component-explorer-cli@next && cd build/rspack && npm install @vscode/component-explorer-webpack-plugin@next @vscode/component-explorer@next && cd ../vite && npm install @vscode/component-explorer-vite-plugin@next @vscode/component-explorer@next",
-		"watch-internal": "npm-run-all2 -lp watch-client-transpile watch-client watch-extensions watch-copilot"
+		"watch-internal": "npm-run-all2 -lp watch-client-transpile watch-client watch-extensions"
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.82.0",

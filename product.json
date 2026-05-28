@@ -92,7 +92,7 @@
 		"walkthroughCommand": "",
 		"completionsMenuCommand": "",
 		"chatRefreshTokenCommand": "",
-		"generateCommitMessageCommand": "",
+		"generateCommitMessageCommand": "void.generateCommitMessageAction",
 		"resolveMergeConflictsCommand": "",
 		"completionsAdvancedSetting": "",
 		"completionsEnablementSetting": "",

@@ -929,7 +929,7 @@ export const MlxSetupInstructions = () => {
 export const AppleFoundationModelsSetupInstructions = () => {
 	if (os !== 'mac') return null
 	return <div className='prose-p:my-0 prose-ol:list-decimal prose-p:py-0 prose-ol:my-0 prose-ol:py-0 text-void-fg-3 text-sm list-decimal select-text mb-4'>
-		<div><ChatMarkdownRender string={`apple — [maclocal-api](https://github.com/scouzi1966/maclocal-api) (\`afm\`)`} chatMessageLocation={undefined} /></div>
+		<div><ChatMarkdownRender string={`Apple — [maclocal-api](https://github.com/scouzi1966/maclocal-api) (\`afm\`)`} chatMessageLocation={undefined} /></div>
 		<div className='pl-6'><ChatMarkdownRender string={`1. Requires macOS 26+, Apple Silicon, and Apple Intelligence. Void auto-installs \`afm\` (Homebrew: \`brew tap scouzi1966/afm && brew install scouzi1966/afm/afm\`, or pip: \`pip install macafm\`).`} chatMessageLocation={undefined} /></div>
 		<div className='pl-6'><ChatMarkdownRender string={`2. Default server: \`afm -p 9999\` → endpoint \`http://127.0.0.1:9999/v1\`, model id \`foundation\`.`} chatMessageLocation={undefined} /></div>
 		<div className='pl-6'><ChatMarkdownRender string={`3. **LoRA adapter**: \`afm -a ./my-adapter.fmadapter -p 9998\`, then set Void’s endpoint to \`http://127.0.0.1:9998\` and refresh.`} chatMessageLocation={undefined} /></div>
@@ -1142,7 +1142,7 @@ export const Settings = () => {
 		{ tab: 'ollama', label: 'Ollama' },
 		...(os === 'mac' ? ([
 			{ tab: 'mlx' as const, label: 'MLX' },
-			{ tab: 'apple' as const, label: 'apple' },
+			{ tab: 'apple' as const, label: 'Apple' },
 		]) : []),
 		{ tab: 'localOther', label: 'Local (other)' },
 		{ tab: 'providers', label: 'Main Providers' },
@@ -1289,7 +1289,7 @@ export const Settings = () => {
 									<div className='w-full h-[1px] my-4' />
 									<AutoDetectLocalModelsToggle />
 									<div className='w-full h-[1px] my-4' />
-									<p className='text-void-fg-3 text-sm mb-4'>Per-provider setup and refresh are under <strong>Ollama</strong>, <strong>MLX</strong>, and <strong>apple</strong> in the sidebar.</p>
+									<p className='text-void-fg-3 text-sm mb-4'>Per-provider setup and refresh are under <strong>Ollama</strong>, <strong>MLX</strong>, and <strong>Apple</strong> in the sidebar.</p>
 								</ErrorBoundary>
 							</div>
 
@@ -1326,7 +1326,7 @@ export const Settings = () => {
 								<div className={shouldShowTab('apple') ? `` : 'hidden'}>
 									<ErrorBoundary>
 										<LocalProviderSection
-											title='apple'
+											title='Apple'
 											description='On-device Foundation model via maclocal-api (`afm`, port 9999).'
 											instructions={<AppleFoundationModelsSetupInstructions />}
 											providerNames={appleProviderNames}

@@ -78,7 +78,7 @@ import '../common/voidSettingsService.js'
 // refreshModel
 import '../common/refreshModelService.js'
 
-// apple (macOS): maclocal-api (afm) auto-install + server
+// Apple (macOS): maclocal-api (afm) auto-install + server
 import '../common/appleFoundationModelsService.js'
 import './appleFoundationModelsWorkbenchContrib.js'
 

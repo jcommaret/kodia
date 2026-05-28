@@ -86,8 +86,11 @@ class GenerateCommitMessageService extends Disposable implements IGenerateCommit
 
 				if (!this.isCurrentRequest(requestId)) { throw new CancellationError() }
 
-				const modelSelection = this.voidSettingsService.state.modelSelectionOfFeature['SCM'] ?? null
-				const modelSelectionOptions = modelSelection ? this.voidSettingsService.state.optionsOfModelSelection['SCM'][modelSelection?.providerName]?.[modelSelection.modelName] : undefined
+				const modelSelection = this.voidSettingsService.state.modelSelectionOfFeature['SCM']
+					?? this.voidSettingsService.state.modelSelectionOfFeature['Chat']
+					?? null
+				const featureName = this.voidSettingsService.state.modelSelectionOfFeature['SCM'] ? 'SCM' as const : 'Chat' as const
+				const modelSelectionOptions = modelSelection ? this.voidSettingsService.state.optionsOfModelSelection[featureName][modelSelection.providerName]?.[modelSelection.modelName] : undefined
 				const overridesOfModel = this.voidSettingsService.state.overridesOfModel
 
 				const modelOptions: ModelOptions = { modelSelection, modelSelectionOptions, overridesOfModel }
@@ -105,6 +108,10 @@ class GenerateCommitMessageService extends Disposable implements IGenerateCommit
 				const commitMessage = await this.sendLLMMessage(messages, separateSystemMessage!, modelOptions)
 
 				if (!this.isCurrentRequest(requestId)) { throw new CancellationError() }
+
+				if (!commitMessage) {
+					throw new Error('Empty commit message from model')
+				}
 
 				repo.input.setValue(commitMessage, false)
 			} catch (error) {
@@ -149,7 +156,7 @@ class GenerateCommitMessageService extends Disposable implements IGenerateCommit
 				onText: () => { },
 				onFinalMessage: (params: { fullText: string }) => {
 					const match = params.fullText.match(/<output>([\s\S]*?)<\/output>/i)
-					const commitMessage = match ? match[1].trim() : ''
+					const commitMessage = match ? match[1].trim() : params.fullText.trim()
 					resolve(commitMessage)
 				},
 				onError: (error) => {

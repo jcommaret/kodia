@@ -858,13 +858,19 @@ registerAction2(class extends Action2 {
 	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
 		const commandService = accessor.get(ICommandService);
 
-		const result = await commandService.executeCommand(CHAT_SETUP_SUPPORT_ANONYMOUS_ACTION_ID);
-		if (!result) {
+		const command = product.defaultChatAgent?.generateCommitMessageCommand;
+		if (!command) {
 			return;
 		}
 
-		const command = product.defaultChatAgent?.generateCommitMessageCommand;
-		if (!command) {
+		// Built-in Void command — no Copilot setup flow
+		if (command === 'void.generateCommitMessageAction') {
+			await commandService.executeCommand(command, ...args);
+			return;
+		}
+
+		const result = await commandService.executeCommand(CHAT_SETUP_SUPPORT_ANONYMOUS_ACTION_ID);
+		if (!result) {
 			return;
 		}
 

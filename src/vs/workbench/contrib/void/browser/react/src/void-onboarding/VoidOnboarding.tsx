@@ -104,7 +104,7 @@ type LocalSubTab = 'ollama' | 'mlx' | 'apple' | 'other';
 const localSubTabLabels: Record<LocalSubTab, string> = {
 	ollama: 'Ollama',
 	mlx: 'MLX',
-	apple: 'apple',
+	apple: 'Apple',
 	other: 'Other',
 };
 

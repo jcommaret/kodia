@@ -22,6 +22,7 @@ import * as optimize from './lib/optimize.ts';
 import { inlineMeta } from './lib/inlineMeta.ts';
 import packageJson from '../package.json' with { type: 'json' };
 import product from '../product.json' with { type: 'json' };
+import * as child_process from 'child_process';
 import * as crypto from 'crypto';
 import * as i18n from './lib/i18n.ts';
 import { getProductionDependencies } from './lib/dependencies.ts';
@@ -545,7 +546,7 @@ function rebuildElectronNativeModulesTask(platform: string, arch: string) {
 			const nodeArch = arch === 'armhf' ? 'arm' : arch;
 
 			await new Promise<void>((resolve, reject) => {
-				const proc = require('child_process').spawn(
+				const proc = child_process.spawn(
 					nodeGypCmd,
 					[
 						'rebuild',

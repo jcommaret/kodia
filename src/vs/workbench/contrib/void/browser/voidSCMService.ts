@@ -3,11 +3,12 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
+import { URI } from '../../../../base/common/uri.js'
 import { ThemeIcon } from '../../../../base/common/themables.js'
 import { localize2 } from '../../../../nls.js'
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js'
 import { ContextKeyExpr, IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js'
-import { ISCMService } from '../../scm/common/scm.js'
+import { ISCMService, ISCMViewService } from '../../scm/common/scm.js'
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IVoidSCMService } from '../common/voidSCMTypes.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
@@ -33,7 +34,7 @@ interface ModelOptions {
 
 export interface IGenerateCommitMessageService {
 	readonly _serviceBrand: undefined
-	generateCommitMessage(): Promise<void>
+	generateCommitMessage(providerRootUri?: URI): Promise<void>
 	abort(): void
 }
 
@@ -51,6 +52,7 @@ class GenerateCommitMessageService extends Disposable implements IGenerateCommit
 
 	constructor(
 		@ISCMService private readonly scmService: ISCMService,
+		@ISCMViewService private readonly scmViewService: ISCMViewService,
 		@IMainProcessService mainProcessService: IMainProcessService,
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 		@IConvertToLLMMessageService private readonly convertToLLMMessageService: IConvertToLLMMessageService,
@@ -68,7 +70,7 @@ class GenerateCommitMessageService extends Disposable implements IGenerateCommit
 		super.dispose()
 	}
 
-	async generateCommitMessage() {
+	async generateCommitMessage(providerRootUri?: URI) {
 		this.loadingContextKey.set(true)
 		this.execute.trigger(async () => {
 			const requestId = generateUuid()
@@ -76,7 +78,7 @@ class GenerateCommitMessageService extends Disposable implements IGenerateCommit
 
 
 			try {
-				const { path, repo } = this.gitRepoInfo()
+				const { path, repo } = this.gitRepoInfo(providerRootUri)
 				const [stat, sampledDiffs, branch, log] = await Promise.all([
 					this.voidSCM.gitStat(path),
 					this.voidSCM.gitSampledDiffs(path),
@@ -133,11 +135,25 @@ class GenerateCommitMessageService extends Disposable implements IGenerateCommit
 		this.currentRequestId = null
 	}
 
-	private gitRepoInfo() {
-		const repo = Array.from(this.scmService.repositories || []).find((r: any) => r.provider.contextValue === 'git')
+	private gitRepoInfo(providerRootUri?: URI) {
+		if (providerRootUri) {
+			const repo = this.scmService.getRepository(providerRootUri)
+			if (repo?.provider.providerId === 'git' && repo.provider.rootUri?.fsPath) {
+				return { path: repo.provider.rootUri.fsPath, repo }
+			}
+		}
+
+		const active = this.scmViewService.activeRepository.get()?.repository
+			?? this.scmViewService.focusedRepository
+		if (active?.provider.providerId === 'git' && active.provider.rootUri?.fsPath) {
+			return { path: active.provider.rootUri.fsPath, repo: active }
+		}
+
+		const repo = Array.from(this.scmService.repositories).find(
+			r => r.provider.providerId === 'git' && r.provider.rootUri?.fsPath
+		)
 		if (!repo) { throw new Error('No git repository found') }
-		if (!repo.provider.rootUri?.fsPath) { throw new Error('No git repository root path found') }
-		return { path: repo.provider.rootUri.fsPath, repo }
+		return { path: repo.provider.rootUri!.fsPath, repo }
 	}
 
 	/** LLM Functions */
@@ -181,7 +197,7 @@ class GenerateCommitMessageService extends Disposable implements IGenerateCommit
 
 	/** UI Functions */
 
-	private onError(error: any) {
+	private onError(error: unknown) {
 		if (!isCancellationError(error)) {
 			console.error(error)
 			this.notificationService.error(localize2('voidFailedToGenerateCommitMessage', 'Failed to generate commit message.').value)
@@ -205,9 +221,9 @@ class GenerateCommitMessageAction extends Action2 {
 		})
 	}
 
-	async run(accessor: ServicesAccessor): Promise<void> {
+	async run(accessor: ServicesAccessor, providerRootUri?: URI): Promise<void> {
 		const generateCommitMessageService = accessor.get(IGenerateCommitMessageService)
-		generateCommitMessageService.generateCommitMessage()
+		await generateCommitMessageService.generateCommitMessage(providerRootUri)
 	}
 }
 

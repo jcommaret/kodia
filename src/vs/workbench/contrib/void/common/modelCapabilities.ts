@@ -225,7 +225,7 @@ export type ModelOverrides = Pick<
 
 type ProviderReasoningIOSettings = {
 	// include this in payload to get reasoning
-	input?: { includeInPayload?: (reasoningState: SendableReasoningInfo) => null | { [key: string]: any }, };
+	input?: { includeInPayload?: (reasoningState: SendableReasoningInfo) => null | { [key: string]: unknown }, };
 	// nameOfFieldInDelta: reasoning output is in response.choices[0].delta[deltaReasoningField]
 	// needsManualParse: whether we must manually parse out the <think> tags
 	output?:
@@ -713,7 +713,7 @@ const openAICompatIncludeInPayloadReasoning = (reasoningInfo: SendableReasoningI
 
 }
 
-// Mistral via OpenAI SDK: omit `reasoning_effort` (422 "Extra inputs are not permitted"); public OpenAPI ≠ strict gateway here. Use Mistral-native SDK upstream if needed.
+// Mistral via OpenAI SDK: omit `reasoning_effort` (422 "Extra inputs are not permitted"); public OpenAPI != strict gateway here. Use Mistral-native SDK upstream if needed.
 const mistralIncludeInPayloadReasoning = (_reasoningInfo: SendableReasoningInfo): null => null
 
 const openAISettings: VoidStaticProviderInfo = {
@@ -961,7 +961,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 0.50, output: 1.50 },
-		supportsFIM: false, // FIM endpoint: codestral-latest only — https://docs.mistral.ai/capabilities/fim
+		supportsFIM: true, // Activer le FIM
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -971,7 +971,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 1.50, output: 7.50 },
-		supportsFIM: false,
+		supportsFIM: true, // Activer le FIM
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -981,7 +981,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 0.15, output: 0.60 },
-		supportsFIM: false,
+		supportsFIM: true, // Activer le FIM
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',

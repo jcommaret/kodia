@@ -40,7 +40,6 @@
 		"watch-extensions": "npm run gulp watch-extensions watch-extension-media",
 		"watch-extensionsd": "deemon npm run watch-extensions",
 		"kill-watch-extensionsd": "deemon --kill npm run watch-extensions",
-		"precommit": "bash scripts/precommit.sh",
 		"reinstall-git-hooks": "node node_modules/husky/bin/install.js",
 		"gulp": "node --experimental-strip-types --max-old-space-size=8192 ./node_modules/gulp/bin/gulp.js",
 		"electron": "node build/lib/electron.ts",

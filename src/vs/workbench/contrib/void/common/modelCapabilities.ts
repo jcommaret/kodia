@@ -89,6 +89,7 @@ export const defaultModelsOfProvider = {
 		'o4-mini',
 	],
 	anthropic: [ // https://docs.anthropic.com/en/docs/about-claude/models/overview
+		'claude-opus-4-8',
 		'claude-opus-4-7',
 		'claude-sonnet-4-6',
 		'claude-haiku-4-5',
@@ -120,6 +121,7 @@ export const defaultModelsOfProvider = {
 	mlx: [], // autodetected — mlx_lm.server
 	appleFoundationModels: [], // autodetected via afm /v1/models (model id: `foundation`)
 	openRouter: [ // https://openrouter.ai/models
+		'anthropic/claude-opus-4.8',
 		'anthropic/claude-opus-4.7',
 		'anthropic/claude-sonnet-4.6',
 		'google/gemini-2.5-pro',
@@ -424,6 +426,7 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 
 	if (lower.includes('claude-3-7') || lower.includes('claude-3.7')) return toFallback(anthropicModelOptions, 'claude-3-7-sonnet-20250219')
 	if (lower.includes('claude-3-5') || lower.includes('claude-3.5')) return toFallback(anthropicModelOptions, 'claude-sonnet-4-6')
+	if (lower.includes('opus-4-8') || lower.includes('opus-4.8')) return toFallback(anthropicModelOptions, 'claude-opus-4-8')
 	if (lower.includes('opus-4-7') || lower.includes('opus-4.7')) return toFallback(anthropicModelOptions, 'claude-opus-4-7')
 	if (lower.includes('sonnet-4-6') || lower.includes('sonnet-4.6')) return toFallback(anthropicModelOptions, 'claude-sonnet-4-6')
 	if (lower.includes('haiku-4-5') || lower.includes('haiku-4.5')) return toFallback(anthropicModelOptions, 'claude-haiku-4-5')
@@ -506,7 +509,17 @@ const anthropicThinkingCapabilities = {
 }
 
 const anthropicModelOptions = {
-	'claude-opus-4-7': { // https://docs.anthropic.com/en/docs/about-claude/models/overview
+	'claude-opus-4-8': { // https://docs.anthropic.com/en/docs/about-claude/models/overview
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 128_000,
+		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'anthropic-style',
+		supportsSystemMessage: 'separated',
+		reasoningCapabilities: { ...anthropicThinkingCapabilities, canTurnOffReasoning: false }, // adaptive thinking
+	},
+	'claude-opus-4-7': {
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 128_000,
 		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
@@ -586,14 +599,15 @@ const anthropicSettings: VoidStaticProviderInfo = {
 	modelOptionsFallback: (modelName) => {
 		const lower = modelName.toLowerCase()
 		let fallbackName: keyof typeof anthropicModelOptions | null = null
-		if (lower.includes('opus-4-7') || lower.includes('opus-4.7')) fallbackName = 'claude-opus-4-7'
+		if (lower.includes('opus-4-8') || lower.includes('opus-4.8')) fallbackName = 'claude-opus-4-8'
+		else if (lower.includes('opus-4-7') || lower.includes('opus-4.7')) fallbackName = 'claude-opus-4-7'
 		else if (lower.includes('sonnet-4-6') || lower.includes('sonnet-4.6')) fallbackName = 'claude-sonnet-4-6'
 		else if (lower.includes('haiku-4-5') || lower.includes('haiku-4.5')) fallbackName = 'claude-haiku-4-5'
 		else if (lower.includes('opus-4-6') || lower.includes('opus-4.6')) fallbackName = 'claude-opus-4-6'
 		else if (lower.includes('sonnet-4-5') || lower.includes('sonnet-4.5')) fallbackName = 'claude-sonnet-4-5-20250929'
 		else if (lower.includes('claude-3-7-sonnet')) fallbackName = 'claude-3-7-sonnet-20250219'
 		else if (lower.includes('claude-3-5-sonnet') || lower.includes('claude-3-5-haiku') || lower.includes('claude-3-opus') || lower.includes('claude-3-sonnet')) fallbackName = 'claude-sonnet-4-6'
-		else if (lower.includes('claude-4-opus') || lower.includes('claude-opus-4')) fallbackName = 'claude-opus-4-6'
+		else if (lower.includes('claude-4-opus') || lower.includes('claude-opus-4')) fallbackName = 'claude-opus-4-8'
 		else if (lower.includes('claude-4-sonnet') || lower.includes('claude-sonnet-4')) fallbackName = 'claude-sonnet-4-6'
 		if (fallbackName) return { modelName: fallbackName, recognizedModelName: fallbackName, ...anthropicModelOptions[fallbackName] }
 		return null
@@ -1382,6 +1396,12 @@ const liteLLMSettings: VoidStaticProviderInfo = { // https://docs.litellm.ai/doc
 
 // ---------------- OPENROUTER ----------------
 const openRouterModelOptions_assumingOpenAICompat = {
+	'anthropic/claude-opus-4.8': {
+		...anthropicModelOptions['claude-opus-4-8'],
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		downloadable: false,
+	},
 	'anthropic/claude-opus-4.7': {
 		...anthropicModelOptions['claude-opus-4-7'],
 		supportsSystemMessage: 'system-role',

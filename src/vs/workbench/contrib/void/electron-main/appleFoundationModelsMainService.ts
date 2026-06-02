@@ -6,6 +6,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { exec as _exec } from 'child_process';
+import { existsSync } from 'fs';
 import { isMacintosh } from '../../../../base/common/platform.js';
 import {
 	AFM_HOMEBREW_FORMULA,
@@ -115,6 +116,13 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 		this._spawnedByVoid = false;
 	}
 
+	private _brewExecEnv(brewPath: string): NodeJS.ProcessEnv {
+		// Ensure the Homebrew bin dir is in PATH so brew's own scripts work
+		const brewBin = brewPath.replace(/\/brew$/, '');
+		const existing = process.env['PATH'] ?? '/usr/bin:/bin:/usr/sbin:/sbin';
+		return { ...process.env, PATH: existing.includes(brewBin) ? existing : `${brewBin}:${existing}` };
+	}
+
 	private async _tryInstallViaHomebrew(log: string[]): Promise<boolean> {
 		const brewPath = await this._whichBrew();
 		if (!brewPath) {
@@ -122,10 +130,11 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 			return false;
 		}
 
+		const env = this._brewExecEnv(brewPath);
 		log.push(`Installing afm via Homebrew (${AFM_HOMEBREW_FORMULA})…`);
 		try {
-			await exec(`"${brewPath}" tap ${AFM_HOMEBREW_TAP}`, { timeout: 120_000 });
-			await exec(`"${brewPath}" install ${AFM_HOMEBREW_FORMULA}`, { timeout: 600_000 });
+			await exec(`"${brewPath}" tap ${AFM_HOMEBREW_TAP}`, { timeout: 120_000, env });
+			await exec(`"${brewPath}" install ${AFM_HOMEBREW_FORMULA}`, { timeout: 600_000, env });
 			log.push('Homebrew install finished.');
 			return true;
 		} catch (e) {
@@ -155,6 +164,16 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 	}
 
 	private async _whichPython3(): Promise<string | null> {
+		// GUI apps on macOS don't inherit the full shell PATH; check known locations first
+		for (const candidate of [
+			'/opt/homebrew/bin/python3',
+			'/usr/local/bin/python3',
+			'/usr/bin/python3',
+		]) {
+			if (existsSync(candidate)) {
+				return candidate;
+			}
+		}
 		for (const cmd of ['python3', 'python']) {
 			try {
 				const { stdout } = await exec(`which ${cmd}`, { timeout: 5_000 });
@@ -170,6 +189,27 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 	}
 
 	private async _whichAfm(): Promise<string | null> {
+		// GUI apps on macOS don't inherit the full shell PATH; check known locations first
+		for (const candidate of [
+			'/opt/homebrew/bin/afm',   // Apple Silicon Homebrew
+			'/usr/local/bin/afm',       // Intel Homebrew
+		]) {
+			if (existsSync(candidate)) {
+				return candidate;
+			}
+		}
+		try {
+			const brewPath = await this._whichBrew();
+			if (brewPath) {
+				const brewPrefix = brewPath.replace(/\/bin\/brew$/, '');
+				const candidate = `${brewPrefix}/bin/afm`;
+				if (existsSync(candidate)) {
+					return candidate;
+				}
+			}
+		} catch {
+			// fall through to which
+		}
 		try {
 			const { stdout } = await exec('which afm', { timeout: 5_000 });
 			const path = stdout.trim();
@@ -180,6 +220,15 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 	}
 
 	private async _whichBrew(): Promise<string | null> {
+		// GUI apps on macOS don't inherit the full shell PATH; check known locations first
+		for (const candidate of [
+			'/opt/homebrew/bin/brew',  // Apple Silicon
+			'/usr/local/bin/brew',      // Intel
+		]) {
+			if (existsSync(candidate)) {
+				return candidate;
+			}
+		}
 		try {
 			const { stdout } = await exec('which brew', { timeout: 5_000 });
 			const path = stdout.trim();

@@ -62,10 +62,11 @@ export class AppleFoundationModelsWorkbenchContrib extends Disposable {
 		}
 
 		const detail = result.errorMessage ?? result.log.join('\n');
+		const message = detail ? `Apple: automatic setup failed\n${detail}` : 'Apple: automatic setup failed';
 		this.notificationService.notify({
 			severity: Severity.Warning,
-			message: 'Apple: automatic setup failed',
-			source: detail || 'Void',
+			message,
+			source: 'Void',
 		});
 	}
 }

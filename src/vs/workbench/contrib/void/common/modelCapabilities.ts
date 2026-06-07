@@ -283,6 +283,7 @@ const openSourceModelOptions_assumingOAICompat = {
 	},
 	'devstral': {
 		supportsFIM: false,
+		specialToolFormat: 'openai-style', // Devstral is designed for agentic tool use
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: false,
 		contextWindow: 256_000, reservedOutputTokenSpace: 8_192,
@@ -1295,6 +1296,7 @@ const ollamaModelOptions = {
 		cost: { input: 0, output: 0 },
 		downloadable: { sizeGb: 14 },
 		supportsFIM: false,
+		specialToolFormat: 'openai-style', // Devstral is designed for agentic tool use
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: false,
 	},

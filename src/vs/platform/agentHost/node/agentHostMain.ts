@@ -23,6 +23,8 @@ import { IAgentHostTerminalManager } from './agentHostTerminalManager.js';
 import { CopilotAgent } from './copilot/copilotAgent.js';
 import { CopilotApiService, ICopilotApiService } from './shared/copilotApiService.js';
 import { ClaudeAgent } from './claude/claudeAgent.js';
+import { MistralAgent } from './mistral/mistralAgent.js';
+import { IMistralApiService, MistralApiService } from './mistral/mistralApiService.js';
 import { ClaudeAgentSdkService, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
 import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
 import { IAgentHostOTelService } from '../common/otel/agentHostOTelService.js';
@@ -125,6 +127,8 @@ async function startAgentHost(): Promise<void> {
 		diServices.set(IAgentHostGitService, gitService);
 		const copilotApiService = instantiationService.createInstance(CopilotApiService, undefined);
 		diServices.set(ICopilotApiService, copilotApiService);
+		const mistralApiService = disposables.add(instantiationService.createInstance(MistralApiService));
+		diServices.set(IMistralApiService, mistralApiService);
 		const claudeProxyService = disposables.add(instantiationService.createInstance(ClaudeProxyService));
 		diServices.set(IClaudeProxyService, claudeProxyService);
 		const claudeAgentSdkService = instantiationService.createInstance(ClaudeAgentSdkService);
@@ -149,6 +153,15 @@ async function startAgentHost(): Promise<void> {
 		if (process.env[AgentHostClaudeSdkPathEnvVar]) {
 			agentService.registerProvider(instantiationService.createInstance(ClaudeAgent));
 		}
+		// The Mistral agent provider is always registered (like Copilot) so it
+		// appears in the Agents Window whenever the agent host runs. Unlike
+		// Claude there is no external SDK to gate on: the agentic loop and tool
+		// execution are native (see `node/mistral/`). The API key is read from
+		// `VSCODE_AGENT_HOST_MISTRAL_API_KEY` (forwarded by the starters from the
+		// `chat.agentHost.mistralAgent.apiKey` setting, which Void mirrors from
+		// the Mistral key in Void Settings); without it the agent lists models
+		// but a turn fails fast with a clear "no API key" error.
+		agentService.registerProvider(instantiationService.createInstance(MistralAgent));
 	} catch (err) {
 		logService.error('Failed to create AgentService', err);
 		throw err;

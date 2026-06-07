@@ -34,6 +34,8 @@ import { ServiceCollection } from '../../instantiation/common/serviceCollection.
 import { CopilotAgent } from './copilot/copilotAgent.js';
 import { CopilotApiService, ICopilotApiService } from './shared/copilotApiService.js';
 import { ClaudeAgent } from './claude/claudeAgent.js';
+import { MistralAgent } from './mistral/mistralAgent.js';
+import { IMistralApiService, MistralApiService } from './mistral/mistralApiService.js';
 import { ClaudeAgentSdkService, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
 import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
 import { IAgentHostOTelService } from '../common/otel/agentHostOTelService.js';
@@ -217,6 +219,8 @@ async function main(): Promise<void> {
 		// the proxy service constructor requires it.
 		const copilotApiService = instantiationService.createInstance(CopilotApiService, undefined);
 		diServices.set(ICopilotApiService, copilotApiService);
+		const mistralApiService = disposables.add(instantiationService.createInstance(MistralApiService));
+		diServices.set(IMistralApiService, mistralApiService);
 		const claudeProxyService = disposables.add(instantiationService.createInstance(ClaudeProxyService));
 		diServices.set(IClaudeProxyService, claudeProxyService);
 		const claudeAgentSdkService = instantiationService.createInstance(ClaudeAgentSdkService);
@@ -234,6 +238,12 @@ async function main(): Promise<void> {
 			agentService.registerProvider(claudeAgent);
 			log('ClaudeAgent registered');
 		}
+		// The Mistral agent is always registered (like Copilot) so it appears in
+		// the Agents Window whenever the agent host runs. Its API key is read
+		// from `VSCODE_AGENT_HOST_MISTRAL_API_KEY` when present.
+		const mistralAgent = disposables.add(instantiationService.createInstance(MistralAgent));
+		agentService.registerProvider(mistralAgent);
+		log('MistralAgent registered');
 	}
 
 	if (options.enableMockAgent) {

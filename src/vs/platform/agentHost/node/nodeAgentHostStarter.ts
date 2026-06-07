@@ -13,7 +13,7 @@ import { parseAgentHostDebugPort } from '../../environment/node/environmentServi
 import { ILogService } from '../../log/common/log.js';
 import { getResolvedShellEnv } from '../../shell/node/shellEnv.js';
 import { IAgentHostConnection, IAgentHostStarter } from '../common/agent.js';
-import { AgentHostClaudeAgentSdkPathSettingId, AgentHostClaudeSdkPathEnvVar, AgentHostOTelCaptureContentSettingId, AgentHostOTelDbSpanExporterEnabledSettingId, AgentHostOTelEnabledSettingId, AgentHostOTelExporterTypeSettingId, AgentHostOTelOtlpEndpointSettingId, AgentHostOTelOutfileSettingId, buildAgentHostOTelEnv } from '../common/agentService.js';
+import { AgentHostClaudeAgentSdkPathSettingId, AgentHostClaudeSdkPathEnvVar, AgentHostMistralApiKeySettingId, AgentHostMistralApiKeyEnvVar, AgentHostOTelCaptureContentSettingId, AgentHostOTelDbSpanExporterEnabledSettingId, AgentHostOTelEnabledSettingId, AgentHostOTelExporterTypeSettingId, AgentHostOTelOtlpEndpointSettingId, AgentHostOTelOutfileSettingId, buildAgentHostOTelEnv } from '../common/agentService.js';
 
 /**
  * Options for configuring the agent host WebSocket server in the child process.
@@ -83,6 +83,14 @@ export class NodeAgentHostStarter extends Disposable implements IAgentHostStarte
 			|| '';
 		if (claudeSdkPath) {
 			env[AgentHostClaudeSdkPathEnvVar] = claudeSdkPath;
+		}
+
+		// The Mistral agent is opt-in: enabled when the user sets an API key.
+		const mistralApiKey = this._configurationService.getValue<string>(AgentHostMistralApiKeySettingId)
+			|| process.env[AgentHostMistralApiKeyEnvVar]
+			|| '';
+		if (mistralApiKey) {
+			env[AgentHostMistralApiKeyEnvVar] = mistralApiKey;
 		}
 
 		// Translate `chat.agentHost.otel.*` settings into the env vars consumed by

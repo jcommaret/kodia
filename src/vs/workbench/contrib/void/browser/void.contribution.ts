@@ -86,6 +86,9 @@ import './appleFoundationModelsWorkbenchContrib.js'
 import '../common/mlxService.js'
 import './mlxWorkbenchContrib.js'
 
+// Mistral agent host: reuse the Mistral key from Void Settings in the Agents Window
+import './mistralAgentHostKeyBridge.js'
+
 // metrics
 import '../common/metricsService.js'
 

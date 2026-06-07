@@ -342,7 +342,7 @@ configurationRegistry.registerConfiguration({
 		'workbench.welcomePage.experimentalOnboarding': {
 			scope: ConfigurationScope.APPLICATION,
 			type: 'boolean',
-			default: false, // Void: use Void onboarding instead of Microsoft Copilot onboarding
+			default: false, // Kodia: use Kodia onboarding instead of Microsoft Copilot onboarding
 			tags: ['experimental'],
 			description: localize('workbench.welcomePage.experimentalOnboarding', "When enabled, show the new onboarding experience instead of the classic walkthrough on first launch."),
 			experiment: {

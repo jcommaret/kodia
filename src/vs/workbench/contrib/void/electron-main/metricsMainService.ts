@@ -40,7 +40,7 @@ export class MetricsMainService extends Disposable implements IMetricsService {
 	private _initProperties: object = {}
 
 
-	// helper - looks like this is stored in a .vscdb file in ~/Library/Application Support/Void
+	// helper - looks like this is stored in a .vscdb file in ~/Library/Application Support/Kodia
 	private _memoStorage(key: string, target: StorageTarget, setValIfNotExist?: string) {
 		const currVal = this._appStorage.get(key, StorageScope.APPLICATION)
 		if (currVal !== undefined) return currVal
@@ -125,11 +125,11 @@ export class MetricsMainService extends Disposable implements IMetricsService {
 
 	const didOptOut = true // Force opt-out for AI Stats
 
-	console.log('User is opted out of basic Void metrics?', didOptOut)
+	console.log('User is opted out of basic Kodia metrics?', didOptOut)
 	this.client.optOut()
 
 
-		console.log('Void posthog metrics info:', JSON.stringify(identifyMessage, null, 2))
+		console.log('Kodia posthog metrics info:', JSON.stringify(identifyMessage, null, 2))
 	}
 
 

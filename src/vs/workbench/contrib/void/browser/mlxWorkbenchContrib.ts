@@ -65,7 +65,7 @@ export class MlxWorkbenchContrib extends Disposable {
 		this.notificationService.notify({
 			severity: Severity.Warning,
 			message: 'MLX: automatic setup failed',
-			source: detail || 'Void',
+			source: detail || 'Kodia',
 		});
 	}
 }

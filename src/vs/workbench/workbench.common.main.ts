@@ -21,8 +21,8 @@ import '../sessions/common/sizes.js';
 
 //#endregion
 
-//#region --- Void
-import './contrib/void/browser/void.contribution.js'; // Void added this
+//#region --- Kodia
+import './contrib/void/browser/void.contribution.js'; // Kodia added this
 //#endregion
 
 //#region --- workbench actions
@@ -223,7 +223,7 @@ import './contrib/notebook/browser/notebook.contribution.js';
 // Speech
 import './contrib/speech/browser/speech.contribution.js';
 
-// Chat — Void keeps shared services for compatibility; Microsoft chat UI is disabled when using Void chat.
+// Chat — Kodia keeps shared services for compatibility; Microsoft chat UI is disabled when using Kodia chat.
 import './contrib/chat/browser/chat.shared.contribution.js';
 // import './contrib/chat/browser/chat.contribution.js';
 // import './contrib/chat/browser/chat.view.contribution.js';
@@ -379,7 +379,7 @@ import './contrib/surveys/browser/nps.contribution.js';
 import './contrib/surveys/browser/languageSurveys.contribution.js';
 
 // Welcome
-// Void commented this out
+// Kodia commented this out
 // import './contrib/welcomeGettingStarted/browser/gettingStarted.contribution.js';
 import './contrib/welcomeGettingStarted/browser/gettingStarted.contribution.js';
 // import './contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.js';
@@ -387,7 +387,7 @@ import './contrib/welcomeWalkthrough/browser/walkThrough.contribution.js';
 import './contrib/welcomeViews/common/viewsWelcome.contribution.js';
 import './contrib/welcomeViews/common/newFile.contribution.js';
 
-// Welcome Onboarding — Microsoft Copilot onboarding (Void uses voidOnboardingService)
+// Welcome Onboarding — Microsoft Copilot onboarding (Kodia uses voidOnboardingService)
 // import './contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.js';
 
 // Call Hierarchy

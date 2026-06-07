@@ -30,7 +30,7 @@ const auxiliaryBarLeftOffIcon = registerIcon('auxiliarybar-left-off-layout-icon'
 export class ToggleAuxiliaryBarAction extends Action2 {
 
 	static readonly ID = 'workbench.action.toggleAuxiliaryBar';
-	static readonly LABEL = localize2('toggleAuxiliaryBar', "Toggle Void Side Bar Visibility");
+	static readonly LABEL = localize2('toggleAuxiliaryBar', "Toggle Kodia Side Bar Visibility");
 
 	constructor() {
 		super({
@@ -38,14 +38,14 @@ export class ToggleAuxiliaryBarAction extends Action2 {
 			title: ToggleAuxiliaryBarAction.LABEL,
 			toggled: {
 				condition: AuxiliaryBarVisibleContext,
-				title: localize('closeSecondarySideBar', 'Hide Void Side Bar'),
+				title: localize('closeSecondarySideBar', 'Hide Kodia Side Bar'),
 				icon: closeIcon,
 				mnemonicTitle: localize({ key: 'miCloseSecondarySideBar', comment: ['&& denotes a mnemonic'] }, "&&Secondary Side Bar"),
 			},
 			icon: closeIcon,
 			category: Categories.View,
 			metadata: {
-				description: localize('openAndCloseAuxiliaryBar', 'Open/Show and Close/Hide Void Side Bar'),
+				description: localize('openAndCloseAuxiliaryBar', 'Open/Show and Close/Hide Kodia Side Bar'),
 			},
 			f1: true,
 			keybinding: {
@@ -98,7 +98,7 @@ registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'workbench.action.closeAuxiliaryBar',
-			title: localize2('closeSecondarySideBar', 'Hide Void Side Bar'),
+			title: localize2('closeSecondarySideBar', 'Hide Kodia Side Bar'),
 			category: Categories.View,
 			precondition: AuxiliaryBarVisibleContext,
 			f1: true,
@@ -112,7 +112,7 @@ registerAction2(class extends Action2 {
 registerAction2(class FocusAuxiliaryBarAction extends Action2 {
 
 	static readonly ID = 'workbench.action.focusAuxiliaryBar';
-	static readonly LABEL = localize2('focusAuxiliaryBar', "Focus into Void Side Bar");
+	static readonly LABEL = localize2('focusAuxiliaryBar', "Focus into Kodia Side Bar");
 
 	constructor() {
 		super({
@@ -145,7 +145,7 @@ MenuRegistry.appendMenuItems([
 			group: '2_pane_toggles',
 			command: {
 				id: ToggleAuxiliaryBarAction.ID,
-				title: localize('toggleSecondarySideBar', "Toggle Void Side Bar"),
+				title: localize('toggleSecondarySideBar', "Toggle Kodia Side Bar"),
 				toggled: { condition: AuxiliaryBarVisibleContext, icon: auxiliaryBarLeftIcon },
 				icon: auxiliaryBarLeftOffIcon,
 			},
@@ -164,7 +164,7 @@ MenuRegistry.appendMenuItems([
 			group: '2_pane_toggles',
 			command: {
 				id: ToggleAuxiliaryBarAction.ID,
-				title: localize('toggleSecondarySideBar', "Toggle Void Side Bar"),
+				title: localize('toggleSecondarySideBar', "Toggle Kodia Side Bar"),
 				toggled: { condition: AuxiliaryBarVisibleContext, icon: auxiliaryBarRightIcon },
 				icon: auxiliaryBarRightOffIcon,
 			},
@@ -183,7 +183,7 @@ MenuRegistry.appendMenuItems([
 			group: '3_workbench_layout_move',
 			command: {
 				id: ToggleAuxiliaryBarAction.ID,
-				title: localize2('hideAuxiliaryBar', 'Hide Void Side Bar'),
+				title: localize2('hideAuxiliaryBar', 'Hide Kodia Side Bar'),
 			},
 			when: ContextKeyExpr.and(AuxiliaryBarVisibleContext, ContextKeyExpr.equals('viewContainerLocation', ViewContainerLocationToString(ViewContainerLocation.AuxiliaryBar))),
 			order: 2
@@ -195,7 +195,7 @@ registerAction2(class extends SwitchCompositeViewAction {
 	constructor() {
 		super({
 			id: 'workbench.action.previousAuxiliaryBarView',
-			title: localize2('previousAuxiliaryBarView', 'Previous Void Side Bar View'),
+			title: localize2('previousAuxiliaryBarView', 'Previous Kodia Side Bar View'),
 			category: Categories.View,
 			f1: true
 		}, ViewContainerLocation.AuxiliaryBar, -1);
@@ -206,7 +206,7 @@ registerAction2(class extends SwitchCompositeViewAction {
 	constructor() {
 		super({
 			id: 'workbench.action.nextAuxiliaryBarView',
-			title: localize2('nextAuxiliaryBarView', 'Next Void Side Bar View'),
+			title: localize2('nextAuxiliaryBarView', 'Next Kodia Side Bar View'),
 			category: Categories.View,
 			f1: true
 		}, ViewContainerLocation.AuxiliaryBar, 1);

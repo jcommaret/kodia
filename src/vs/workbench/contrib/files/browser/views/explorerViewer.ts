@@ -874,7 +874,7 @@ export class FilesRenderer implements ICompressibleTreeRenderer<ExplorerItem, Fu
 		return FilesRenderer.ID;
 	}
 
-	// Void added this
+	// Kodia added this
 	// // Create void buttons container
 	// const voidButtonsContainer = DOM.append(container, DOM.$('div'));
 	// voidButtonsContainer.style.position = 'absolute'
@@ -914,7 +914,7 @@ export class FilesRenderer implements ICompressibleTreeRenderer<ExplorerItem, Fu
 		return templateData;
 	}
 
-	// Void cares about this function, this is where elements in the tree are rendered
+	// Kodia cares about this function, this is where elements in the tree are rendered
 	renderElement(node: ITreeNode<ExplorerItem, FuzzyScore>, index: number, templateData: IFileTemplateData): void {
 		const stat = node.element;
 		templateData.currentContext = stat;

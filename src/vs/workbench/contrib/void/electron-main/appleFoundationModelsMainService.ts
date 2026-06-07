@@ -266,7 +266,7 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 
 	private async _startServer(afmPath: string, port: number, log: string[]): Promise<void> {
 		if (this._child && !this._child.killed) {
-			log.push('Void afm process already running.');
+			log.push('Kodia afm process already running.');
 			return;
 		}
 

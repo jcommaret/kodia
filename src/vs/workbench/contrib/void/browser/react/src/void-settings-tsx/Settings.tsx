@@ -324,10 +324,10 @@ const SimpleModelSettingsDialog = ({
 
 				{/* Display model recognition status */}
 				<div className="text-sm text-void-fg-3 mb-4">
-					{type === 'default' ? `${modelName} comes packaged with Void, so you shouldn't need to change these settings.`
+					{type === 'default' ? `${modelName} comes packaged with Kodia, so you shouldn't need to change these settings.`
 						: isUnrecognizedModel
-							? `Model not recognized by Void.`
-							: `Void recognizes ${modelName} ("${recognizedModelName}").`}
+							? `Model not recognized by Kodia.`
+							: `Kodia recognizes ${modelName} ("${recognizedModelName}").`}
 				</div>
 
 
@@ -741,7 +741,7 @@ export const SettingsForProvider = ({ providerName, showProviderTitle, showProvi
 				providerName === 'ollama' ?
 					<WarningBox className="pl-2 mb-4" text={`Please install an Ollama model. We'll auto-detect it.`} />
 					: (providerName === 'mlx' || providerName === 'appleFoundationModels' || providerName === 'lmStudio' || providerName === 'vLLM') ?
-						<WarningBox className="pl-2 mb-4" text={`Start your local server — Void will auto-detect models at the endpoint.`} />
+						<WarningBox className="pl-2 mb-4" text={`Start your local server — Kodia will auto-detect models at the endpoint.`} />
 						: <WarningBox className="pl-2 mb-4" text={`Please add a model for ${providerTitle} (Models section).`} />
 				: null}
 		</div>
@@ -912,15 +912,15 @@ export const OllamaSetupInstructions = ({ sayWeAutoDetect }: { sayWeAutoDetect?:
 		>
 			<ChatMarkdownRender string={`3. Run \`ollama pull your_model\` to install a model.`} chatMessageLocation={undefined} />
 		</div>
-		{sayWeAutoDetect && <div className=' pl-6'><ChatMarkdownRender string={`Void automatically detects locally running models and enables them.`} chatMessageLocation={undefined} /></div>}
+		{sayWeAutoDetect && <div className=' pl-6'><ChatMarkdownRender string={`Kodia automatically detects locally running models and enables them.`} chatMessageLocation={undefined} /></div>}
 	</div>
 }
 
 export const MlxSetupInstructions = () => {
 	return <div className='prose-p:my-0 prose-ol:list-decimal prose-p:py-0 prose-ol:my-0 prose-ol:py-0 text-void-fg-3 text-sm list-decimal select-text mb-4'>
 		<div><ChatMarkdownRender string={`MLX (one model at a time)`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`1. Void can run \`pip install mlx-lm\` and start \`mlx_lm.server\` for you (toggle in Settings → Models). Default model: \`mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit\` on port 8080.`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`2. Void shows only **one** autodetected entry: the model currently loaded by the server.`} chatMessageLocation={undefined} /></div>
+		<div className='pl-6'><ChatMarkdownRender string={`1. Kodia can run \`pip install mlx-lm\` and start \`mlx_lm.server\` for you (toggle in Settings → Models). Default model: \`mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit\` on port 8080.`} chatMessageLocation={undefined} /></div>
+		<div className='pl-6'><ChatMarkdownRender string={`2. Kodia shows only **one** autodetected entry: the model currently loaded by the server.`} chatMessageLocation={undefined} /></div>
 		<div className='pl-6'><ChatMarkdownRender string={`3. **Switch models**: stop the server, run \`mlx_lm.server --model <other-hf-repo>\`, then click **Refresh** next to MLX in Settings → Models.`} chatMessageLocation={undefined} /></div>
 		<div className='pl-6'><ChatMarkdownRender string={`4. **Second model in parallel**: run another server on a different port (e.g. \`mlx_lm.server --model … --port 8081\`), then at the bottom of the model list use **Add Model** → **OpenAI-Compatible** with \`http://127.0.0.1:8081/v1\`, or add the model id manually under MLX if the endpoint exposes multiple ids.`} chatMessageLocation={undefined} /></div>
 	</div>
@@ -930,9 +930,9 @@ export const AppleFoundationModelsSetupInstructions = () => {
 	if (os !== 'mac') return null
 	return <div className='prose-p:my-0 prose-ol:list-decimal prose-p:py-0 prose-ol:my-0 prose-ol:py-0 text-void-fg-3 text-sm list-decimal select-text mb-4'>
 		<div><ChatMarkdownRender string={`Apple — [maclocal-api](https://github.com/scouzi1966/maclocal-api) (\`afm\`)`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`1. Requires macOS 26+, Apple Silicon, and Apple Intelligence. Void auto-installs \`afm\` (Homebrew: \`brew tap scouzi1966/afm && brew install scouzi1966/afm/afm\`, or pip: \`pip install macafm\`).`} chatMessageLocation={undefined} /></div>
+		<div className='pl-6'><ChatMarkdownRender string={`1. Requires macOS 26+, Apple Silicon, and Apple Intelligence. Kodia auto-installs \`afm\` (Homebrew: \`brew tap scouzi1966/afm && brew install scouzi1966/afm/afm\`, or pip: \`pip install macafm\`).`} chatMessageLocation={undefined} /></div>
 		<div className='pl-6'><ChatMarkdownRender string={`2. Default server: \`afm -p 9999\` → endpoint \`http://127.0.0.1:9999/v1\`, model id \`foundation\`.`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`3. **LoRA adapter**: \`afm -a ./my-adapter.fmadapter -p 9998\`, then set Void’s endpoint to \`http://127.0.0.1:9998\` and refresh.`} chatMessageLocation={undefined} /></div>
+		<div className='pl-6'><ChatMarkdownRender string={`3. **LoRA adapter**: \`afm -a ./my-adapter.fmadapter -p 9998\`, then set Kodia’s endpoint to \`http://127.0.0.1:9998\` and refresh.`} chatMessageLocation={undefined} /></div>
 		<div className='pl-6'><ChatMarkdownRender string={`4. **Other local models**: use **MLX** (\`mlx_lm.server\`) or \`afm mlx -m <hf-repo>\` from maclocal-api — this provider is only Apple’s on-device Foundation model.`} chatMessageLocation={undefined} /></div>
 	</div>
 }
@@ -1268,7 +1268,7 @@ export const Settings = () => {
 
 					<div className='max-w-3xl'>
 
-						<h1 className='text-2xl w-full'>{`Void's Settings`}</h1>
+						<h1 className='text-2xl w-full'>{`Kodia's Settings`}</h1>
 
 						<div className='w-full h-[1px] my-2' />
 
@@ -1297,7 +1297,7 @@ export const Settings = () => {
 								<ErrorBoundary>
 									<LocalProviderSection
 										title='Ollama'
-										description='Pull models with `ollama pull` — Void autodetects them at your endpoint.'
+										description='Pull models with `ollama pull` — Kodia autodetects them at your endpoint.'
 										instructions={<OllamaSetupInstructions sayWeAutoDetect={true} />}
 										providerNames={ollamaProviderNames}
 										refreshable
@@ -1354,7 +1354,7 @@ export const Settings = () => {
 							<div className={shouldShowTab('providers') ? `` : 'hidden'}>
 								<ErrorBoundary>
 									<h2 className={`text-3xl mb-2`}>Main Providers</h2>
-									<h3 className={`text-void-fg-3 mb-2`}>{`Void can access models from Anthropic, OpenAI, OpenRouter, and more.`}</h3>
+									<h3 className={`text-void-fg-3 mb-2`}>{`Kodia can access models from Anthropic, OpenAI, OpenRouter, and more.`}</h3>
 
 									<VoidProviderSettings providerNames={nonlocalProviderNames} />
 								</ErrorBoundary>
@@ -1494,7 +1494,7 @@ export const Settings = () => {
 
 										<div className='w-full'>
 											<h4 className={`text-base`}>Editor</h4>
-											<div className='text-sm text-void-fg-3 mt-1'>{`Settings that control the visibility of Void suggestions in the code editor.`}</div>
+											<div className='text-sm text-void-fg-3 mt-1'>{`Settings that control the visibility of Kodia suggestions in the code editor.`}</div>
 
 											<div className='my-2'>
 												{/* Auto Accept Switch */}
@@ -1547,7 +1547,7 @@ export const Settings = () => {
 								<div>
 									<ErrorBoundary>
 										<h2 className='text-3xl mb-2'>One-Click Switch</h2>
-										<h4 className='text-void-fg-3 mb-4'>{`Transfer your editor settings into Void.`}</h4>
+										<h4 className='text-void-fg-3 mb-4'>{`Transfer your editor settings into Kodia.`}</h4>
 
 										<div className='flex flex-col gap-2'>
 											<OneClickSwitchButton className='w-48' fromEditor="VS Code" />
@@ -1560,7 +1560,7 @@ export const Settings = () => {
 								{/* Import/Export section */}
 								<div>
 									<h2 className='text-3xl mb-2'>Import/Export</h2>
-									<h4 className='text-void-fg-3 mb-4'>{`Transfer Void's settings and chats in and out of Void.`}</h4>
+									<h4 className='text-void-fg-3 mb-4'>{`Transfer Kodia's settings and chats in and out of Kodia.`}</h4>
 									<div className='flex flex-col gap-8'>
 										{/* Settings Subcategory */}
 										<div className='flex flex-col gap-2 max-w-48 w-full'>
@@ -1621,7 +1621,7 @@ export const Settings = () => {
 								{/* Metrics section */}
 								<div className='max-w-[600px]'>
 									<h2 className={`text-3xl mb-2`}>Metrics</h2>
-									<h4 className={`text-void-fg-3 mb-4`}>Very basic anonymous usage tracking helps us keep Void running smoothly. You may opt out below. Regardless of this setting, Void never sees your code, messages, or API keys.</h4>
+									<h4 className={`text-void-fg-3 mb-4`}>Very basic anonymous usage tracking helps us keep Kodia running smoothly. You may opt out below. Regardless of this setting, Kodia never sees your code, messages, or API keys.</h4>
 
 									<div className='my-2'>
 										{/* Disable All Metrics Switch */}
@@ -1670,7 +1670,7 @@ Alternatively, place a \`.voidrules\` file in the root of your workspace.
 											</div>
 										</ErrorBoundary>
 										<div className='text-void-fg-3 text-xs mt-1'>
-											{`When disabled, Void will not include anything in the system message except for content you specified above.`}
+											{`When disabled, Kodia will not include anything in the system message except for content you specified above.`}
 										</div>
 									</div>
 								</div>

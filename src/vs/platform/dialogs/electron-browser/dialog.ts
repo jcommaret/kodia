@@ -11,7 +11,7 @@ import { IProductService } from '../../product/common/productService.js';
 import { process } from '../../../base/parts/sandbox/electron-browser/globals.js';
 
 export function createNativeAboutDialogDetails(productService: IProductService, osProps: IOSProperties): { title: string; details: string; detailsToCopy: string } {
-	// Use the Void version from productService
+	// Use the Kodia version from productService
 	const voidVersion = productService.voidVersion || '1.5.0';
 	let version = productService.version;
 	if (productService.target) {

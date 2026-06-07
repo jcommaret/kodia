@@ -98,7 +98,7 @@ class SidebarViewPane extends ViewPane {
 // ---------- Register viewpane inside the void container ----------
 
 // const voidThemeIcon = Codicon.symbolObject;
-// const voidViewIcon = registerIcon('void-view-icon', voidThemeIcon, localize('voidViewIcon', 'View icon of the Void chat view.'));
+// const voidViewIcon = registerIcon('void-view-icon', voidThemeIcon, localize('voidViewIcon', 'View icon of the Kodia chat view.'));
 
 // called VIEWLET_ID in other places for some reason
 export const VOID_VIEW_CONTAINER_ID = 'workbench.view.void'
@@ -108,7 +108,7 @@ export const VOID_VIEW_ID = VOID_VIEW_CONTAINER_ID
 const viewContainerRegistry = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry);
 const container = viewContainerRegistry.registerViewContainer({
 	id: VOID_VIEW_CONTAINER_ID,
-	title: nls.localize2('voidContainer', 'Chat'), // this is used to say "Void" (Ctrl + L)
+	title: nls.localize2('voidContainer', 'Chat'), // this is used to say "Kodia" (Ctrl + L)
 	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [VOID_VIEW_CONTAINER_ID, {
 		mergeViewWithContainerWhenSingleView: true,
 		orientation: Orientation.HORIZONTAL,
@@ -154,7 +154,7 @@ registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: VOID_OPEN_SIDEBAR_ACTION_ID,
-			title: 'Open Void Sidebar',
+			title: 'Open Kodia Sidebar',
 		})
 	}
 	run(accessor: ServicesAccessor): void {

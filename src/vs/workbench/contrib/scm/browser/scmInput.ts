@@ -863,7 +863,7 @@ registerAction2(class extends Action2 {
 			return;
 		}
 
-		// Built-in Void command — no Copilot setup flow
+		// Built-in Kodia command — no Copilot setup flow
 		if (command === 'void.generateCommitMessageAction') {
 			await commandService.executeCommand(command, ...args);
 			return;

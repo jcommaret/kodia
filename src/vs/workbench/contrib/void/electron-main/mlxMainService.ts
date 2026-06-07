@@ -157,7 +157,7 @@ export class MlxMainService implements IMlxMainService {
 
 	private async _startServer(serverCmd: MlxServerCommand, port: number, model: string, log: string[]): Promise<void> {
 		if (this._child && !this._child.killed) {
-			log.push('Void mlx server process already running.');
+			log.push('Kodia mlx server process already running.');
 			return;
 		}
 

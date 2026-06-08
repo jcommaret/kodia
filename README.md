@@ -1,4 +1,4 @@
-# Welcome to Void
+# Welcome to Kodia
 
 <div align="center">
 	<img
@@ -9,15 +9,15 @@
 	/>
 </div>
 
-## About Void
+## About Kodia
 
-Void is an open-source alternative to Cursor, designed to provide a powerful and flexible code editor with advanced AI integration. It allows you to:
+Kodia is a Void fork, Void is an open-source alternative to Cursor, designed to provide a powerful and flexible code editor with advanced AI integration. It allows you to:
 - Use AI agents directly on your codebase
 - Checkpoint and visualize changes
 - Bring any model or host locally
 - Send messages directly to providers without retaining your data
 
-Void is a fork of VSCode, with additional features and modifications to support AI-driven development workflows.
+Kodia is a fork of VSCode, with additional features and modifications to support AI-driven development workflows.
 
 ## Features
 

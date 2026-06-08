@@ -71,6 +71,40 @@ export const AgentHostClaudeAgentSdkPathSettingId = 'chat.agentHost.claudeAgent.
  */
 export const AgentHostClaudeSdkPathEnvVar = 'VSCODE_AGENT_HOST_CLAUDE_SDK_PATH';
 
+// -- Mistral agent settings ------------------------------------------------------
+
+/**
+ * Workbench setting holding the user's Mistral API key. When non-empty, the
+ * `MistralAgent` provider is registered inside the agent host. Unlike the
+ * Claude SDK (a local package path), Mistral needs only an API key: the
+ * agentic loop and tool execution are implemented natively in the agent host
+ * (`node/mistral/`), and the key authenticates `chat.stream` calls to
+ * `api.mistral.ai`. When empty (the default), the Mistral provider is not
+ * registered. The agent host process must be restarted for changes to take
+ * effect.
+ *
+ * The agent host is a separate node utility process and cannot read Void's
+ * renderer-side `IVoidSettingsService`, so the key is plumbed through as a
+ * setting → env var, mirroring {@link AgentHostClaudeAgentSdkPathSettingId}.
+ */
+export const AgentHostMistralApiKeySettingId = 'chat.agentHost.mistralAgent.apiKey';
+
+/**
+ * Environment variable that holds the Mistral API key. When set to a non-empty
+ * value, the agent host process registers the Mistral agent provider. Set by
+ * the agent host starters from {@link AgentHostMistralApiKeySettingId}, and may
+ * also be set directly by developers as an override.
+ */
+export const AgentHostMistralApiKeyEnvVar = 'VSCODE_AGENT_HOST_MISTRAL_API_KEY';
+
+/**
+ * Protected-resource identifier the Mistral agent advertises so the workbench
+ * can push the API key to the running agent host via `authenticate` (routing
+ * matches providers by this resource). Used by both `MistralAgent`
+ * (`getProtectedResources`) and the renderer key bridge.
+ */
+export const AgentHostMistralResource = 'https://api.mistral.ai';
+
 // -- OpenTelemetry settings ------------------------------------------------------
 //
 // The `chat.agentHost.otel.*` namespace surfaces the same exporter knobs the CLI

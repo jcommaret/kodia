@@ -209,6 +209,11 @@ export const MANAGE_CHAT_COMMAND_ID = 'workbench.action.chat.manage';
 export const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
 export const OPEN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openAgentsWindow';
 export const OPEN_AGENTS_WINDOW_PRECONDITION = ContextKeyExpr.and(
+	// Kodia: the Agents Window UI entry points (title bar button, command
+	// palette entries, Cmd/Ctrl+Shift+A keybinding) are intentionally hidden.
+	// The agent host backend stays enabled; only the visible affordances are
+	// removed. Remove `ContextKeyExpr.false()` to restore the original gating.
+	ContextKeyExpr.false(),
 	ChatEntitlementContextKeys.Setup.hidden.negate(),
 	ChatEntitlementContextKeys.Setup.disabledInWorkspace.negate(),
 	IsSessionsWindowContext.negate(),

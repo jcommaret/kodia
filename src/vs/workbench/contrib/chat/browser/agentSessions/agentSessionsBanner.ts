@@ -31,12 +31,22 @@ export interface IAgentsBannerResult {
 }
 
 /**
+ * Kodia: the Agents Window UI is intentionally hidden, so the
+ * "Try out the new Agents window" banner (welcome page / agent sessions
+ * welcome) is never promoted. Set this back to `true` to restore the banner.
+ */
+const KODIA_AGENTS_BANNER_ENABLED: boolean = false;
+
+/**
  * Returns whether the agents banner can be shown.
  * The banner requires the open agents window command
  * to be registered (desktop builds only) and is limited to Insiders quality.
  * It is also hidden when AI features are disabled.
  */
 export function canShowAgentsBanner(chatEntitlementService: IChatEntitlementService): boolean {
+	if (!KODIA_AGENTS_BANNER_ENABLED) {
+		return false;
+	}
 	const sentiment = chatEntitlementService.sentiment;
 	if (sentiment.hidden || sentiment.disabled) {
 		return false;

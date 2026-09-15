@@ -9,6 +9,22 @@
 	/>
 </div>
 
+## Installation rapide (macOS)
+
+Prérequis : Xcode, Python 3, [nvm](https://github.com/nvm-sh/nvm).
+
+```bash
+git clone https://github.com/jcommaret/kodia.git
+cd kodia   # ce dépôt s'appelle void/ en local
+nvm install
+nvm use    # Node 24.18.0, voir .nvmrc
+npm install
+./scripts/code.sh
+```
+
+Le premier `npm install` est long. Ensuite : `Cmd+Shift+B` pour compiler en
+mode développeur, puis recharger la fenêtre (`Cmd+R`).
+
 ## About Kodia
 
 Kodia is a Void fork, Void is an open-source alternative to Cursor, designed to provide a powerful and flexible code editor with advanced AI integration. It allows you to:
@@ -55,7 +71,7 @@ Kodia is a fork of VSCode, with additional features and modifications to support
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/voideditor/void
+   git clone https://github.com/jcommaret/kodia.git
    ```
 2. Install dependencies:
    ```bash
@@ -73,7 +89,7 @@ Kodia is a fork of VSCode, with additional features and modifications to support
 
 ### Common Issues and Fixes
 
-- Ensure you have Node version **22.22.3** (as specified in `.nvmrc`).
+- Ensure you have Node version **24.18.0** (as specified in `.nvmrc`).
   - Use [nvm](https://github.com/nvm-sh/nvm) to manage Node versions:
     ```bash
     nvm install

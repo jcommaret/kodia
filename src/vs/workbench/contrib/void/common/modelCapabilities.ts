@@ -1203,10 +1203,10 @@ const deepseekFlashOptions = { // DeepSeek-V4.1-Flash — https://api-docs.deeps
 	cost: { cache_read: 0.003, input: 0.15, output: 0.60 },
 	downloadable: false,
 	supportsFIM: true,
-	specialToolFormat: 'openai-style' as const,
-	supportsSystemMessage: 'system-role' as const,
-	reasoningCapabilities: { supportsReasoning: true as const, canTurnOffReasoning: true, canIOReasoning: true, openSourceThinkTags: ['<think>', '</think>'] as [string, string] },
-}
+	specialToolFormat: 'openai-style',
+	supportsSystemMessage: 'system-role',
+	reasoningCapabilities: { supportsReasoning: true, canTurnOffReasoning: true, canIOReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+} as const satisfies VoidStaticModelInfo
 
 const deepseekModelOptions = {
 	'deepseek-flash': deepseekFlashOptions,

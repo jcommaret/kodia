@@ -6,11 +6,13 @@
 // Based on @sergeche's work on the emmet plugin for atom
 
 import * as path from 'path';
+import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
 import { URL } from 'url';
 import { imageSize } from 'image-size';
-import { ISizeCalculationResult } from 'image-size/dist/types/interface';
+
+type ISizeCalculationResult = ReturnType<typeof imageSize>;
 
 const reUrl = /^https?:/;
 export type ImageInfoWithScale = {
@@ -33,27 +35,18 @@ export function getImageSize(file: string): Promise<ImageInfoWithScale | undefin
  * Get image size from file on local file system
  */
 function getImageSizeFromFile(file: string): Promise<ImageInfoWithScale | undefined> {
-	return new Promise((resolve, reject) => {
-		const isDataUrl = file.match(/^data:.+?;base64,/);
+	const isDataUrl = file.match(/^data:.+?;base64,/);
 
-		if (isDataUrl) {
-			// NB should use sync version of `sizeOf()` for buffers
-			try {
-				const data = Buffer.from(file.slice(isDataUrl[0].length), 'base64');
-				return resolve(sizeForFileName('', imageSize(data)));
-			} catch (err) {
-				return reject(err);
-			}
+	if (isDataUrl) {
+		try {
+			const data = Buffer.from(file.slice(isDataUrl[0].length), 'base64');
+			return Promise.resolve(sizeForFileName('', imageSize(data)));
+		} catch (err) {
+			return Promise.reject(err);
 		}
+	}
 
-		imageSize(file, (err: Error | null, size?: ISizeCalculationResult) => {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(sizeForFileName(path.basename(file), size));
-			}
-		});
-	});
+	return fs.promises.readFile(file).then(data => sizeForFileName(path.basename(file), imageSize(data)));
 }
 
 /**

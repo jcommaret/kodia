@@ -45,6 +45,7 @@ export const canonicalModelNameForProvider = (providerName: ProviderName, modelN
 	if (providerName === 'mistral') {
 		if (lower === 'magistral-small-latest') return 'mistral-small-latest'
 		if (lower === 'devstral-small-latest') return 'devstral-latest'
+		if (lower === 'glm-5.3' || lower === 'glm-5-3' || lower === 'glm-5.3-latest') return 'zai-glm-5-3'
 		if (lower === 'glm-5.2' || lower === 'glm-5-2' || lower === 'glm-5.2-latest') return 'zai-glm-5-2'
 	}
 

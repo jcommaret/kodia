@@ -101,6 +101,7 @@ interface IMistralProvisionalSession {
  * `workbench/contrib/void/common/modelCapabilities.ts`.
  */
 const MISTRAL_SEED_MODELS: ReadonlyArray<{ id: string; name: string; maxContextWindow: number }> = [
+	{ id: 'zai-glm-5-3', name: 'Z.ai GLM 5.3', maxContextWindow: 1_000_000 },
 	{ id: 'zai-glm-5-2', name: 'Z.ai GLM 5.2', maxContextWindow: 1_000_000 },
 	{ id: 'devstral-latest', name: 'Devstral', maxContextWindow: 256_000 },
 	{ id: 'codestral-latest', name: 'Codestral', maxContextWindow: 256_000 },

@@ -137,7 +137,7 @@ export const defaultModelsOfProvider = {
 		'x-ai/grok-4.6',
 		'qwen/qwen3-235b-a22b',
 		'deepseek/deepseek-v4.1-flash',
-		'z-ai/glm-5.2',
+		'z-ai/glm-5.3',
 	],
 	groq: [ // https://console.groq.com/docs/models
 		'openai/gpt-oss-120b',
@@ -148,6 +148,7 @@ export const defaultModelsOfProvider = {
 		'groq/compound-mini',
 	],
 	mistral: [ // https://docs.mistral.ai/getting-started/models/models_overview/
+		'zai-glm-5-3',
 		'zai-glm-5-2',
 		'mistral-large-latest',
 		'mistral-medium-latest',
@@ -493,7 +494,10 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 
 	if (lower.includes('codestral')) return toFallback(openSourceModelOptions_assumingOAICompat, 'codestral')
 	if (lower.includes('devstral')) return toFallback(openSourceModelOptions_assumingOAICompat, 'devstral')
-	if (lower.includes('glm')) return toFallback(mistralModelOptions, 'zai-glm-5-2')
+	if (lower.includes('glm')) {
+		if (lower.includes('5.2') || lower.includes('5-2')) return toFallback(mistralModelOptions, 'zai-glm-5-2')
+		return toFallback(mistralModelOptions, 'zai-glm-5-3')
+	}
 
 	if (lower.includes('ministral')) return toFallback(mistralModelOptions, 'ministral-8b-latest')
 	if (lower.includes('mistral') && lower.includes('medium')) return toFallback(mistralModelOptions, 'mistral-medium-latest')
@@ -1257,7 +1261,27 @@ const mistralReasoningEffortCapabilities = {
 	openSourceThinkTags: ['<think>', '</think>'] as [string, string],
 }
 
+// GLM 5.3: thinking cannot be disabled; official efforts are low / high / max (default max).
+// https://z.ai/blog/glm-5.3 — Mistral hosts it unmodified: https://docs.mistral.ai/models/zai-glm-5-3
+const glm53ReasoningEffortCapabilities = {
+	supportsReasoning: true as const,
+	canIOReasoning: true,
+	canTurnOffReasoning: false,
+	reasoningSlider: { type: 'effort_slider' as const, values: ['low', 'high', 'max'], default: 'max' },
+	openSourceThinkTags: ['<think>', '</think>'] as [string, string],
+}
+
 const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/models_overview/
+	'zai-glm-5-3': { // Z.ai GLM 5.3 — https://docs.mistral.ai/models/zai-glm-5-3
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 128_000,
+		cost: { input: 1.40, cache_read: 0.14, output: 4.40 },
+		supportsFIM: false,
+		specialToolFormat: 'openai-style',
+		downloadable: { sizeGb: 'not-known' },
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: glm53ReasoningEffortCapabilities,
+	},
 	'zai-glm-5-2': { // Z.ai GLM 5.2 — https://docs.mistral.ai/models/zai-glm-5-2
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 128_000,
@@ -1362,7 +1386,10 @@ const mistralSettings: VoidStaticProviderInfo = {
 	modelOptionsFallback: (modelName) => {
 		const lower = modelName.toLowerCase()
 		let fallbackName: keyof typeof mistralModelOptions | null = null
-		if (lower.includes('glm')) fallbackName = 'zai-glm-5-2'
+		if (lower.includes('glm')) {
+			if (lower.includes('5.2') || lower.includes('5-2')) fallbackName = 'zai-glm-5-2'
+			else fallbackName = 'zai-glm-5-3'
+		}
 		else if (lower.includes('codestral')) fallbackName = 'codestral-latest'
 		else if (lower.includes('devstral')) fallbackName = 'devstral-medium-latest'
 		else if (lower.includes('ministral')) {
@@ -1829,6 +1856,10 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'mistralai/devstral-2512': {
 		...mistralModelOptions['devstral-medium-latest'],
+		downloadable: false,
+	},
+	'z-ai/glm-5.3': {
+		...mistralModelOptions['zai-glm-5-3'],
 		downloadable: false,
 	},
 	'z-ai/glm-5.2': {

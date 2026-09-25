@@ -39,7 +39,7 @@ export const canonicalModelNameForProvider = (providerName: ProviderName, modelN
 	}
 
 	if (providerName === 'xAI') {
-		if (lower.startsWith('grok-2') || lower.startsWith('grok-3')) return 'grok-4.6'
+		if (lower.startsWith('grok-2') || lower.startsWith('grok-3')) return 'grok-4.7'
 	}
 
 	if (providerName === 'mistral') {

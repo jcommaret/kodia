@@ -80,6 +80,7 @@ export const defaultProviderSettings = {
 export const defaultModelsOfProvider = {
 	openAI: [ // https://platform.openai.com/docs/models
 		'gpt-6-astra',
+		'gpt-6.1-sol',
 		'gpt-6-sol',
 		'gpt-6-luna',
 		'gpt-5.6', // alias → gpt-5.6-sol
@@ -94,6 +95,7 @@ export const defaultModelsOfProvider = {
 		'claude-fable-5-1',
 		'claude-opus-5-5',
 		'claude-opus-5',
+		'claude-sonnet-5-5',
 		'claude-sonnet-5',
 		'claude-haiku-4-5',
 		'claude-fable-5',
@@ -457,6 +459,7 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 	if (lower.includes('opus-5-5') || lower.includes('opus-5.5') || lower.includes('opus5.5')) return toFallback(anthropicModelOptions, 'claude-opus-5-5')
 	if (lower.includes('opus-5') || lower.includes('opus5')) return toFallback(anthropicModelOptions, 'claude-opus-5')
 	if (lower.includes('opus-4-8') || lower.includes('opus-4.8')) return toFallback(anthropicModelOptions, 'claude-opus-4-8')
+	if (lower.includes('sonnet-5-5') || lower.includes('sonnet-5.5') || lower.includes('sonnet5.5')) return toFallback(anthropicModelOptions, 'claude-sonnet-5-5')
 	if (lower.includes('sonnet-5') || lower.includes('sonnet5')) return toFallback(anthropicModelOptions, 'claude-sonnet-5')
 	if (lower.includes('opus-4-7') || lower.includes('opus-4.7')) return toFallback(anthropicModelOptions, 'claude-opus-4-7')
 	if (lower.includes('sonnet-4-6') || lower.includes('sonnet-4.6')) return toFallback(anthropicModelOptions, 'claude-sonnet-4-6')
@@ -519,6 +522,7 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 	if (lower.includes('quasar') || lower.includes('quaser')) return toFallback(openSourceModelOptions_assumingOAICompat, 'quasar')
 
 	if (lower.includes('gpt') && (lower.includes('astra') || lower.includes('gpt-6') || lower.includes('gpt6'))) {
+		if (lower.includes('6.1') || lower.includes('6-1')) return toFallback(openAIModelOptions, 'gpt-6.1-sol')
 		if (lower.includes('luna')) return toFallback(openAIModelOptions, 'gpt-6-luna')
 		if (lower.includes('sol')) return toFallback(openAIModelOptions, 'gpt-6-sol')
 		return toFallback(openAIModelOptions, 'gpt-6-astra')
@@ -635,6 +639,16 @@ const anthropicModelOptions = {
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
 	},
+	'claude-sonnet-5-5': { // https://platform.claude.com/docs/en/models/sonnet-5-5/overview — adaptive, default effort high
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 128_000,
+		cost: { input: 2.00, cache_read: 0.20, cache_write: 2.50, output: 10.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'anthropic-style',
+		supportsSystemMessage: 'separated',
+		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
+	},
 	'claude-sonnet-5': {
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 128_000,
@@ -724,6 +738,7 @@ const anthropicSettings: VoidStaticProviderInfo = {
 		else if (lower.includes('opus-5-5') || lower.includes('opus-5.5') || lower.includes('opus5.5')) fallbackName = 'claude-opus-5-5'
 		else if (lower.includes('opus-5') || lower.includes('opus5')) fallbackName = 'claude-opus-5'
 		else if (lower.includes('opus-4-8') || lower.includes('opus-4.8')) fallbackName = 'claude-opus-4-8'
+		else if (lower.includes('sonnet-5-5') || lower.includes('sonnet-5.5') || lower.includes('sonnet5.5')) fallbackName = 'claude-sonnet-5-5'
 		else if (lower.includes('sonnet-5') || lower.includes('sonnet5')) fallbackName = 'claude-sonnet-5'
 		else if (lower.includes('opus-4-7') || lower.includes('opus-4.7')) fallbackName = 'claude-opus-4-7'
 		else if (lower.includes('sonnet-4-6') || lower.includes('sonnet-4.6')) fallbackName = 'claude-sonnet-4-6'
@@ -781,6 +796,17 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsFIM: false,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		reasoningCapabilities: openAI6ReasoningEffortCapabilities,
+	},
+	'gpt-6.1-sol': { // upgrade to GPT-6 Sol — https://developers.openai.com/api/docs/models/gpt-6.1-sol
+		contextWindow: 1_050_000,
+		reservedOutputTokenSpace: 128_000,
+		cost: { input: 2.00, output: 10.00, cache_read: 0.10 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'developer-role',
+		// low / medium (default) / high / xhigh / max — 'none' and 'minimal' are rejected, same set as Astra
 		reasoningCapabilities: openAI6ReasoningEffortCapabilities,
 	},
 	'gpt-6-sol': { // coding / agents — https://developers.openai.com/api/docs/models/gpt-6-sol
@@ -903,7 +929,8 @@ const openAISettings: VoidStaticProviderInfo = {
 		const lower = modelName.toLowerCase()
 		let fallbackName: keyof typeof openAIModelOptions | null = null
 		if (lower.includes('gpt-6') || lower.includes('gpt6') || lower.includes('astra')) {
-			if (lower.includes('luna')) fallbackName = 'gpt-6-luna'
+			if (lower.includes('6.1') || lower.includes('6-1')) fallbackName = 'gpt-6.1-sol'
+			else if (lower.includes('luna')) fallbackName = 'gpt-6-luna'
 			else if (lower.includes('sol')) fallbackName = 'gpt-6-sol'
 			else fallbackName = 'gpt-6-astra'
 		}
@@ -1868,6 +1895,12 @@ const openRouterModelOptions_assumingOpenAICompat = {
 		specialToolFormat: 'openai-style',
 		downloadable: false,
 	},
+	'anthropic/claude-sonnet-5.5': {
+		...anthropicModelOptions['claude-sonnet-5-5'],
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		downloadable: false,
+	},
 	'anthropic/claude-sonnet-5': {
 		...anthropicModelOptions['claude-sonnet-5'],
 		supportsSystemMessage: 'system-role',
@@ -1908,6 +1941,10 @@ const openRouterModelOptions_assumingOpenAICompat = {
 		...openAIModelOptions['gpt-6-astra'],
 		downloadable: false,
 	},
+	'openai/gpt-6.1-sol': {
+		...openAIModelOptions['gpt-6.1-sol'],
+		downloadable: false,
+	},
 	'openai/gpt-6-sol': {
 		...openAIModelOptions['gpt-6-sol'],
 		downloadable: false,
@@ -1931,6 +1968,22 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	'x-ai/grok-4.6': {
 		...xAIModelOptions['grok-4.6'],
 		downloadable: false,
+	},
+	'mistralai/mistral-large-4-0': { // Mistral Large 4 (public preview) — https://openrouter.ai/mistralai/mistral-large-4-0
+		contextWindow: 524_288,
+		reservedOutputTokenSpace: 262_144,
+		cost: { input: 0.68, cache_read: 0.07, output: 2.09 }, // promotional rate; list price is double
+		downloadable: { sizeGb: 'not-known' }, // open-weight
+		supportsFIM: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		// Mistral has not documented which reasoning_effort values Large 4 accepts, so no slider.
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canIOReasoning: true,
+			canTurnOffReasoning: false,
+			openSourceThinkTags: ['<think>', '</think>'],
+		},
 	},
 	'mistralai/mistral-large-2512': {
 		...mistralModelOptions['mistral-large-latest'],

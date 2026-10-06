@@ -1397,7 +1397,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		contextWindow: 524_288,
 		reservedOutputTokenSpace: 262_144,
 		cost: { input: 0.68, cache_read: 0.07, output: 2.09 }, // promotional rate; list price is double
-		supportsFIM: false, // not documented for Large 4 (Large 3 has it)
+		supportsFIM: true, // Activer le FIM
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' }, // open-weight, weights announced for end of October 2026
 		supportsSystemMessage: 'system-role',
@@ -1454,7 +1454,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 0.40, output: 2.00 },
-		supportsFIM: false,
+		supportsFIM: true, // Activer le FIM
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -1464,7 +1464,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 4_096,
 		cost: { input: 0.20, output: 0.20 },
-		supportsFIM: false,
+		supportsFIM: true, // Activer le FIM
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -1474,7 +1474,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 4_096,
 		cost: { input: 0.15, output: 0.15 },
-		supportsFIM: false,
+		supportsFIM: true, // Activer le FIM
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 4.1 },
 		supportsSystemMessage: 'system-role',
@@ -1484,7 +1484,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 4_096,
 		cost: { input: 0.10, output: 0.10 },
-		supportsFIM: false,
+		supportsFIM: true, // Activer le FIM
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',

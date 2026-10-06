@@ -156,6 +156,7 @@ export const defaultModelsOfProvider = {
 	mistral: [ // https://docs.mistral.ai/getting-started/models/models_overview/
 		'zai-glm-5-3',
 		'zai-glm-5-2',
+		'mistral-large-4',
 		'mistral-large-latest',
 		'mistral-medium-latest',
 		'mistral-small-latest',
@@ -509,6 +510,7 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 	}
 
 	if (lower.includes('ministral')) return toFallback(mistralModelOptions, 'ministral-8b-latest')
+	if (lower.includes('mistral') && (lower.includes('large-4') || lower.includes('large-26'))) return toFallback(mistralModelOptions, 'mistral-large-4')
 	if (lower.includes('mistral') && lower.includes('medium')) return toFallback(mistralModelOptions, 'mistral-medium-latest')
 	if (lower.includes('mistral') && lower.includes('small')) return toFallback(mistralModelOptions, 'mistral-small-latest')
 	if (lower.includes('mistral')) return toFallback(mistralModelOptions, 'mistral-large-latest')
@@ -1390,6 +1392,24 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 			openSourceThinkTags: ['<think>', '</think>'] as [string, string],
 		},
 	},
+	'mistral-large-4': { // Mistral Large 4 "Le Chonk", public preview — https://docs.mistral.ai/models/mistral-large-4-0
+		// Mistral's model page claims 1M, but the preview API and every gateway report 512k; keep the lower bound.
+		contextWindow: 524_288,
+		reservedOutputTokenSpace: 262_144,
+		cost: { input: 0.68, cache_read: 0.07, output: 2.09 }, // promotional rate; list price is double
+		supportsFIM: false, // not documented for Large 4 (Large 3 has it)
+		specialToolFormat: 'openai-style',
+		downloadable: { sizeGb: 'not-known' }, // open-weight, weights announced for end of October 2026
+		supportsSystemMessage: 'system-role',
+		// reasoning_effort is accepted ('high' in Mistral's own example) but the allowed
+		// enum is undocumented for this model, so no slider — sending a wrong value 400s.
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canIOReasoning: true,
+			canTurnOffReasoning: false,
+			openSourceThinkTags: ['<think>', '</think>'] as [string, string],
+		},
+	},
 	'mistral-large-latest': { // Mistral Large 3 — https://docs.mistral.ai/models/model-cards/mistral-large-3-25-12
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 8_192,
@@ -1488,6 +1508,7 @@ const mistralSettings: VoidStaticProviderInfo = {
 			else if (lower.includes('8')) fallbackName = 'ministral-8b-latest'
 			else fallbackName = 'ministral-3b-latest'
 		}
+		else if (lower.includes('large-4') || lower.includes('large-26')) fallbackName = 'mistral-large-4'
 		else if (lower.includes('mistral-large') || lower.includes('large-25')) fallbackName = 'mistral-large-latest'
 		else if (lower.includes('mistral-medium') || lower.includes('medium-3')) fallbackName = 'mistral-medium-latest'
 		else if (lower.includes('mistral-small') || lower.includes('small-26') || lower.includes('small-4')) fallbackName = 'mistral-small-latest'
@@ -1969,21 +1990,9 @@ const openRouterModelOptions_assumingOpenAICompat = {
 		...xAIModelOptions['grok-4.6'],
 		downloadable: false,
 	},
-	'mistralai/mistral-large-4-0': { // Mistral Large 4 (public preview) — https://openrouter.ai/mistralai/mistral-large-4-0
-		contextWindow: 524_288,
-		reservedOutputTokenSpace: 262_144,
-		cost: { input: 0.68, cache_read: 0.07, output: 2.09 }, // promotional rate; list price is double
-		downloadable: { sizeGb: 'not-known' }, // open-weight
-		supportsFIM: false,
-		specialToolFormat: 'openai-style',
-		supportsSystemMessage: 'system-role',
-		// Mistral has not documented which reasoning_effort values Large 4 accepts, so no slider.
-		reasoningCapabilities: {
-			supportsReasoning: true,
-			canIOReasoning: true,
-			canTurnOffReasoning: false,
-			openSourceThinkTags: ['<think>', '</think>'],
-		},
+	'mistralai/mistral-large-4-0': {
+		...mistralModelOptions['mistral-large-4'],
+		downloadable: false,
 	},
 	'mistralai/mistral-large-2512': {
 		...mistralModelOptions['mistral-large-latest'],

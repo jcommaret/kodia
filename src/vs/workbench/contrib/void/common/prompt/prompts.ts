@@ -262,6 +262,34 @@ export const builtinTools: {
 		}
 	},
 
+	go_to_definition: {
+		name: 'go_to_definition',
+		description: `Finds where a symbol (function, class, method, type, variable...) is defined, using the language server. More precise than text search: it follows imports and ignores unrelated symbols with the same name. Returns each definition's path, line and first lines of code.`,
+		params: {
+			...uriParam('file where the symbol appears'),
+			line: { description: 'The line number (1-based) where the symbol appears in that file.' },
+			symbol: { description: 'The symbol exactly as written on that line, e.g. `getUser` (not `api.getUser`).' },
+		}
+	},
+
+	find_references: {
+		name: 'find_references',
+		description: `Finds every place a symbol is used across the workspace, using the language server — e.g. all the callers of a function before changing its signature. Returns paths and lines.`,
+		params: {
+			...uriParam('file where the symbol appears'),
+			line: { description: 'The line number (1-based) where the symbol appears in that file.' },
+			symbol: { description: 'The symbol exactly as written on that line, e.g. `getUser` (not `api.getUser`).' },
+		}
+	},
+
+	search_symbols: {
+		name: 'search_symbols',
+		description: `Searches the whole workspace for symbols (functions, classes, types, variables...) by name, using the language server. Use it to find where something is defined when you know its name but not its file.`,
+		params: {
+			query: { description: 'The symbol name, or part of it.' },
+		}
+	},
+
 	read_lint_errors: {
 		name: 'read_lint_errors',
 		description: `Use this tool to view all the lint errors on a file.`,

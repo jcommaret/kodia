@@ -1,5 +1,13 @@
-import { CancellationToken } from '../../../../base/common/cancellation.js'
+import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js'
 import { URI } from '../../../../base/common/uri.js'
+import { IReference } from '../../../../base/common/lifecycle.js'
+import { Position } from '../../../../editor/common/core/position.js'
+import { IRange } from '../../../../editor/common/core/range.js'
+import { ITextModel } from '../../../../editor/common/model.js'
+import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js'
+import { IResolvedTextEditorModel, ITextModelService } from '../../../../editor/common/services/resolverService.js'
+import { getDefinitionsAtPosition, getReferencesAtPosition } from '../../../../editor/contrib/gotoSymbol/browser/goToSymbol.js'
+import { getWorkspaceSymbols, WorkspaceSymbolProviderRegistry } from '../../search/common/search.js'
 import { IFileService } from '../../../../platform/files/common/files.js'
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js'
 import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js'
@@ -8,13 +16,13 @@ import { QueryBuilder } from '../../../services/search/common/queryBuilder.js'
 import { ISearchService } from '../../../services/search/common/search.js'
 import { IEditCodeService } from './editCodeServiceInterface.js'
 import { ITerminalToolService } from './terminalToolService.js'
-import { LintErrorItem, BuiltinToolCallParams, BuiltinToolResultType, BuiltinToolName } from '../common/toolsServiceTypes.js'
+import { LintErrorItem, BuiltinToolCallParams, BuiltinToolResultType, BuiltinToolName, CodeLocation } from '../common/toolsServiceTypes.js'
 import { IVoidModelService } from '../common/voidModelService.js'
 import { EndOfLinePreference } from '../../../../editor/common/model.js'
 import { IVoidCommandBarService } from './voidCommandBarServiceInterface.js'
 import { computeDirectoryTree1Deep, IDirectoryStrService, stringifyDirectoryTree1Deep } from '../common/directoryStrService.js'
 import { IMarkerService, MarkerSeverity } from '../../../../platform/markers/common/markers.js'
-import { timeout } from '../../../../base/common/async.js'
+import { raceTimeout, timeout } from '../../../../base/common/async.js'
 import { RawToolParamsObj } from '../common/sendLLMMessageTypes.js'
 import { MAX_CHILDREN_URIs_PAGE, MAX_FILE_CHARS_PAGE, MAX_PROJECT_MEMORY_TOKENS, MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_INACTIVE_TIME } from '../common/prompt/prompts.js'
 import { IVoidSettingsService } from '../common/voidSettingsService.js'
@@ -121,6 +129,75 @@ const validateBoolean = (b: unknown, opts: { default: boolean }) => {
 }
 
 
+const validateLine = (lineUnknown: unknown) => {
+	const line = validateNumber(lineUnknown, { default: null })
+	if (line === null || line < 1) throw new Error(`Invalid LLM output: line must be a line number (1 or greater), but it was ${JSON.stringify(lineUnknown)}.`)
+	return line
+}
+
+
+// --- language-server (LSP) tools ---
+
+const LANGUAGE_SERVER_TIMEOUT_MS = 20_000
+const MAX_LANGUAGE_SERVER_RESULTS = 50
+const DEFINITION_SNIPPET_LINES = 5
+
+// indexed by SymbolKind (a const enum); symbolKindNames from languages.ts is localized, and this text goes to the LLM
+const symbolKindNames = ['file', 'module', 'namespace', 'package', 'class', 'method', 'property', 'field', 'constructor', 'enum', 'interface', 'function', 'variable', 'constant', 'string', 'number', 'boolean', 'array', 'object', 'key', 'null', 'enum member', 'struct', 'event', 'operator', 'type parameter']
+
+const isIdentifierChar = (c: string | undefined) => c !== undefined && /[\p{L}\p{N}_$]/u.test(c)
+
+// 1-based column of `name` on the line, preferring a whole-identifier match over a substring
+const columnOfIdentifier = (lineContent: string, name: string): number | null => {
+	let substringMatch: number | null = null
+	for (let i = lineContent.indexOf(name); i !== -1; i = lineContent.indexOf(name, i + 1)) {
+		if (!isIdentifierChar(lineContent[i - 1]) && !isIdentifierChar(lineContent[i + name.length])) return i + 1
+		substringMatch ??= i + 1
+	}
+	return substringMatch
+}
+
+// Where `symbol` is, at or near `line`: LLMs are often off by a line or two. For `a.b` or `a::b`, the last part.
+const positionOfSymbol = (model: ITextModel, line: number, symbol: string): Position => {
+	const name = symbol.split(/\.|::|->/).map(s => s.trim()).filter(s => s).pop() ?? symbol.trim()
+	const lineCount = model.getLineCount()
+	for (const delta of [0, -1, 1, -2, 2, -3, 3]) {
+		const l = line + delta
+		if (l < 1 || l > lineCount) continue
+		const column = columnOfIdentifier(model.getLineContent(l), name)
+		if (column !== null) return new Position(l, column)
+	}
+	const lineContent = line <= lineCount ? `"${model.getLineContent(line).trim()}"` : `past the end of the file (${lineCount} lines)`
+	throw new Error(`"${symbol}" was not found on line ${line} or the lines around it. Line ${line} is ${lineContent}.`)
+}
+
+// one result per line, in order
+const uniqueByLine = <T extends { uri: URI, range: IRange }>(links: T[]): T[] => {
+	const seen = new Set<string>()
+	return links.filter(l => {
+		const key = `${l.uri.toString()}:${l.range.startLineNumber}`
+		if (seen.has(key)) return false
+		seen.add(key)
+		return true
+	})
+}
+
+// language servers can hang, or still be starting: give up rather than block the agent
+const withLanguageServerTimeout = async <T>(run: (token: CancellationToken) => Promise<T>): Promise<T> => {
+	const cts = new CancellationTokenSource()
+	try {
+		const result = await raceTimeout(run(cts.token), LANGUAGE_SERVER_TIMEOUT_MS, () => cts.cancel())
+		if (result === undefined) throw new Error(`The language server did not answer within ${LANGUAGE_SERVER_TIMEOUT_MS / 1000}s (it may still be starting). Try again, or use search_for_files.`)
+		return result
+	}
+	finally {
+		cts.dispose()
+	}
+}
+
+const noLanguageServerMessage = (what: string) => `No language server provides ${what} here, so this tool can't answer. Use search_for_files or search_in_file instead.`
+
+
 const checkIfIsFolder = (uriStr: string) => {
 	uriStr = uriStr.trim()
 	if (uriStr.endsWith('/') || uriStr.endsWith('\\')) return true
@@ -157,8 +234,40 @@ export class ToolsService implements IToolsService {
 		@IMarkerService private readonly markerService: IMarkerService,
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 		@IStorageService private readonly storageService: IStorageService,
+		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
+		@ITextModelService textModelService: ITextModelService,
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
+
+		const modelOfFile = async (uri: URI) => {
+			await voidModelService.initializeModel(uri)
+			const { model } = await voidModelService.getModelSafe(uri)
+			if (model === null) { throw new Error(`No contents; File does not exist.`) }
+			return model
+		}
+
+		// The code at each location, `nLines` lines from its start. Each file is loaded once and released
+		// afterwards (unlike voidModelService, which keeps files open), since references can span many files.
+		const codeLocationsOf = async (links: { uri: URI, range: IRange }[], nLines: number): Promise<CodeLocation[]> => {
+			const refOfURI = new Map<string, IReference<IResolvedTextEditorModel> | null>()
+			try {
+				const locations: CodeLocation[] = []
+				for (const { uri, range } of links) {
+					const key = uri.toString()
+					if (!refOfURI.has(key)) refOfURI.set(key, await textModelService.createModelReference(uri).catch(() => null))
+					const model = refOfURI.get(key)?.object.textEditorModel
+
+					const line = range.startLineNumber
+					const lastLine = model ? Math.min(line + nLines - 1, model.getLineCount()) : line
+					const snippet = model ? model.getValueInRange({ startLineNumber: line, startColumn: 1, endLineNumber: lastLine, endColumn: Number.MAX_SAFE_INTEGER }, EndOfLinePreference.LF) : ''
+					locations.push({ uri, line, snippet })
+				}
+				return locations
+			}
+			finally {
+				for (const ref of refOfURI.values()) ref?.dispose()
+			}
+		}
 
 		this.validateParams = {
 			read_file: (params: RawToolParamsObj) => {
@@ -224,6 +333,28 @@ export class ToolsService implements IToolsService {
 				const query = validateStr('query', queryUnknown);
 				const isRegex = validateBoolean(isRegexUnknown, { default: false });
 				return { uri, query, isRegex };
+			},
+			go_to_definition: (params: RawToolParamsObj) => {
+				const { uri: uriStr, line: lineUnknown, symbol: symbolUnknown } = params
+				const uri = validateURI(uriStr)
+				const line = validateLine(lineUnknown)
+				const symbol = validateStr('symbol', symbolUnknown).trim()
+				if (!symbol) throw new Error(`Invalid LLM output: symbol was empty.`)
+				return { uri, line, symbol }
+			},
+			find_references: (params: RawToolParamsObj) => {
+				const { uri: uriStr, line: lineUnknown, symbol: symbolUnknown } = params
+				const uri = validateURI(uriStr)
+				const line = validateLine(lineUnknown)
+				const symbol = validateStr('symbol', symbolUnknown).trim()
+				if (!symbol) throw new Error(`Invalid LLM output: symbol was empty.`)
+				return { uri, line, symbol }
+			},
+			search_symbols: (params: RawToolParamsObj) => {
+				const { query: queryUnknown } = params
+				const query = validateStr('query', queryUnknown).trim()
+				if (!query) throw new Error(`Invalid LLM output: query was empty.`)
+				return { query }
 			},
 
 			read_lint_errors: (params: RawToolParamsObj) => {
@@ -403,6 +534,54 @@ export class ToolsService implements IToolsService {
 				return { result: { lines } };
 			},
 
+			go_to_definition: async ({ uri, line, symbol }) => {
+				const model = await modelOfFile(uri)
+				const position = positionOfSymbol(model, line, symbol)
+				const registry = languageFeaturesService.definitionProvider
+				if (!registry.has(model)) return { result: { locations: [], hasLanguageServer: false } }
+
+				const links = await withLanguageServerTimeout(token => getDefinitionsAtPosition(registry, model, position, false, token))
+				// targetSelectionRange is the symbol's name; range can span a whole class
+				const definitions = uniqueByLine(links.map(l => ({ uri: l.uri, range: l.targetSelectionRange ?? l.range })))
+				const locations = await codeLocationsOf(definitions.slice(0, MAX_LANGUAGE_SERVER_RESULTS), DEFINITION_SNIPPET_LINES)
+				return { result: { locations, hasLanguageServer: true } }
+			},
+
+			find_references: async ({ uri, line, symbol }) => {
+				const model = await modelOfFile(uri)
+				const position = positionOfSymbol(model, line, symbol)
+				const registry = languageFeaturesService.referenceProvider
+				if (!registry.has(model)) return { result: { locations: [], totalCount: 0, hasLanguageServer: false } }
+
+				const links = await withLanguageServerTimeout(token => getReferencesAtPosition(registry, model, position, false, false, token))
+				const references = uniqueByLine(links)
+				const locations = await codeLocationsOf(references.slice(0, MAX_LANGUAGE_SERVER_RESULTS), 1)
+				return { result: { locations, totalCount: references.length, hasLanguageServer: true } }
+			},
+
+			search_symbols: async ({ query }) => {
+				if (WorkspaceSymbolProviderRegistry.all().length === 0) return { result: { symbols: [], totalCount: 0, hasLanguageServer: false } }
+
+				const items = await withLanguageServerTimeout(token => getWorkspaceSymbols(query, token))
+				// exact name first, then case-insensitive, then prefix, then the rest (sort is stable)
+				const lowerQuery = query.toLowerCase()
+				const rank = (name: string) => name === query ? 0 : name.toLowerCase() === lowerQuery ? 1 : name.toLowerCase().startsWith(lowerQuery) ? 2 : 3
+				const symbols = items.map(i => i.symbol).sort((a, b) => rank(a.name) - rank(b.name))
+				return {
+					result: {
+						symbols: symbols.slice(0, MAX_LANGUAGE_SERVER_RESULTS).map(s => ({
+							name: s.name,
+							kind: symbolKindNames[s.kind] ?? 'symbol',
+							containerName: s.containerName || undefined,
+							uri: s.location.uri,
+							line: s.location.range?.startLineNumber,
+						})),
+						totalCount: symbols.length,
+						hasLanguageServer: true,
+					}
+				}
+			},
+
 			read_lint_errors: async ({ uri }) => {
 				await timeout(1000)
 				const { lintErrors } = this._getLintErrors(uri)
@@ -527,6 +706,37 @@ export class ToolsService implements IToolsService {
 					return `Line ${n}:\n\`\`\`\n${lineContent}\n\`\`\``
 				}).join('\n\n');
 				return lines;
+			},
+			go_to_definition: (params, result) => {
+				if (!result.hasLanguageServer) return noLanguageServerMessage('definitions for this file type')
+				if (result.locations.length === 0) return `No definition found for "${params.symbol}".`
+				return result.locations.map(l => `${l.uri.fsPath}:${l.line}\n\`\`\`\n${l.snippet}\n\`\`\``).join('\n\n')
+			},
+			find_references: (params, result) => {
+				if (!result.hasLanguageServer) return noLanguageServerMessage('references for this file type')
+				if (result.locations.length === 0) return `No references found for "${params.symbol}".`
+
+				// grouped by file, in the language server's order
+				const linesOfFile = new Map<string, string[]>()
+				for (const l of result.locations) {
+					const lines = linesOfFile.get(l.uri.fsPath) ?? []
+					lines.push(`  ${l.line}: ${l.snippet.trim()}`)
+					linesOfFile.set(l.uri.fsPath, lines)
+				}
+				const str = [...linesOfFile].map(([fsPath, lines]) => `${fsPath}\n${lines.join('\n')}`).join('\n\n')
+				const truncated = result.totalCount > result.locations.length ? `\n\n(Showing ${result.locations.length} of ${result.totalCount} references.)` : ''
+				return str + truncated
+			},
+			search_symbols: (params, result) => {
+				if (!result.hasLanguageServer) return noLanguageServerMessage('workspace symbols')
+				if (result.symbols.length === 0) return `No symbols match "${params.query}". The language server may not have loaded the project yet (reading one of its files helps) — or use search_for_files.`
+
+				const str = result.symbols.map(s => {
+					const where = s.line ? `${s.uri.fsPath}:${s.line}` : s.uri.fsPath
+					return `${s.name} (${s.kind}${s.containerName ? `, in ${s.containerName}` : ''}) — ${where}`
+				}).join('\n')
+				const truncated = result.totalCount > result.symbols.length ? `\n\n(Showing ${result.symbols.length} of ${result.totalCount} symbols. Use a more specific query to narrow it down.)` : ''
+				return str + truncated
 			},
 			read_lint_errors: (params, result) => {
 				return result.lintErrors ?

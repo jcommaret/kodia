@@ -1484,6 +1484,9 @@ const titleOfBuiltinToolName = {
 
 	'read_lint_errors': { done: `Read lint errors`, proposed: 'Read lint errors', running: loadingTitleWrapper('Reading lint errors') },
 	'search_in_file': { done: 'Searched in file', proposed: 'Search in file', running: loadingTitleWrapper('Searching in file') },
+	'go_to_definition': { done: 'Went to definition', proposed: 'Go to definition', running: loadingTitleWrapper('Going to definition') },
+	'find_references': { done: 'Found references', proposed: 'Find references', running: loadingTitleWrapper('Finding references') },
+	'search_symbols': { done: 'Searched symbols', proposed: 'Search symbols', running: loadingTitleWrapper('Searching symbols') },
 	'read_project_memory': { done: 'Read project memory', proposed: 'Read project memory', running: loadingTitleWrapper('Reading project memory') },
 	'write_project_memory': { done: 'Saved project memory', proposed: 'Save project memory', running: loadingTitleWrapper('Saving project memory') },
 } as const satisfies Record<BuiltinToolName, { done: any, proposed: any, running: any }>
@@ -1562,6 +1565,26 @@ const toolNameToDesc = (toolName: BuiltinToolName, _toolParams: BuiltinToolCallP
 			return {
 				desc1: `"${toolParams.query}"`,
 				desc1Info: getRelative(toolParams.uri, accessor),
+			};
+		},
+		'go_to_definition': () => {
+			const toolParams = _toolParams as BuiltinToolCallParams['go_to_definition'];
+			return {
+				desc1: toolParams.symbol,
+				desc1Info: `${getRelative(toolParams.uri, accessor)}:${toolParams.line}`,
+			};
+		},
+		'find_references': () => {
+			const toolParams = _toolParams as BuiltinToolCallParams['find_references'];
+			return {
+				desc1: toolParams.symbol,
+				desc1Info: `${getRelative(toolParams.uri, accessor)}:${toolParams.line}`,
+			};
+		},
+		'search_symbols': () => {
+			const toolParams = _toolParams as BuiltinToolCallParams['search_symbols'];
+			return {
+				desc1: `"${toolParams.query}"`,
 			};
 		},
 		'create_file_or_folder': () => {
@@ -1934,6 +1957,41 @@ const CommandTool = ({ toolMessage, type, threadId }: { threadId: string } & ({
 }
 
 type WrapperProps<T extends ToolName> = { toolMessage: Exclude<ToolMessage<T>, { type: 'invalid_params' }>, messageIdx: number, threadId: string }
+
+// go_to_definition, find_references and search_symbols: shows the same text the LLM received
+type LanguageServerToolName = 'go_to_definition' | 'find_references' | 'search_symbols'
+const LanguageServerToolWrapper = ({ toolMessage, numResults, resultStr }: { toolMessage: WrapperProps<LanguageServerToolName>['toolMessage'], numResults?: number, resultStr?: string }) => {
+	const accessor = useAccessor()
+	const title = getTitle(toolMessage)
+	const { desc1, desc1Info } = toolNameToDesc(toolMessage.name, toolMessage.params, accessor)
+
+	if (toolMessage.type === 'tool_request') return null // do not show past requests
+	if (toolMessage.type === 'running_now') return null // do not show running
+
+	const componentParams: ToolHeaderParams = { title, desc1, desc1Info, isError: false, icon: null, isRejected: toolMessage.type === 'rejected' }
+
+	if (toolMessage.type === 'success') {
+		componentParams.numResults = numResults
+		componentParams.children = !resultStr ? undefined :
+			<ToolChildrenWrapper>
+				<CodeChildren className='bg-void-bg-3'>
+					<pre className='font-mono whitespace-pre'>
+						{resultStr}
+					</pre>
+				</CodeChildren>
+			</ToolChildrenWrapper>
+	}
+	else if (toolMessage.type === 'tool_error') {
+		componentParams.bottomChildren = <BottomChildren title='Error'>
+			<CodeChildren>
+				{toolMessage.result}
+			</CodeChildren>
+		</BottomChildren>
+	}
+
+	return <ToolHeaderWrapper {...componentParams} />
+}
+
 const MCPToolWrapper = ({ toolMessage }: WrapperProps<string>) => {
 	const accessor = useAccessor()
 	const mcpService = accessor.get('IMCPService')
@@ -2286,6 +2344,42 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			}
 
 			return <ToolHeaderWrapper {...componentParams} />;
+		}
+	},
+
+	'go_to_definition': {
+		resultWrapper: ({ toolMessage }) => {
+			const toolsService = useAccessor().get('IToolsService')
+			const success = toolMessage.type === 'success' ? toolMessage : null
+			return <LanguageServerToolWrapper
+				toolMessage={toolMessage}
+				numResults={success?.result.locations.length}
+				resultStr={success ? toolsService.stringOfResult['go_to_definition'](success.params, success.result) : undefined}
+			/>
+		}
+	},
+
+	'find_references': {
+		resultWrapper: ({ toolMessage }) => {
+			const toolsService = useAccessor().get('IToolsService')
+			const success = toolMessage.type === 'success' ? toolMessage : null
+			return <LanguageServerToolWrapper
+				toolMessage={toolMessage}
+				numResults={success?.result.totalCount}
+				resultStr={success ? toolsService.stringOfResult['find_references'](success.params, success.result) : undefined}
+			/>
+		}
+	},
+
+	'search_symbols': {
+		resultWrapper: ({ toolMessage }) => {
+			const toolsService = useAccessor().get('IToolsService')
+			const success = toolMessage.type === 'success' ? toolMessage : null
+			return <LanguageServerToolWrapper
+				toolMessage={toolMessage}
+				numResults={success?.result.totalCount}
+				resultStr={success ? toolsService.stringOfResult['search_symbols'](success.params, success.result) : undefined}
+			/>
 		}
 	},
 

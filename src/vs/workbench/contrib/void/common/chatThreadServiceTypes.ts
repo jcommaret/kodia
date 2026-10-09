@@ -5,8 +5,9 @@
 
 import { URI } from '../../../../base/common/uri.js';
 import { VoidFileSnapshot } from './editCodeServiceTypes.js';
-import { AnthropicReasoning, RawToolParamsObj } from './sendLLMMessageTypes.js';
+import { AnthropicReasoning, LLMUsage, RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { ToolCallParams, ToolName, ToolResult } from './toolsServiceTypes.js';
+import { ModelSelection } from './voidSettingsTypes.js';
 
 export type ToolMessage<T extends ToolName> = {
 	role: 'tool';
@@ -63,6 +64,10 @@ export type ChatMessage =
 		reasoning: string; // reasoning from the LLM, used for step-by-step thinking
 
 		anthropicReasoning: AnthropicReasoning[] | null; // anthropic reasoning
+
+		// both optional: absent on messages stored before they existed
+		modelSelection?: ModelSelection; // the model that produced this message — its anthropicReasoning signatures are only valid for that model
+		usage?: LLMUsage; // tokens of the request that produced this message
 	}
 	| ToolMessage<ToolName>
 	| DecorativeCanceledTool

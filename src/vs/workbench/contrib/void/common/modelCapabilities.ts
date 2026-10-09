@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { FeatureName, ModelSelectionOptions, OverridesOfModel, ProviderName } from './voidSettingsTypes.js';
+import { LLMUsage } from './sendLLMMessageTypes.js';
 
 
 
@@ -2146,6 +2147,17 @@ export const getModelCapabilities = (
 	}
 
 	return { modelName, ...defaultModelOptions, ...overrides, isUnrecognizedModel: true };
+}
+
+// Dollars for one request. `cost` is per million tokens; cache rates fall back to the input rate
+// when the catalog doesn't list them.
+export const getUsageCost = (usage: LLMUsage, cost: VoidStaticModelInfo['cost']): number => {
+	return (
+		usage.input * cost.input
+		+ usage.output * cost.output
+		+ (usage.cacheRead ?? 0) * (cost.cache_read ?? cost.input)
+		+ (usage.cacheWrite ?? 0) * (cost.cache_write ?? cost.input)
+	) / 1_000_000
 }
 
 // non-model settings

@@ -100,8 +100,10 @@ export type LLMUsage = {
 	cacheWrite?: number;
 }
 
+// toolCall: the call currently being streamed (the latest one, when a turn makes several) — for display only
 export type OnText = (p: { fullText: string; fullReasoning: string; toolCall?: RawToolCallObj }) => void
-export type OnFinalMessage = (p: { fullText: string; fullReasoning: string; toolCall?: RawToolCallObj; anthropicReasoning: AnthropicReasoning[] | null; usage?: LLMUsage }) => void // id is tool_use_id
+// toolCalls: every call of the turn, in the order the model made them (models can call several tools at once)
+export type OnFinalMessage = (p: { fullText: string; fullReasoning: string; toolCalls?: RawToolCallObj[]; anthropicReasoning: AnthropicReasoning[] | null; usage?: LLMUsage }) => void // id is tool_use_id
 export type OnError = (p: { message: string; fullError: Error | null }) => void
 export type OnAbort = () => void
 export type AbortRef = { current: (() => void) | null }

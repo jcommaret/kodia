@@ -351,14 +351,13 @@ export const extractXMLToolsWrapper = (
 		newOnText({ ...params })
 
 		fullText = fullText.trimEnd()
-		const toolCall = latestToolCall
 
 		// console.log('final message!!!', trueFullText)
 		// console.log('----- returning ----\n', fullText)
 		// console.log('----- tools ----\n', JSON.stringify(firstToolCallRef.current, null, 2))
-		// console.log('----- toolCall ----\n', JSON.stringify(toolCall, null, 2))
 
-		onFinalMessage({ ...params, fullText, toolCall: toolCall })
+		// XML tool calling parses a single call per turn
+		onFinalMessage({ ...params, fullText, toolCalls: latestToolCall ? [latestToolCall] : undefined })
 	}
 	return { newOnText, newOnFinalMessage };
 }

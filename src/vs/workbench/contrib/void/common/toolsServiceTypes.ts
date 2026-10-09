@@ -9,6 +9,11 @@ export type TerminalResolveReason = { type: 'timeout' } | { type: 'done', exitCo
 
 export type LintErrorItem = { code: string, message: string, startLineNumber: number, endLineNumber: number }
 
+// a place in the code, with the text there (the LLM can pass uri + line straight back to other tools)
+export type CodeLocation = { uri: URI, line: number, snippet: string }
+
+export type WorkspaceSymbolEntry = { name: string, kind: string, containerName: string | undefined, uri: URI, line: number | undefined }
+
 // Partial of IFileStat
 export type ShallowDirectoryItem = {
 	uri: URI;
@@ -50,6 +55,9 @@ export type BuiltinToolCallParams = {
 	'search_pathnames_only': { query: string, includePattern: string | null, pageNumber: number },
 	'search_for_files': { query: string, isRegex: boolean, searchInFolder: URI | null, pageNumber: number },
 	'search_in_file': { uri: URI, query: string, isRegex: boolean },
+	'go_to_definition': { uri: URI, line: number, symbol: string },
+	'find_references': { uri: URI, line: number, symbol: string },
+	'search_symbols': { query: string },
 	'read_lint_errors': { uri: URI },
 	'read_project_memory': {},
 	// ---
@@ -73,6 +81,10 @@ export type BuiltinToolResultType = {
 	'search_pathnames_only': { uris: URI[], hasNextPage: boolean },
 	'search_for_files': { uris: URI[], hasNextPage: boolean },
 	'search_in_file': { lines: number[]; },
+	// hasLanguageServer: false when no language server answers this request for the file / workspace
+	'go_to_definition': { locations: CodeLocation[], hasLanguageServer: boolean },
+	'find_references': { locations: CodeLocation[], totalCount: number, hasLanguageServer: boolean },
+	'search_symbols': { symbols: WorkspaceSymbolEntry[], totalCount: number, hasLanguageServer: boolean },
 	'read_lint_errors': { lintErrors: LintErrorItem[] | null },
 	'read_project_memory': { content: string },
 	// ---

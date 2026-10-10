@@ -25,6 +25,7 @@ import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '
 import { estimateTokens } from '../../../../common/tokenizer.js';
 import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
+import { dataURLOfChatImage } from '../util/chatImages.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName, LintErrorItem, ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js';
 import { CopyButton, EditToolAcceptRejectButtonsHTML, IconShell1, JumpToFileButton, JumpToTerminalButton, StatusIndicator, StatusIndicatorForApplyButton, useApplyStreamState, useEditToolStreamState } from '../markdown/ApplyBlockHoverButtons.js';
 import { IsRunningType } from '../../../chatThreadService.js';
@@ -715,14 +716,16 @@ export const SelectedFiles = (
 				const thisKey = selection.type === 'CodeSelection' ? selection.type + selection.language + selection.range + selection.state.wasAddedAsCurrentFile + selection.uri.fsPath
 					: selection.type === 'File' ? selection.type + selection.language + selection.state.wasAddedAsCurrentFile + selection.uri.fsPath
 						: selection.type === 'Folder' ? selection.type + selection.language + selection.state + selection.uri.fsPath
-							: i
+							: selection.type === 'Image' ? selection.type + selection.id
+								: i
 
-				const SelectionIcon = (
-					selection.type === 'File' ? File
-						: selection.type === 'Folder' ? Folder
-							: selection.type === 'CodeSelection' ? Text
-								: (undefined as never)
-				)
+				// images show a thumbnail instead of an icon
+				const selectionIcon = selection.type === 'Image'
+					? <img src={dataURLOfChatImage(selection)} alt='' className='h-4 w-auto max-w-8 object-cover rounded-[2px]' />
+					: (() => {
+						const SelectionIcon = selection.type === 'File' ? File : selection.type === 'Folder' ? Folder : Text
+						return <SelectionIcon size={10} />
+					})()
 
 				return <div // container for summarybox and code
 					key={thisKey}
@@ -731,7 +734,7 @@ export const SelectedFiles = (
 					{/* tooltip for file path */}
 					<span className="truncate overflow-hidden text-ellipsis"
 						data-tooltip-id='void-tooltip'
-						data-tooltip-content={getRelative(selection.uri, accessor)}
+						data-tooltip-content={selection.type === 'Image' ? selection.name : getRelative(selection.uri, accessor)}
 						data-tooltip-place='top'
 						data-tooltip-delay-show={3000}
 					>
@@ -779,11 +782,11 @@ export const SelectedFiles = (
 								}
 							}}
 						>
-							{<SelectionIcon size={10} />}
+							{selectionIcon}
 
 							{ // file name and range
-								getBasename(selection.uri.fsPath)
-								+ (selection.type === 'CodeSelection' ? ` (${selection.range[0]}-${selection.range[1]})` : '')
+								selection.type === 'Image' ? selection.name
+									: getBasename(selection.uri.fsPath) + (selection.type === 'CodeSelection' ? ` (${selection.range[0]}-${selection.range[1]})` : '')
 							}
 
 							{selection.type === 'File' && selection.state.wasAddedAsCurrentFile && messageIdx === undefined && currentURI?.fsPath === selection.uri.fsPath ?
@@ -1215,6 +1218,7 @@ const UserMessageComponent = ({ chatMessage, messageIdx, isCheckpointGhost, curr
 		>
 			<VoidInputBox2
 				enableAtToMention
+				enableImageAttachments
 				ref={setTextAreaRef}
 				className='min-h-[81px] max-h-[500px] px-0.5'
 				placeholder="Edit your message..."
@@ -3321,6 +3325,7 @@ export const SidebarChat = () => {
 	>
 		<VoidInputBox2
 			enableAtToMention
+			enableImageAttachments
 			className={`min-h-[81px] px-0.5 py-0.5`}
 			placeholder={`@ to mention, ${keybindingString ? `${keybindingString} to add a selection. ` : ''}Enter instructions...`}
 			onChangeText={onChangeText}

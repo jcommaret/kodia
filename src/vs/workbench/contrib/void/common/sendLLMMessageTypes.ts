@@ -29,6 +29,9 @@ export const getErrorMessage: (error: unknown) => string = (error) => {
 
 
 
+export type AnthropicImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+export type OpenAIImagePart = { type: 'image_url'; image_url: { url: string } }
+
 export type AnthropicLLMChatMessage = {
 	role: 'assistant',
 	content: string | (AnthropicReasoning | { type: 'text'; text: string }
@@ -37,12 +40,15 @@ export type AnthropicLLMChatMessage = {
 } | {
 	role: 'user',
 	content: string | (
-		{ type: 'text'; text: string; } | { type: 'tool_result'; tool_use_id: string; content: string; }
+		{ type: 'text'; text: string; } | { type: 'tool_result'; tool_use_id: string; content: string; } | AnthropicImageBlock
 	)[]
 }
 export type OpenAILLMChatMessage = {
-	role: 'system' | 'user' | 'developer';
+	role: 'system' | 'developer';
 	content: string;
+} | {
+	role: 'user';
+	content: string | ({ type: 'text'; text: string } | OpenAIImagePart)[];
 } | {
 	role: 'assistant',
 	content: string | (AnthropicReasoning | { type: 'text'; text: string })[];
@@ -63,6 +69,7 @@ export type GeminiLLMChatMessage = {
 	role: 'user';
 	parts: (
 		| { text: string; }
+		| { inlineData: { mimeType: string; data: string } }
 		| { functionResponse: { id: string; name: ToolName, response: { output: string } } }
 	)[];
 }

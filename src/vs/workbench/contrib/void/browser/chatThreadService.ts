@@ -52,6 +52,8 @@ const findStagingSelectionIndex = (currentSelections: StagingSelectionItem[] | u
 	for (let i = 0; i < currentSelections.length; i += 1) {
 		const s = currentSelections[i]
 
+		// images have no uri, and each paste is its own image
+		if (s.type === 'Image' || newSelection.type === 'Image') continue
 		if (s.uri.fsPath !== newSelection.uri.fsPath) continue
 
 		if (s.type === 'File' && newSelection.type === 'File') {
@@ -1391,7 +1393,7 @@ We only need to do it for files that were edited since `from`, ie files between 
 			// URIs of user selections
 			if (m.role === 'user') {
 				for (const sel of m.selections ?? []) {
-					addURI(sel.uri)
+					if (sel.uri) addURI(sel.uri) // images have none
 				}
 			}
 			// URIs of files that have been read

@@ -187,6 +187,7 @@ export type VoidStaticModelInfo = { // not stateful
 	supportsSystemMessage: false | 'system-role' | 'developer-role' | 'separated'; // typically you should use 'system-role'. 'separated' means the system message is passed as a separate field (e.g. anthropic)
 	specialToolFormat?: 'openai-style' | 'anthropic-style' | 'gemini-style', // typically you should use 'openai-style'. null means "can't call tools by default", and asks the LLM to output XML in agent mode
 	supportsFIM: boolean; // whether the model was specifically designed for autocomplete or "FIM" ("fill-in-middle" format)
+	supportsVision?: boolean; // whether the model accepts images in user messages. Defaults to false: images are left out (with a note) rather than risking an API error
 
 	additionalOpenAIPayload?: { [key: string]: string } // additional payload in the message body for requests that are openai-compatible (ollama, vllm, openai, openrouter, etc)
 
@@ -230,6 +231,7 @@ export const modelOverrideKeys = [
 	'supportsSystemMessage',
 	'specialToolFormat',
 	'supportsFIM',
+	'supportsVision',
 	'reasoningCapabilities',
 	'additionalOpenAIPayload'
 ] as const
@@ -578,6 +580,7 @@ const anthropicModelOptions = {
 		cost: { input: 10.00, cache_read: 0.25, cache_write: 12.50, output: 50.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -588,6 +591,7 @@ const anthropicModelOptions = {
 		cost: { input: 10.00, cache_read: 0.25, cache_write: 12.50, output: 50.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -598,6 +602,7 @@ const anthropicModelOptions = {
 		cost: { input: 10.00, cache_read: 1.00, cache_write: 12.50, output: 50.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -608,6 +613,7 @@ const anthropicModelOptions = {
 		cost: { input: 4.00, cache_read: 0.20, cache_write: 5.00, output: 20.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -618,6 +624,7 @@ const anthropicModelOptions = {
 		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -628,6 +635,7 @@ const anthropicModelOptions = {
 		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -638,6 +646,7 @@ const anthropicModelOptions = {
 		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -648,6 +657,7 @@ const anthropicModelOptions = {
 		cost: { input: 2.00, cache_read: 0.20, cache_write: 2.50, output: 10.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -658,6 +668,7 @@ const anthropicModelOptions = {
 		cost: { input: 2.00, cache_read: 0.20, cache_write: 2.50, output: 10.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -668,6 +679,7 @@ const anthropicModelOptions = {
 		cost: { input: 3.00, cache_read: 0.30, cache_write: 3.75, output: 15.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -678,6 +690,7 @@ const anthropicModelOptions = {
 		cost: { input: 1.00, cache_read: 0.10, cache_write: 1.25, output: 5.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicThinkingCapabilities,
@@ -688,6 +701,7 @@ const anthropicModelOptions = {
 		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicThinkingCapabilities,
@@ -698,6 +712,7 @@ const anthropicModelOptions = {
 		cost: { input: 3.00, cache_read: 0.30, cache_write: 3.75, output: 15.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicThinkingCapabilities,
@@ -708,6 +723,7 @@ const anthropicModelOptions = {
 		cost: { input: 3.00, cache_read: 0.30, cache_write: 3.75, output: 15.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicThinkingCapabilities,
@@ -797,6 +813,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 10.00, output: 50.00, cache_read: 1.00, cache_write: 12.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI6ReasoningEffortCapabilities,
@@ -807,6 +824,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 2.00, output: 10.00, cache_read: 0.10 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		// low / medium (default) / high / xhigh / max — 'none' and 'minimal' are rejected, same set as Astra
@@ -818,6 +836,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 2.00, output: 10.00, cache_read: 0.20, cache_write: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI6SolLunaReasoningEffortCapabilities,
@@ -828,6 +847,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 0.10, output: 0.50, cache_read: 0.01, cache_write: 0.125 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI6SolLunaReasoningEffortCapabilities,
@@ -838,6 +858,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 4.00, output: 20.00, cache_read: 0.40 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
@@ -848,6 +869,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 2.00, output: 12.00, cache_read: 0.20 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
@@ -858,6 +880,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 0.20, output: 1.20, cache_read: 0.02 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
@@ -868,6 +891,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 5.00, output: 30.00, cache_read: 0.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
@@ -878,6 +902,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 2.50, output: 15.00, cache_read: 0.25 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
@@ -888,6 +913,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 0.75, output: 4.50, cache_read: 0.075 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
@@ -898,6 +924,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		cost: { input: 0.20, output: 1.25, cache_read: 0.02 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
@@ -988,6 +1015,7 @@ const xAIModelOptions = {
 		cost: { input: 2.00, cache_read: 0.50, output: 6.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: xAI46ReasoningEffortCapabilities,
@@ -998,6 +1026,7 @@ const xAIModelOptions = {
 		cost: { input: 2.00, cache_read: 0.50, output: 6.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: xAI46ReasoningEffortCapabilities,
@@ -1008,6 +1037,7 @@ const xAIModelOptions = {
 		cost: { input: 2.00, cache_read: 0.30, output: 6.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: xAI45ReasoningEffortCapabilities,
@@ -1018,6 +1048,7 @@ const xAIModelOptions = {
 		cost: { input: 1.00, cache_read: 0.20, output: 2.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		// Coding/agentic model. It reasons, but xAI's reasoning guide does not list it as
@@ -1034,6 +1065,7 @@ const xAIModelOptions = {
 		cost: { input: 1.25, cache_read: 0.20, output: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: xAIReasoningEffortCapabilities,
@@ -1044,6 +1076,7 @@ const xAIModelOptions = {
 		cost: { input: 1.25, output: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { ...xAIReasoningEffortCapabilities, canTurnOffReasoning: false },
@@ -1054,6 +1087,7 @@ const xAIModelOptions = {
 		cost: { input: 1.25, output: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
@@ -1064,6 +1098,7 @@ const xAIModelOptions = {
 		cost: { input: 1.25, output: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { ...xAIReasoningEffortCapabilities, canTurnOffReasoning: false },
@@ -1116,6 +1151,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 1.25, output: 10.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1132,6 +1168,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 0.15, output: 0.60 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1148,6 +1185,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 0.075, output: 0.30 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1164,6 +1202,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 0.75, cache_read: 0.075, output: 3.75 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: gemini38ReasoningCapabilities,
@@ -1174,6 +1213,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 0.75, output: 3.75 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1190,6 +1230,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 1.50, output: 7.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1206,6 +1247,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 0.15, output: 0.60 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1222,6 +1264,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 0.30, output: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1238,6 +1281,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 0.075, output: 0.30 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1254,6 +1298,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		cost: { input: 2.00, output: 12.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1301,6 +1346,7 @@ const deepseekFlashOptions = { // DeepSeek-V4.1-Flash — https://api-docs.deeps
 	cost: { cache_read: 0.003, input: 0.15, output: 0.60 },
 	downloadable: false,
 	supportsFIM: true,
+	supportsVision: true,
 	specialToolFormat: 'openai-style',
 	supportsSystemMessage: 'system-role',
 	reasoningCapabilities: { supportsReasoning: true, canTurnOffReasoning: true, canIOReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
@@ -1308,7 +1354,7 @@ const deepseekFlashOptions = { // DeepSeek-V4.1-Flash — https://api-docs.deeps
 
 const deepseekModelOptions = {
 	'deepseek-flash': deepseekFlashOptions,
-	'deepseek-v4-flash': deepseekFlashOptions, // legacy alias, still accepted by the API
+	'deepseek-v4-flash': { ...deepseekFlashOptions, supportsVision: false }, // legacy alias, still accepted by the API — DeepSeek only documents vision for deepseek-flash
 	'deepseek-v4-pro': { // https://api-docs.deepseek.com/quick_start/pricing
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 384_000,
@@ -1399,6 +1445,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		reservedOutputTokenSpace: 262_144,
 		cost: { input: 0.68, cache_read: 0.07, output: 2.09 }, // promotional rate; list price is double
 		supportsFIM: true, // Activer le FIM
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' }, // open-weight, weights announced for end of October 2026
 		supportsSystemMessage: 'system-role',
@@ -1416,6 +1463,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 0.50, output: 1.50 },
 		supportsFIM: true, // Activer le FIM
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -1426,6 +1474,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 1.50, output: 7.50 },
 		supportsFIM: true, // Activer le FIM
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -1436,6 +1485,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 0.15, output: 0.60 },
 		supportsFIM: true, // Activer le FIM
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -1466,6 +1516,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		reservedOutputTokenSpace: 4_096,
 		cost: { input: 0.20, output: 0.20 },
 		supportsFIM: true, // Activer le FIM
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -1476,6 +1527,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		reservedOutputTokenSpace: 4_096,
 		cost: { input: 0.15, output: 0.15 },
 		supportsFIM: true, // Activer le FIM
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 4.1 },
 		supportsSystemMessage: 'system-role',
@@ -1486,6 +1538,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		reservedOutputTokenSpace: 4_096,
 		cost: { input: 0.10, output: 0.10 },
 		supportsFIM: true, // Activer le FIM
+		supportsVision: true,
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',

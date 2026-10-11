@@ -301,10 +301,10 @@ const formatTokenCount = (n: number): string => {
 	return `${Math.round(n / 1000)}k`
 }
 
-const formatDollars = (d: number): string => d < 0.01 ? `<$0.01` : `$${d.toFixed(2)}`
+const formatDollars = (d: number): string => d >= 0.01 ? `$${d.toFixed(2)}` : d >= 0.001 ? `$${d.toFixed(3)}` : '<$0.001'
 
-// Totals for every LLM request made in the thread. Each message is priced with the model that
-// produced it, so switching models mid-thread stays accurate. Free (local) models show tokens only.
+// Totals for every LLM request made in the thread, shown in the bar above the input. Each message is priced
+// with the model that produced it, so switching models mid-thread stays accurate. Free (local) models show tokens only.
 const ThreadUsageSummary = ({ messages }: { messages: ChatMessage[] }) => {
 	const { overridesOfModel } = useSettingsState()
 
@@ -323,19 +323,30 @@ const ThreadUsageSummary = ({ messages }: { messages: ChatMessage[] }) => {
 	}
 	if (nRequests === 0) return null
 
-	const inputStr = cacheRead > 0
-		? `${formatTokenCount(input + cacheRead)} in (${formatTokenCount(cacheRead)} cache)`
-		: `${formatTokenCount(input)} in`
-	const parts = [inputStr, `${formatTokenCount(output)} out`]
+	// most important first: when the bar is too narrow, the last parts drop out whole instead of being cut
+	const totalInput = input + cacheRead
+	const cachedPercent = totalInput > 0 ? Math.round(100 * cacheRead / totalInput) : 0
+	const parts: string[] = []
 	if (dollars > 0) parts.push(formatDollars(dollars))
+	parts.push(`${formatTokenCount(totalInput)} in`)
+	if (cachedPercent > 0) parts.push(`${cachedPercent}% cached`)
+	parts.push(`${formatTokenCount(output)} out`)
 
+	const details = [
+		`${nRequests} request${nRequests === 1 ? '' : 's'} in this thread`,
+		`${totalInput.toLocaleString()} input tokens${cacheRead > 0 ? `, ${cacheRead.toLocaleString()} read from cache` : ''}`,
+		`${output.toLocaleString()} output tokens`,
+	]
+	if (dollars > 0) details.push(`about $${dollars.toFixed(4)}`)
+
+	// one line high with overflow hidden: parts that don't fit wrap to a second line, which isn't shown
 	return <div
-		className='text-void-fg-3 text-[10px] leading-none select-none text-right px-1 pb-1'
+		className='flex flex-wrap justify-end h-4 leading-4 overflow-hidden min-w-0 opacity-80'
 		data-tooltip-id='void-tooltip'
-		data-tooltip-content={`${nRequests} request${nRequests === 1 ? '' : 's'} in this thread`}
+		data-tooltip-content={details.join(' · ')}
 		data-tooltip-place='top'
 	>
-		{parts.join(' · ')}
+		{parts.map((part, i) => <span key={i} className='whitespace-pre'>{i === 0 ? part : ` · ${part}`}</span>)}
 	</div>
 }
 
@@ -2830,7 +2841,7 @@ const _ChatBubble = ({ threadId, chatMessage, currCheckpointIdx, isCommitted, me
 
 }
 
-const CommandBarInChat = () => {
+const CommandBarInChat = ({ messages }: { messages: ChatMessage[] }) => {
 	const { stateOfURI: commandBarStateOfURI, sortedURIs: sortedCommandBarURIs } = useCommandBarState()
 	const numFilesChanged = sortedCommandBarURIs.length
 
@@ -3078,10 +3089,11 @@ const CommandBarInChat = () => {
 					justify-between
 				`}
 			>
-				<div className="flex gap-2 items-center">
+				<div className="flex gap-2 items-center shrink-0">
 					{fileDetailsButton}
 				</div>
-				<div className="flex gap-2 items-center">
+				<div className="flex gap-2 items-center min-w-0 pl-2">
+					<ThreadUsageSummary messages={messages} />
 					{acceptRejectAllButtons}
 					{threadStatusHTML}
 				</div>
@@ -3374,10 +3386,9 @@ export const SidebarChat = () => {
 
 	const threadPageInput = <div key={'input' + chatThreadsState.currentThreadId}>
 		<div className='px-4'>
-			<CommandBarInChat />
+			<CommandBarInChat messages={previousMessages} />
 		</div>
 		<div className='px-2 pb-2'>
-			<ThreadUsageSummary messages={previousMessages} />
 			{inputChatArea}
 		</div>
 	</div>

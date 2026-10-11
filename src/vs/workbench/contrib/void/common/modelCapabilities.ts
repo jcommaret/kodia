@@ -188,6 +188,7 @@ export type VoidStaticModelInfo = { // not stateful
 	specialToolFormat?: 'openai-style' | 'anthropic-style' | 'gemini-style', // typically you should use 'openai-style'. null means "can't call tools by default", and asks the LLM to output XML in agent mode
 	supportsFIM: boolean; // whether the model was specifically designed for autocomplete or "FIM" ("fill-in-middle" format)
 	supportsVision?: boolean; // whether the model accepts images in user messages. Defaults to false: images are left out (with a note) rather than risking an API error
+	supportsPredictedOutputs?: boolean; // whether the model accepts a `prediction` of its output (OpenAI-compatible), which speeds up rewrites that mostly repeat the original code. Defaults to false
 
 	additionalOpenAIPayload?: { [key: string]: string } // additional payload in the message body for requests that are openai-compatible (ollama, vllm, openai, openrouter, etc)
 
@@ -232,6 +233,7 @@ export const modelOverrideKeys = [
 	'specialToolFormat',
 	'supportsFIM',
 	'supportsVision',
+	'supportsPredictedOutputs',
 	'reasoningCapabilities',
 	'additionalOpenAIPayload'
 ] as const
@@ -1499,6 +1501,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		cost: { input: 1.50, output: 7.50 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
+		supportsPredictedOutputs: true, // listed on the model card; https://docs.mistral.ai/studio-api/conversations/advanced/predicted-outputs
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',

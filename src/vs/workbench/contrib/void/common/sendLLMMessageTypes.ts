@@ -132,7 +132,7 @@ type SendLLMType = {
 	messages: LLMFIMMessage;
 	separateSystemMessage?: undefined;
 	chatMode?: undefined;
-	promptCacheKey?: undefined;
+	promptCacheKey?: string; // the same for completions in one file (Mistral only)
 	promptCacheTTL?: undefined;
 }
 export type ServiceSendLLMMessageParams = {

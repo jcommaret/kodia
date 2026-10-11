@@ -122,11 +122,13 @@ type SendLLMType = {
 	messages: LLMChatMessage[]; // the type of raw chat messages that we send to Anthropic, OAI, etc
 	separateSystemMessage: string | undefined;
 	chatMode: ChatMode | null;
+	promptCacheKey?: string; // the same for requests sharing a prefix (e.g. a thread's agent loop), to help provider-side prompt caching
 } | {
 	messagesType: 'FIMMessage';
 	messages: LLMFIMMessage;
 	separateSystemMessage?: undefined;
 	chatMode?: undefined;
+	promptCacheKey?: undefined;
 }
 export type ServiceSendLLMMessageParams = {
 	onText: OnText;

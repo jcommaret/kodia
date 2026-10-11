@@ -14,7 +14,7 @@ import { Tool as GeminiTool, FunctionDeclaration, GoogleGenAI, ThinkingConfig, S
 import { GoogleAuth } from 'google-auth-library'
 /* eslint-enable */
 
-import { AnthropicLLMChatMessage, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, ModelListParams, OllamaModelResponse, OnError, OnFinalMessage, OnText, RawToolCallObj, RawToolParamsObj } from '../../common/sendLLMMessageTypes.js';
+import { AnthropicLLMChatMessage, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, LLMUsage, ModelListParams, OllamaModelResponse, OnError, OnFinalMessage, OnText, RawToolCallObj, RawToolParamsObj } from '../../common/sendLLMMessageTypes.js';
 import { ChatMode, displayInfoOfProviderName, ModelSelectionOptions, OverridesOfModel, ProviderName, SettingsOfProvider } from '../../common/voidSettingsTypes.js';
 import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities, defaultProviderSettings, getReservedOutputTokenSpace } from '../../common/modelCapabilities.js';
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
@@ -428,6 +428,23 @@ const _trimMessagesForToolBudget = (
 	return msgs
 }
 
+// Providers known to accept `stream_options.include_usage`. Others (local servers, Azure's default
+// API version) may reject the unknown param; we still read `usage` from them if they send it anyway.
+const providersWithStreamUsageOption: ReadonlySet<ProviderName> = new Set<ProviderName>(['openAI', 'openRouter', 'xAI', 'deepseek'])
+
+// OpenAI-compatible `prompt_tokens` includes cached tokens (DeepSeek reports them as `prompt_cache_hit_tokens`).
+const openAICompatibleUsage = (usage: unknown): LLMUsage | undefined => {
+	if (!usage || typeof usage !== 'object') return undefined
+	const u = usage as {
+		prompt_tokens?: number; completion_tokens?: number;
+		prompt_tokens_details?: { cached_tokens?: number } | null;
+		prompt_cache_hit_tokens?: number;
+	}
+	if (typeof u.prompt_tokens !== 'number') return undefined
+	const cacheRead = u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens ?? 0
+	return { input: u.prompt_tokens - cacheRead, output: u.completion_tokens ?? 0, cacheRead }
+}
+
 const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, modelName: modelName_, _setAborter, providerName, chatMode, separateSystemMessage, overridesOfModel, mcpTools }: SendChatParams_Internal) => {
 	const {
 		modelName,
@@ -469,6 +486,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		model: modelName,
 		messages: preparedMessages,
 		stream: true,
+		...(providersWithStreamUsageOption.has(providerName) ? { stream_options: { include_usage: true } } : {}),
 		...nativeToolsObj,
 		...reasoningAndExtraPayload,
 		// max_completion_tokens: maxTokens,
@@ -497,12 +515,17 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 	let toolId = ''
 	let toolParamsStr = ''
 
+	let usage: LLMUsage | undefined
+
 	openai.chat.completions
 		.create(options)
 		.then(async response => {
 			_setAborter(() => response.controller.abort())
 			// when receive text
 			for await (const chunk of response) {
+				// usually only on the last chunk (Groq nests it under x_groq)
+				usage = openAICompatibleUsage(chunk.usage ?? (chunk as { x_groq?: { usage?: unknown } }).x_groq?.usage) ?? usage
+
 				// message (delta.content is usually a string, but Mistral magistral returns an array of content chunks)
 				const { text: newText, reasoning: newReasoningFromContent } = parseOpenAICompatibleDeltaContent(chunk.choices[0]?.delta?.content)
 				fullTextSoFar += newText
@@ -542,7 +565,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 			else {
 				const toolCall = rawToolCallObjOfParamsStr(toolName, toolParamsStr, toolId)
 				const toolCallObj = toolCall ? { toolCall } : {}
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj });
+				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj, usage });
 			}
 		})
 		// when error/fail - this catches errors of both .create() and .then(for await)
@@ -607,16 +630,64 @@ const toAnthropicTool = (toolInfo: InternalToolInfo) => {
 	} satisfies Anthropic.Messages.Tool
 }
 
+// Prompt caching: unlike OpenAI, DeepSeek and Gemini, Anthropic only caches up to explicit
+// `cache_control` breakpoints. The agent loop resends the whole thread on every tool call, so we mark
+// the end of the tools, the system prompt and the latest message — each request then reads the
+// previous request's prefix from cache. The API silently ignores breakpoints below the model's
+// minimum cacheable length, so short chats need no special-casing. (4 breakpoints max; we use 3.)
+const anthropicCacheControl = { type: 'ephemeral' } as const
+
 const anthropicTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined) => {
 	const allowedTools = availableTools(chatMode, mcpTools)
 	if (!allowedTools || Object.keys(allowedTools).length === 0) return null
 
-	const anthropicTools: Anthropic.Messages.ToolUnion[] = []
+	const anthropicTools: Anthropic.Messages.Tool[] = []
 	for (const t in allowedTools ?? {}) {
 		anthropicTools.push(toAnthropicTool(allowedTools[t]))
 	}
+	// tools render before the system prompt, so they stay cached even when the system prompt changes (e.g. open files)
+	anthropicTools[anthropicTools.length - 1] = { ...anthropicTools[anthropicTools.length - 1], cache_control: anthropicCacheControl }
 	return anthropicTools
 }
+
+const anthropicSystemWithCacheControl = (system: string | undefined): Anthropic.Messages.TextBlockParam[] | undefined => {
+	if (!system) return undefined
+	return [{ type: 'text', text: system, cache_control: anthropicCacheControl }]
+}
+
+// thinking blocks can't carry cache_control, and the API rejects it on empty text
+const _canCarryCacheControl = (block: { type: string; text?: string }) =>
+	block.type === 'text' ? !!block.text : (block.type === 'tool_result' || block.type === 'tool_use' || block.type === 'image')
+
+const anthropicMessagesWithCacheControl = (messages: AnthropicLLMChatMessage[]): Anthropic.Messages.MessageParam[] => {
+	const out = messages.slice() as Anthropic.Messages.MessageParam[]
+	const lastIdx = out.length - 1
+	if (lastIdx < 0) return out
+	const last = out[lastIdx]
+
+	if (typeof last.content === 'string') {
+		if (last.content) out[lastIdx] = { ...last, content: [{ type: 'text', text: last.content, cache_control: anthropicCacheControl }] }
+		return out
+	}
+
+	const blocks = last.content.slice()
+	for (let i = blocks.length - 1; i >= 0; i -= 1) {
+		if (_canCarryCacheControl(blocks[i] as { type: string; text?: string })) {
+			blocks[i] = { ...blocks[i], cache_control: anthropicCacheControl } as Anthropic.Messages.ContentBlockParam
+			break
+		}
+	}
+	out[lastIdx] = { ...last, content: blocks }
+	return out
+}
+
+// Anthropic's `input_tokens` already excludes cached tokens, so the fields map 1:1.
+const anthropicUsage = (usage: Anthropic.Messages.Usage): LLMUsage => ({
+	input: usage.input_tokens,
+	output: usage.output_tokens,
+	cacheRead: usage.cache_read_input_tokens ?? undefined,
+	cacheWrite: usage.cache_creation_input_tokens ?? undefined,
+})
 
 
 
@@ -651,8 +722,8 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 	});
 
 	const stream = anthropic.messages.stream({
-		system: separateSystemMessage ?? undefined,
-		messages: messages as AnthropicLLMChatMessage[],
+		system: anthropicSystemWithCacheControl(separateSystemMessage),
+		messages: anthropicMessagesWithCacheControl(messages as AnthropicLLMChatMessage[]),
 		model: modelName,
 		max_tokens: maxTokens ?? 4_096, // anthropic requires this
 		...includeInPayload,
@@ -734,7 +805,7 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 		const toolCall = tools[0] && rawToolCallObjOfAnthropicParams(tools[0])
 		const toolCallObj = toolCall ? { toolCall } : {}
 
-		onFinalMessage({ fullText, fullReasoning, anthropicReasoning, ...toolCallObj })
+		onFinalMessage({ fullText, fullReasoning, anthropicReasoning, ...toolCallObj, usage: anthropicUsage(response.usage) })
 	})
 	// on error
 	stream.on('error', (error) => {
@@ -945,6 +1016,8 @@ const sendGeminiChat = async ({
 	let toolParamsStr = ''
 	let toolId = ''
 
+	let usage: LLMUsage | undefined
+
 
 	genAI.models.generateContentStream({
 		model: modelName,
@@ -963,6 +1036,13 @@ const sendGeminiChat = async ({
 				// message
 				const newText = chunk.text ?? ''
 				fullTextSoFar += newText
+
+				// usage — cumulative, so the last chunk has the totals. promptTokenCount includes cached tokens.
+				const m = chunk.usageMetadata
+				if (m?.promptTokenCount !== undefined) {
+					const cacheRead = m.cachedContentTokenCount ?? 0
+					usage = { input: m.promptTokenCount - cacheRead, output: (m.candidatesTokenCount ?? 0) + (m.thoughtsTokenCount ?? 0), cacheRead }
+				}
 
 				// tool call
 				const functionCalls = chunk.functionCalls
@@ -990,7 +1070,7 @@ const sendGeminiChat = async ({
 				if (!toolId) toolId = generateUuid() // ids are empty, but other providers might expect an id
 				const toolCall = rawToolCallObjOfParamsStr(toolName, toolParamsStr, toolId)
 				const toolCallObj = toolCall ? { toolCall } : {}
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj });
+				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj, usage });
 			}
 		})
 		.catch(error => {

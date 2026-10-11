@@ -21,7 +21,7 @@ import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 import { ChatMode, displayInfoOfProviderName, FeatureName, isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
-import { getModelCapabilities, getIsReasoningEnabledState } from '../../../../common/modelCapabilities.js';
+import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '../../../../common/modelCapabilities.js';
 import { estimateTokens } from '../../../../common/tokenizer.js';
 import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
@@ -298,6 +298,44 @@ const formatTokenCount = (n: number): string => {
 	if (n < 1000) return `${n}`
 	if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
 	return `${Math.round(n / 1000)}k`
+}
+
+const formatDollars = (d: number): string => d < 0.01 ? `<$0.01` : `$${d.toFixed(2)}`
+
+// Totals for every LLM request made in the thread. Each message is priced with the model that
+// produced it, so switching models mid-thread stays accurate. Free (local) models show tokens only.
+const ThreadUsageSummary = ({ messages }: { messages: ChatMessage[] }) => {
+	const { overridesOfModel } = useSettingsState()
+
+	let input = 0, output = 0, cacheRead = 0, dollars = 0
+	let nRequests = 0
+	for (const m of messages) {
+		if (m.role !== 'assistant' || !m.usage) continue
+		nRequests += 1
+		input += m.usage.input + (m.usage.cacheWrite ?? 0)
+		cacheRead += m.usage.cacheRead ?? 0
+		output += m.usage.output
+		if (m.modelSelection) {
+			const { cost } = getModelCapabilities(m.modelSelection.providerName, m.modelSelection.modelName, overridesOfModel)
+			dollars += getUsageCost(m.usage, cost)
+		}
+	}
+	if (nRequests === 0) return null
+
+	const inputStr = cacheRead > 0
+		? `${formatTokenCount(input + cacheRead)} in (${formatTokenCount(cacheRead)} cache)`
+		: `${formatTokenCount(input)} in`
+	const parts = [inputStr, `${formatTokenCount(output)} out`]
+	if (dollars > 0) parts.push(formatDollars(dollars))
+
+	return <div
+		className='text-void-fg-3 text-[10px] leading-none select-none text-right px-1 pb-1'
+		data-tooltip-id='void-tooltip'
+		data-tooltip-content={`${nRequests} request${nRequests === 1 ? '' : 's'} in this thread`}
+		data-tooltip-place='top'
+	>
+		{parts.join(' · ')}
+	</div>
 }
 
 interface VoidChatAreaProps {
@@ -3228,6 +3266,7 @@ export const SidebarChat = () => {
 			<CommandBarInChat />
 		</div>
 		<div className='px-2 pb-2'>
+			<ThreadUsageSummary messages={previousMessages} />
 			{inputChatArea}
 		</div>
 	</div>

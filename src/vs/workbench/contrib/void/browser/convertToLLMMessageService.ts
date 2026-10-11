@@ -75,33 +75,38 @@ const prepareMessages_openai_tools = (messages: SimpleLLMMessage[]): AnthropicOr
 
 	const newMessages: OpenAILLMChatMessage[] = [];
 
+	// the assistant message of the current turn — every tool message that follows it (a turn can call
+	// several tools at once) is one of its tool_calls
+	let turnAssistant: (OpenAILLMChatMessage & { role: 'assistant' }) | undefined = undefined
+
 	for (let i = 0; i < messages.length; i += 1) {
 		const currMsg = messages[i]
 
 		if (currMsg.role !== 'tool') {
 			// Omit anthropic-only fields: JSON.stringify would send them and strict APIs (e.g. Mistral) return 422 Extra inputs.
 			if (currMsg.role === 'assistant') {
-				newMessages.push({
+				turnAssistant = {
 					role: 'assistant',
 					content: currMsg.content,
-				})
+				}
+				newMessages.push(turnAssistant)
 			} else {
+				turnAssistant = undefined
 				newMessages.push(currMsg)
 			}
 			continue
 		}
 
-		// edit previous assistant message to have called the tool
-		const prevMsg = 0 <= i - 1 && i - 1 <= newMessages.length ? newMessages[i - 1] : undefined
-		if (prevMsg?.role === 'assistant') {
-			prevMsg.tool_calls = [{
+		// edit the turn's assistant message to have called the tool
+		if (turnAssistant) {
+			(turnAssistant.tool_calls ??= []).push({
 				type: 'function',
 				id: currMsg.id,
 				function: {
 					name: currMsg.name,
 					arguments: JSON.stringify(currMsg.rawParams)
 				}
-			}]
+			})
 		}
 
 		// add the tool
@@ -141,68 +146,74 @@ anthropic RESPONSE (role=user):
 Converts:
 assistant: ...content
 tool: (id, name, params)
+tool: (id2, name2, params2)   <- a turn can call several tools at once
 ->
-assistant: ...content, call(name, id, params)
-user: ...content, result(id, content)
+assistant: ...content, call(name, id, params), call(name2, id2, params2)
+user: result(id, content), result(id2, content2)   <- Anthropic requires all of a turn's results in one message
 */
 
 type AnthropicOrOpenAILLMMessage = AnthropicLLMChatMessage | OpenAILLMChatMessage
 
-const prepareMessages_anthropic_tools = (messages: SimpleLLMMessage[], supportsAnthropicReasoning: boolean): AnthropicOrOpenAILLMMessage[] => {
-	const newMessages: (AnthropicLLMChatMessage | (SimpleLLMMessage & { role: 'tool' }))[] = messages;
+type AnthropicToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string; }
 
-	for (let i = 0; i < messages.length; i += 1) {
-		const currMsg = messages[i]
+const prepareMessages_anthropic_tools = (messages: SimpleLLMMessage[], supportsAnthropicReasoning: boolean): AnthropicOrOpenAILLMMessage[] => {
+	const newMessages: AnthropicLLMChatMessage[] = []
+
+	// the current turn: its assistant message, and the user message collecting its tool results
+	let turn: { assistant: AnthropicLLMChatMessage & { role: 'assistant' }; results: AnthropicToolResultBlock[] | null } | null = null
+
+	for (const currMsg of messages) {
 
 		// add anthropic reasoning
 		if (currMsg.role === 'assistant') {
-			if (currMsg.anthropicReasoning && supportsAnthropicReasoning) {
-				const content = currMsg.content
-				newMessages[i] = {
+			const assistant: AnthropicLLMChatMessage & { role: 'assistant' } = currMsg.anthropicReasoning && supportsAnthropicReasoning
+				? {
 					role: 'assistant',
-					content: content ? [...currMsg.anthropicReasoning, { type: 'text' as const, text: content }] : currMsg.anthropicReasoning
+					content: currMsg.content ? [...currMsg.anthropicReasoning, { type: 'text' as const, text: currMsg.content }] : currMsg.anthropicReasoning
 				}
-			}
-			else {
-				newMessages[i] = {
+				: {
 					role: 'assistant',
 					content: currMsg.content,
 					// strip away anthropicReasoning
 				}
-			}
+			newMessages.push(assistant)
+			turn = { assistant, results: null }
 			continue
 		}
 
 		if (currMsg.role === 'user') {
-			newMessages[i] = {
+			newMessages.push({
 				role: 'user',
 				content: currMsg.content,
-			}
+			})
+			turn = null
 			continue
 		}
 
 		if (currMsg.role === 'tool') {
-			// add anthropic tools
-			const prevMsg = 0 <= i - 1 && i - 1 <= newMessages.length ? newMessages[i - 1] : undefined
-
 			// make it so the assistant called the tool
-			if (prevMsg?.role === 'assistant') {
-				if (typeof prevMsg.content === 'string') prevMsg.content = [{ type: 'text', text: prevMsg.content }]
-				prevMsg.content.push({ type: 'tool_use', id: currMsg.id, name: currMsg.name, input: currMsg.rawParams })
+			if (turn) {
+				const { assistant } = turn
+				if (typeof assistant.content === 'string') assistant.content = [{ type: 'text', text: assistant.content }]
+				assistant.content.push({ type: 'tool_use', id: currMsg.id, name: currMsg.name, input: currMsg.rawParams })
 			}
 
-			// turn each tool into a user message with tool results at the end
-			newMessages[i] = {
-				role: 'user',
-				content: [{ type: 'tool_result', tool_use_id: currMsg.id, content: currMsg.content }]
+			// put the result in the turn's tool-results user message
+			const result: AnthropicToolResultBlock = { type: 'tool_result', tool_use_id: currMsg.id, content: currMsg.content }
+			if (turn?.results) {
+				turn.results.push(result)
+			}
+			else {
+				const results = [result]
+				newMessages.push({ role: 'user', content: results })
+				if (turn) turn.results = results
 			}
 			continue
 		}
 
 	}
 
-	// we just removed the tools
-	return newMessages as AnthropicLLMChatMessage[]
+	return newMessages
 }
 
 
@@ -212,13 +223,14 @@ const prepareMessages_XML_tools = (messages: SimpleLLMMessage[], supportsAnthrop
 	for (let i = 0; i < messages.length; i += 1) {
 
 		const c = messages[i]
-		const next = 0 <= i + 1 && i + 1 <= messages.length - 1 ? messages[i + 1] : null
 
 		if (c.role === 'assistant') {
-			// if called a tool (message after it), re-add its XML to the message
+			// if called tools (messages after it), re-add their XML to the message
 			// alternatively, could just hold onto the original output, but this way requires less piping raw strings everywhere
 			let content: AnthropicOrOpenAILLMMessage['content'] = c.content
-			if (next?.role === 'tool') {
+			for (let j = i + 1; j < messages.length; j += 1) {
+				const next = messages[j]
+				if (next.role !== 'tool') break
 				content = `${content}\n\n${reParsedToolXMLString(next.name, next.rawParams)}`
 			}
 
@@ -463,7 +475,8 @@ const prepareOpenAIOrAnthropicMessages = ({
 type GeminiUserPart = (GeminiLLMChatMessage & { role: 'user' })['parts'][0]
 type GeminiModelPart = (GeminiLLMChatMessage & { role: 'model' })['parts'][0]
 const prepareGeminiMessages = (messages: AnthropicLLMChatMessage[]) => {
-	let latestToolName: ToolName | undefined = undefined
+	// functionResponse needs the tool's name; a turn can hold several tool calls, so look it up by id
+	const toolNameOfId = new Map<string, ToolName>()
 	const messages2: GeminiLLMChatMessage[] = messages.map((m): GeminiLLMChatMessage | null => {
 		if (m.role === 'assistant') {
 			if (typeof m.content === 'string') {
@@ -475,7 +488,7 @@ const prepareGeminiMessages = (messages: AnthropicLLMChatMessage[]) => {
 						return { text: c.text }
 					}
 					else if (c.type === 'tool_use') {
-						latestToolName = c.name
+						toolNameOfId.set(c.id, c.name)
 						return { functionCall: { id: c.id, name: c.name, args: c.input } }
 					}
 					else return null
@@ -493,8 +506,9 @@ const prepareGeminiMessages = (messages: AnthropicLLMChatMessage[]) => {
 						return { text: c.text }
 					}
 					else if (c.type === 'tool_result') {
-						if (!latestToolName) return null
-						return { functionResponse: { id: c.tool_use_id, name: latestToolName, response: { output: c.content } } }
+						const toolName = toolNameOfId.get(c.tool_use_id)
+						if (!toolName) return null
+						return { functionResponse: { id: c.tool_use_id, name: toolName, response: { output: c.content } } }
 					}
 					else return null
 				}).filter(m => !!m)

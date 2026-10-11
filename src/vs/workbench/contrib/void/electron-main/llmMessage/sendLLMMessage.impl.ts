@@ -329,6 +329,24 @@ const rawToolCallObjOfParamsStr = (name: string, toolParamsStr: string, id: stri
 }
 
 
+// a tool call whose name/id/params arrive in pieces while streaming
+type StreamedToolCall = { name: string; id: string; paramsStr: string }
+
+// the call currently being generated (the latest one), for display while streaming
+const streamingToolCallOf = (calls: StreamedToolCall[]): RawToolCallObj | undefined => {
+	for (let i = calls.length - 1; i >= 0; i -= 1) {
+		const t = calls[i] // may be a hole if indexes arrive out of order
+		if (t?.name) return { name: t.name, rawParams: {}, isDone: false, doneParams: [], id: t.id }
+	}
+	return undefined
+}
+
+// calls whose params aren't valid JSON are dropped, as before
+const finalToolCallsOf = (calls: StreamedToolCall[]): RawToolCallObj[] =>
+	calls.filter(t => !!t?.name)
+		.map(t => rawToolCallObjOfParamsStr(t.name, t.paramsStr, t.id))
+		.filter((t): t is RawToolCallObj => t !== null)
+
 const rawToolCallObjOfAnthropicParams = (toolBlock: Anthropic.Messages.ToolUseBlock): RawToolCallObj | null => {
 	const { id, name, input } = toolBlock
 
@@ -511,9 +529,8 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 	let fullReasoningSoFar = ''
 	let fullTextSoFar = ''
 
-	let toolName = ''
-	let toolId = ''
-	let toolParamsStr = ''
+	// one entry per parallel tool call; deltas name the call they extend by `index`
+	const streamedToolCalls: StreamedToolCall[] = []
 
 	let usage: LLMUsage | undefined
 
@@ -531,14 +548,14 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 				fullTextSoFar += newText
 				fullReasoningSoFar += newReasoningFromContent
 
-				// tool call
-				for (const tool of chunk.choices[0]?.delta?.tool_calls ?? []) {
-					const index = tool.index
-					if (index !== 0) continue
-
-					toolName += tool.function?.name ?? ''
-					toolParamsStr += tool.function?.arguments ?? '';
-					toolId += tool.id ?? ''
+				// tool calls
+				const toolDeltas = chunk.choices[0]?.delta?.tool_calls ?? []
+				for (let j = 0; j < toolDeltas.length; j += 1) {
+					const tool = toolDeltas[j]
+					const t = streamedToolCalls[tool.index ?? j] ??= { name: '', id: '', paramsStr: '' } // some servers omit index
+					t.name += tool.function?.name ?? ''
+					t.paramsStr += tool.function?.arguments ?? ''
+					t.id += tool.id ?? ''
 				}
 
 
@@ -554,18 +571,17 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 				onText({
 					fullText: fullTextSoFar,
 					fullReasoning: fullReasoningSoFar,
-					toolCall: !toolName ? undefined : { name: toolName, rawParams: {}, isDone: false, doneParams: [], id: toolId },
+					toolCall: streamingToolCallOf(streamedToolCalls),
 				})
 
 			}
 			// on final
-			if (!fullTextSoFar && !fullReasoningSoFar && !toolName) {
+			const toolCalls = finalToolCallsOf(streamedToolCalls)
+			if (!fullTextSoFar && !fullReasoningSoFar && toolCalls.length === 0) {
 				onError({ message: 'Kodia: Response from model was empty.', fullError: null })
 			}
 			else {
-				const toolCall = rawToolCallObjOfParamsStr(toolName, toolParamsStr, toolId)
-				const toolCallObj = toolCall ? { toolCall } : {}
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj, usage });
+				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage });
 			}
 		})
 		// when error/fail - this catches errors of both .create() and .then(for await)
@@ -774,7 +790,9 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 				runOnText()
 			}
 			else if (e.content_block.type === 'tool_use') {
-				fullToolName += e.content_block.name ?? '' // anthropic gives us the tool name in the start block
+				// anthropic gives us the tool name in the start block; a turn can hold several tool_use blocks, show the latest
+				fullToolName = e.content_block.name ?? ''
+				fullToolParams = ''
 				runOnText()
 			}
 		}
@@ -799,13 +817,12 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 	// on done - (or when error/fail) - this is called AFTER last streamEvent
 	stream.on('finalMessage', (response) => {
 		const anthropicReasoning = response.content.filter(c => c.type === 'thinking' || c.type === 'redacted_thinking')
-		const tools = response.content.filter(c => c.type === 'tool_use')
-		// console.log('TOOLS!!!!!!', JSON.stringify(tools, null, 2))
-		// console.log('TOOLS!!!!!!', JSON.stringify(response, null, 2))
-		const toolCall = tools[0] && rawToolCallObjOfAnthropicParams(tools[0])
-		const toolCallObj = toolCall ? { toolCall } : {}
+		const toolCalls = response.content
+			.filter(c => c.type === 'tool_use')
+			.map(rawToolCallObjOfAnthropicParams)
+			.filter((t): t is RawToolCallObj => t !== null)
 
-		onFinalMessage({ fullText, fullReasoning, anthropicReasoning, ...toolCallObj, usage: anthropicUsage(response.usage) })
+		onFinalMessage({ fullText, fullReasoning, anthropicReasoning, toolCalls, usage: anthropicUsage(response.usage) })
 	})
 	// on error
 	stream.on('error', (error) => {
@@ -1012,9 +1029,8 @@ const sendGeminiChat = async ({
 	let fullReasoningSoFar = ''
 	let fullTextSoFar = ''
 
-	let toolName = ''
-	let toolParamsStr = ''
-	let toolId = ''
+	// Gemini sends each function call whole, once, in the chunk where it completes
+	const streamedToolCalls: StreamedToolCall[] = []
 
 	let usage: LLMUsage | undefined
 
@@ -1044,13 +1060,13 @@ const sendGeminiChat = async ({
 					usage = { input: m.promptTokenCount - cacheRead, output: (m.candidatesTokenCount ?? 0) + (m.thoughtsTokenCount ?? 0), cacheRead }
 				}
 
-				// tool call
-				const functionCalls = chunk.functionCalls
-				if (functionCalls && functionCalls.length > 0) {
-					const functionCall = functionCalls[0] // Get the first function call
-					toolName = functionCall.name ?? ''
-					toolParamsStr = JSON.stringify(functionCall.args ?? {})
-					toolId = functionCall.id ?? ''
+				// tool calls
+				for (const functionCall of chunk.functionCalls ?? []) {
+					streamedToolCalls.push({
+						name: functionCall.name ?? '',
+						paramsStr: JSON.stringify(functionCall.args ?? {}),
+						id: functionCall.id || generateUuid(), // ids are often empty, but other providers expect one
+					})
 				}
 
 				// (do not handle reasoning yet)
@@ -1059,18 +1075,16 @@ const sendGeminiChat = async ({
 				onText({
 					fullText: fullTextSoFar,
 					fullReasoning: fullReasoningSoFar,
-					toolCall: !toolName ? undefined : { name: toolName, rawParams: {}, isDone: false, doneParams: [], id: toolId },
+					toolCall: streamingToolCallOf(streamedToolCalls),
 				})
 			}
 
 			// on final
-			if (!fullTextSoFar && !fullReasoningSoFar && !toolName) {
+			const toolCalls = finalToolCallsOf(streamedToolCalls)
+			if (!fullTextSoFar && !fullReasoningSoFar && toolCalls.length === 0) {
 				onError({ message: 'Kodia: Response from model was empty.', fullError: null })
 			} else {
-				if (!toolId) toolId = generateUuid() // ids are empty, but other providers might expect an id
-				const toolCall = rawToolCallObjOfParamsStr(toolName, toolParamsStr, toolId)
-				const toolCallObj = toolCall ? { toolCall } : {}
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj, usage });
+				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage });
 			}
 		})
 		.catch(error => {

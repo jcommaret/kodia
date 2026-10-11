@@ -62,7 +62,7 @@ export type BuiltinToolCallParams = {
 	'read_project_memory': {},
 	// ---
 	'rewrite_file': { uri: URI, newContent: string },
-	'write_project_memory': { content: string, mode: 'append' | 'replace' },
+	'write_project_memory': { section: string, content: string },
 	'edit_file': { uri: URI, searchReplaceBlocks: string },
 	'create_file_or_folder': { uri: URI, isFolder: boolean },
 	'delete_file_or_folder': { uri: URI, isRecursive: boolean, isFolder: boolean },

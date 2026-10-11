@@ -20,8 +20,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { EndOfLinePreference } from '../../../../editor/common/model.js';
 import { ToolName } from '../common/toolsServiceTypes.js';
 import { IMCPService } from '../common/mcpService.js';
-import { IStorageService, StorageScope } from '../../../../platform/storage/common/storage.js';
-import { PROJECT_MEMORY_STORAGE_KEY } from '../common/storageKeys.js';
+import { IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
 
 export const EMPTY_MESSAGE = '(empty message)'
 const CLEARED_TOOL_RESULT = '(This result was cleared to fit the context window. Call the tool again if you need it.)'
@@ -639,7 +638,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 		@IVoidModelService private readonly voidModelService: IVoidModelService,
 		@IMCPService private readonly mcpService: IMCPService,
-		@IStorageService private readonly storageService: IStorageService,
+		@IProjectMemoryService private readonly projectMemoryService: IProjectMemoryService,
 	) {
 		super()
 	}
@@ -662,9 +661,9 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		}
 	}
 
-	// Notes saved by the agent itself (via write_project_memory) in previous sessions, scoped to this workspace
+	// Notes saved by the agent itself (via write_project_memory) in previous sessions: .kodia/memory.md
 	private _getProjectMemory(): string {
-		return this.storageService.get(PROJECT_MEMORY_STORAGE_KEY, StorageScope.WORKSPACE) ?? ''
+		return this.projectMemoryService.getMemory()
 	}
 
 	// The user's own instructions: from settings and .voidrules files
@@ -704,8 +703,9 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		const guidelines = this._getGuidelines()
 		if (guidelines) sections.push(`GUIDELINES (from the user's settings and .voidrules file):\n${guidelines}`)
 
+		await this.projectMemoryService.whenReady
 		const projectMemory = this._getProjectMemory()
-		if (projectMemory) sections.push(`PROJECT MEMORY (notes saved automatically in previous sessions via write_project_memory):\n${projectMemory}`)
+		if (projectMemory) sections.push(`PROJECT MEMORY (${PROJECT_MEMORY_FILE_PATH}: notes kept across sessions; rewrite a section with write_project_memory when something here is outdated or worth adding):\n${projectMemory}`)
 
 		if (!disableSystemMessage) {
 			const directoryStr = await this.directoryStrService.getAllDirectoriesStr({

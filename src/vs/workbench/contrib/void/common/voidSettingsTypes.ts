@@ -486,6 +486,7 @@ export type GlobalSettings = {
 	isOnboardingComplete: boolean;
 	disableSystemMessage: boolean;
 	autoAcceptLLMChanges: boolean;
+	oneHourPromptCache: boolean; // Claude: keep the prompt cache 1 hour (2x write price) instead of 5 minutes
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -504,6 +505,7 @@ export const defaultGlobalSettings: GlobalSettings = {
 	isOnboardingComplete: false,
 	disableSystemMessage: false,
 	autoAcceptLLMChanges: false,
+	oneHourPromptCache: false,
 }
 
 export type GlobalSettingName = keyof GlobalSettings

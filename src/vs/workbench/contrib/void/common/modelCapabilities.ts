@@ -554,24 +554,45 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 
 
 // ---------------- ANTHROPIC ----------------
+// max_tokens is the model's full output limit (reservedOutputTokenSpace), which leaves room for the
+// thinking budget on top of the answer; the budget must stay below it.
 const anthropicThinkingCapabilities = {
 	supportsReasoning: true as const,
 	canTurnOffReasoning: true,
 	canIOReasoning: true,
-	reasoningReservedOutputTokenSpace: 8192,
 	reasoningSlider: { type: 'budget_slider' as const, min: 1024, max: 8192, default: 1024 },
 }
 
-// Adaptive-thinking models (Fable 5.1/5, Mythos 5.1, Opus 5.5/5/4.8/4.7, Sonnet 5): thinking is always on and the model
-// decides how much to think. They reject `thinking: { type: 'enabled', budget_tokens }` with a 400,
-// so no budget slider — we send `thinking: { type: 'adaptive' }` instead (see anthropicSettings below).
+// Adaptive-thinking models (Fable 5.1/5, Mythos 5.1, Opus 5.5/5/4.8/4.7, Sonnet 5.5/5/4.6): thinking is always on
+// and the model decides how much to think; `output_config.effort` steers how hard it works. They reject
+// `thinking: { type: 'enabled', budget_tokens }` with a 400, so we send `thinking: { type: 'adaptive' }` plus the
+// effort (see anthropicSettings below). Defaults to 'high', recommended for coding — Opus 5.5's own default is
+// 'medium'. Changing the effort mid-thread restarts the prompt cache of the conversation.
+// https://platform.claude.com/docs/en/build-with-claude/effort
 const anthropicAdaptiveThinkingCapabilities = {
 	supportsReasoning: true as const,
 	canTurnOffReasoning: false,
 	canIOReasoning: true,
-	reasoningReservedOutputTokenSpace: 8192,
-	reasoningSlider: { type: 'adaptive' as const },
+	reasoningSlider: { type: 'effort_slider' as const, values: ['low', 'medium', 'high', 'xhigh', 'max'], default: 'high' },
 }
+
+// Sonnet 4.6 has no 'xhigh' level (it arrived with Opus 4.7)
+const anthropicAdaptiveThinkingCapabilities_noXHigh = {
+	...anthropicAdaptiveThinkingCapabilities,
+	reasoningSlider: { type: 'effort_slider' as const, values: ['low', 'medium', 'high', 'max'], default: 'high' },
+}
+
+// Claude API features only some models accept: sending them to the others is a 400. Keyed by catalog name.
+export const anthropicModelFeatures = {
+	// `thinking.display` defaults to "omitted" on these: without "summarized", the reasoning comes back empty
+	summarizedThinkingDisplay: new Set(['claude-fable-5-1', 'claude-mythos-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-5-5', 'claude-sonnet-5']),
+	// These check that nothing before a replayed thinking block changed (system prompt, tools, earlier messages);
+	// accounts created since 2026-08-31 get a 400 otherwise. `drop_block` makes the API drop those blocks instead.
+	// https://platform.claude.com/docs/en/build-with-claude/extended-thinking
+	thinkingBlockBinding: new Set(['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5']),
+	// These accept `role: "system"` messages inside `messages`, after the cached history
+	midConversationSystemMessages: new Set(['claude-fable-5-1', 'claude-mythos-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5']),
+} as const
 
 const anthropicModelOptions = {
 	'claude-fable-5-1': { // https://platform.claude.com/docs/en/models/fable-5-1/overview
@@ -682,7 +703,7 @@ const anthropicModelOptions = {
 		supportsVision: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
-		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
+		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities_noXHigh,
 	},
 	'claude-haiku-4-5': {
 		contextWindow: 200_000,
@@ -739,6 +760,9 @@ const anthropicSettings: VoidStaticProviderInfo = {
 
 				if (reasoningInfo.type === 'adaptive') {
 					return { thinking: { type: 'adaptive' } }
+				}
+				if (reasoningInfo.type === 'effort_slider_value') { // adaptive thinking, steered by effort
+					return { thinking: { type: 'adaptive' }, output_config: { effort: reasoningInfo.reasoningEffort } }
 				}
 				if (reasoningInfo.type === 'budget_slider_value') {
 					return { thinking: { type: 'enabled', budget_tokens: reasoningInfo.reasoningBudget } }
@@ -2260,7 +2284,8 @@ export const getReservedOutputTokenSpace = (providerName: ProviderName, modelNam
 		reasoningCapabilities,
 		reservedOutputTokenSpace,
 	} = getModelCapabilities(providerName, modelName, opts.overridesOfModel)
-	return opts.isReasoningEnabled && reasoningCapabilities ? reasoningCapabilities.reasoningReservedOutputTokenSpace : reservedOutputTokenSpace
+	// the reasoning override only applies when set; otherwise the model's own output limit
+	return (opts.isReasoningEnabled && reasoningCapabilities ? reasoningCapabilities.reasoningReservedOutputTokenSpace : undefined) ?? reservedOutputTokenSpace
 }
 
 // used to force reasoning state (complex) into something simple we can just read from when sending a message

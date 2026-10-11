@@ -16,7 +16,7 @@ import { GoogleAuth } from 'google-auth-library'
 
 import { AnthropicLLMChatMessage, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, LLMUsage, ModelListParams, OllamaModelResponse, OnError, OnFinalMessage, OnText, RawToolCallObj, RawToolParamsObj } from '../../common/sendLLMMessageTypes.js';
 import { ChatMode, displayInfoOfProviderName, ModelSelectionOptions, OverridesOfModel, ProviderName, SettingsOfProvider } from '../../common/voidSettingsTypes.js';
-import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities, defaultProviderSettings, getReservedOutputTokenSpace } from '../../common/modelCapabilities.js';
+import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities, defaultProviderSettings, getReservedOutputTokenSpace, anthropicModelFeatures } from '../../common/modelCapabilities.js';
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
@@ -51,6 +51,7 @@ type SendChatParams_Internal = InternalCommonMessageParams & {
 	chatMode: ChatMode | null;
 	mcpTools: InternalToolInfo[] | undefined;
 	promptCacheKey?: string;
+	promptCacheTTL?: '1h';
 }
 type SendFIMParams_Internal = InternalCommonMessageParams & { messages: LLMFIMMessage; separateSystemMessage: string | undefined; }
 export type ListParams_Internal<ModelResponse> = ModelListParams<ModelResponse>
@@ -659,9 +660,12 @@ const toAnthropicTool = (toolInfo: InternalToolInfo) => {
 // the end of the tools, the system prompt and the latest message — each request then reads the
 // previous request's prefix from cache. The API silently ignores breakpoints below the model's
 // minimum cacheable length, so short chats need no special-casing. (4 breakpoints max; we use 3.)
-const anthropicCacheControl = { type: 'ephemeral' } as const
+// 5 minutes by default; 1 hour (2x write price instead of 1.25x) keeps the thread cached when the user takes
+// longer than 5 minutes to reply. All breakpoints use the same TTL (a 1h entry may not follow a 5m one).
+type AnthropicCacheControl = { type: 'ephemeral'; ttl?: '1h' }
+const anthropicCacheControlOf = (ttl: '1h' | undefined): AnthropicCacheControl => ttl ? { type: 'ephemeral', ttl } : { type: 'ephemeral' }
 
-const anthropicTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined) => {
+const anthropicTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined, cacheControl: AnthropicCacheControl) => {
 	const allowedTools = availableTools(chatMode, mcpTools)
 	if (!allowedTools || Object.keys(allowedTools).length === 0) return null
 
@@ -670,39 +674,60 @@ const anthropicTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] 
 		anthropicTools.push(toAnthropicTool(allowedTools[t]))
 	}
 	// tools render before the system prompt, so they stay cached even when the system prompt changes (e.g. open files)
-	anthropicTools[anthropicTools.length - 1] = { ...anthropicTools[anthropicTools.length - 1], cache_control: anthropicCacheControl }
+	anthropicTools[anthropicTools.length - 1] = { ...anthropicTools[anthropicTools.length - 1], cache_control: cacheControl }
 	return anthropicTools
 }
 
-const anthropicSystemWithCacheControl = (system: string | undefined): Anthropic.Messages.TextBlockParam[] | undefined => {
+const anthropicSystemWithCacheControl = (system: string | undefined, cacheControl: AnthropicCacheControl): Anthropic.Messages.TextBlockParam[] | undefined => {
 	if (!system) return undefined
-	return [{ type: 'text', text: system, cache_control: anthropicCacheControl }]
+	return [{ type: 'text', text: system, cache_control: cacheControl }]
 }
 
 // thinking blocks can't carry cache_control, and the API rejects it on empty text
 const _canCarryCacheControl = (block: { type: string; text?: string }) =>
 	block.type === 'text' ? !!block.text : (block.type === 'tool_result' || block.type === 'tool_use' || block.type === 'image')
 
-const anthropicMessagesWithCacheControl = (messages: AnthropicLLMChatMessage[]): Anthropic.Messages.MessageParam[] => {
+const anthropicMessagesWithCacheControl = (messages: AnthropicLLMChatMessage[], cacheControl: AnthropicCacheControl): Anthropic.Messages.MessageParam[] => {
 	const out = messages.slice() as Anthropic.Messages.MessageParam[]
-	const lastIdx = out.length - 1
+	// the latest user/assistant message: a trailing `role: "system"` message (editor context) stays after the breakpoint
+	let lastIdx = out.length - 1
+	while (lastIdx >= 0 && (out[lastIdx].role as string) === 'system') lastIdx -= 1
 	if (lastIdx < 0) return out
 	const last = out[lastIdx]
 
 	if (typeof last.content === 'string') {
-		if (last.content) out[lastIdx] = { ...last, content: [{ type: 'text', text: last.content, cache_control: anthropicCacheControl }] }
+		if (last.content) out[lastIdx] = { ...last, content: [{ type: 'text', text: last.content, cache_control: cacheControl }] }
 		return out
 	}
 
 	const blocks = last.content.slice()
 	for (let i = blocks.length - 1; i >= 0; i -= 1) {
 		if (_canCarryCacheControl(blocks[i] as { type: string; text?: string })) {
-			blocks[i] = { ...blocks[i], cache_control: anthropicCacheControl } as Anthropic.Messages.ContentBlockParam
+			blocks[i] = { ...blocks[i], cache_control: cacheControl } as Anthropic.Messages.ContentBlockParam
 			break
 		}
 	}
 	out[lastIdx] = { ...last, content: blocks }
 	return out
+}
+
+// Fills in the thinking options only some models accept (see anthropicModelFeatures).
+const THINKING_BINDING_BETA = 'thinking-binding-controls-2026-08-01'
+const anthropicThinkingOptions = (recognizedModelName: string | undefined, payload: { [key: string]: unknown }) => {
+	const thinking = payload.thinking as { type?: string } | undefined
+	if (!recognizedModelName || thinking?.type !== 'adaptive') return { payload, betas: [] as string[] }
+
+	const betas: string[] = []
+	const newThinking: { [key: string]: unknown } = { ...thinking }
+	// without it, these models return empty thinking text and the reasoning panel stays blank
+	if (anthropicModelFeatures.summarizedThinkingDisplay.has(recognizedModelName)) newThinking.display = 'summarized'
+	// Thinking blocks are bound to everything before them; Kodia's history can legitimately change (a new turn's
+	// system prompt, a model switch, context clearing). Drop the stale blocks instead of failing with a 400.
+	if (anthropicModelFeatures.thinkingBlockBinding.has(recognizedModelName)) {
+		newThinking.block_binding = { prefix_mismatch_behavior: 'drop_block' }
+		betas.push(THINKING_BINDING_BETA)
+	}
+	return { payload: { ...payload, thinking: newThinking }, betas }
 }
 
 // Anthropic's `input_tokens` already excludes cached tokens, so the fields map 1:1.
@@ -716,9 +741,10 @@ const anthropicUsage = (usage: Anthropic.Messages.Usage): LLMUsage => ({
 
 
 // ------------ ANTHROPIC ------------
-const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName: modelName_, _setAborter, separateSystemMessage, chatMode, mcpTools }: SendChatParams_Internal) => {
+const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName: modelName_, _setAborter, separateSystemMessage, chatMode, mcpTools, promptCacheTTL }: SendChatParams_Internal) => {
 	const {
 		modelName,
+		recognizedModelName,
 		specialToolFormat,
 	} = getModelCapabilities(providerName, modelName_, overridesOfModel)
 
@@ -727,13 +753,15 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 
 	// reasoning
 	const reasoningInfo = getSendableReasoningInfo('Chat', providerName, modelName_, modelSelectionOptions, overridesOfModel) // user's modelName_ here
-	const includeInPayload = providerReasoningIOSettings?.input?.includeInPayload?.(reasoningInfo) || {}
+	const { payload: includeInPayload, betas } = anthropicThinkingOptions(recognizedModelName, providerReasoningIOSettings?.input?.includeInPayload?.(reasoningInfo) || {})
+
+	const cacheControl = anthropicCacheControlOf(promptCacheTTL)
 
 	// anthropic-specific - max tokens
 	const maxTokens = getReservedOutputTokenSpace(providerName, modelName_, { isReasoningEnabled: !!reasoningInfo?.isReasoningEnabled, overridesOfModel })
 
 	// tools
-	const potentialTools = anthropicTools(chatMode, mcpTools)
+	const potentialTools = anthropicTools(chatMode, mcpTools, cacheControl)
 	const nativeToolsObj = potentialTools && specialToolFormat === 'anthropic-style' ?
 		{ tools: potentialTools, tool_choice: { type: 'auto' } } as const
 		: {}
@@ -746,14 +774,14 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 	});
 
 	const stream = anthropic.messages.stream({
-		system: anthropicSystemWithCacheControl(separateSystemMessage),
-		messages: anthropicMessagesWithCacheControl(messages as AnthropicLLMChatMessage[]),
+		system: anthropicSystemWithCacheControl(separateSystemMessage, cacheControl),
+		messages: anthropicMessagesWithCacheControl(messages as AnthropicLLMChatMessage[], cacheControl),
 		model: modelName,
 		max_tokens: maxTokens ?? 4_096, // anthropic requires this
 		...includeInPayload,
 		...nativeToolsObj,
 
-	})
+	}, betas.length ? { headers: { 'anthropic-beta': betas.join(',') } } : undefined)
 
 	// manually parse out tool results if XML
 	if (!specialToolFormat) {
@@ -824,6 +852,11 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 
 	// on done - (or when error/fail) - this is called AFTER last streamEvent
 	stream.on('finalMessage', (response) => {
+		// with drop_block, stale thinking blocks are dropped and listed here; worth a look if it happens every request
+		const dropped = ((response as { input_transformations?: { type?: string, reason?: string, path?: string }[] }).input_transformations ?? [])
+			.filter(t => t.type === 'thinking_dropped' && t.reason === 'prefix_binding_mismatch')
+		if (dropped.length) console.warn(`Kodia: the API dropped ${dropped.length} thinking block(s) bound to an earlier version of the conversation (first: ${dropped[0].path}).`)
+
 		const anthropicReasoning = response.content.filter(c => c.type === 'thinking' || c.type === 'redacted_thinking')
 		const toolCalls = response.content
 			.filter(c => c.type === 'tool_use')

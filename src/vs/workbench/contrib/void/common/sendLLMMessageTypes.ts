@@ -42,6 +42,9 @@ export type AnthropicLLMChatMessage = {
 	content: string | (
 		{ type: 'text'; text: string; } | { type: 'tool_result'; tool_use_id: string; content: string; } | AnthropicImageBlock
 	)[]
+} | {
+	role: 'system', // mid-conversation system message, on the Claude models that accept one (anthropicModelFeatures)
+	content: string,
 }
 export type OpenAILLMChatMessage = {
 	role: 'system' | 'developer';
@@ -123,12 +126,14 @@ type SendLLMType = {
 	separateSystemMessage: string | undefined;
 	chatMode: ChatMode | null;
 	promptCacheKey?: string; // the same for requests sharing a prefix (e.g. a thread's agent loop), to help provider-side prompt caching
+	promptCacheTTL?: '1h'; // Anthropic: keep the prompt cache 1 hour instead of 5 minutes
 } | {
 	messagesType: 'FIMMessage';
 	messages: LLMFIMMessage;
 	separateSystemMessage?: undefined;
 	chatMode?: undefined;
 	promptCacheKey?: undefined;
+	promptCacheTTL?: undefined;
 }
 export type ServiceSendLLMMessageParams = {
 	onText: OnText;

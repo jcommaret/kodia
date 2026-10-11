@@ -544,7 +544,7 @@ Always bias towards writing as little as possible - NEVER write the whole file. 
 Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 	}
 
-	details.push(`Each user message ends with a <workspace_context> block: the user's active file, open files${mode === 'agent' ? ', persistent terminals' : ''} and the date at the time they sent it. The block of the latest user message is the current one.`)
+	details.push(`Each user message comes with a <workspace_context> block: the user's active file, open files${mode === 'agent' ? ', persistent terminals' : ''} and the date at the time they sent it. The block of the latest user message is the current one.`)
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)
 	details.push(`Always use MARKDOWN to format lists, bullet points, etc. Do NOT write tables.`)
 

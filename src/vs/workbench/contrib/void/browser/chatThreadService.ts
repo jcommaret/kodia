@@ -861,6 +861,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 					messagesType: 'chatMessages',
 					chatMode,
 					messages: messages,
+					promptCacheKey: threadId, // every request of the agent loop resends the thread's prefix
 					modelSelection,
 					modelSelectionOptions,
 					overridesOfModel,

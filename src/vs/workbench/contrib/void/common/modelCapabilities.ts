@@ -1401,6 +1401,14 @@ const mistralReasoningEffortCapabilities = {
 	openSourceThinkTags: ['<think>', '</think>'] as [string, string],
 }
 
+// Large 4 takes the same 'none' / 'high' reasoning_effort, but Kodia defaults it to 'high': without the
+// param it doesn't think at all, and Mistral recommends 'high' for code and agentic work.
+// https://docs.mistral.ai/capabilities/reasoning
+const mistralLarge4ReasoningEffortCapabilities = {
+	...mistralReasoningEffortCapabilities,
+	reasoningSlider: { type: 'effort_slider' as const, values: ['none', 'high'], default: 'high' },
+}
+
 // GLM 5.3: thinking cannot be disabled; official efforts are low / high / max (default max).
 // https://z.ai/blog/glm-5.3 — Mistral hosts it unmodified: https://docs.mistral.ai/models/zai-glm-5-3
 const glm53ReasoningEffortCapabilities = {
@@ -1439,9 +1447,8 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 			openSourceThinkTags: ['<think>', '</think>'] as [string, string],
 		},
 	},
-	'mistral-large-4': { // Mistral Large 4 "Le Chonk", public preview — https://docs.mistral.ai/models/mistral-large-4-0
-		// Mistral's model page claims 1M, but the preview API and every gateway report 512k; keep the lower bound.
-		contextWindow: 524_288,
+	'mistral-large-4': { // Mistral Large 4 "Le Chonk", public preview (API id also mistral-large-4-0) — https://docs.mistral.ai/models/mistral-large-4-0
+		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 262_144,
 		cost: { input: 0.68, cache_read: 0.07, output: 2.09 }, // promotional rate; list price is double
 		supportsFIM: true, // Activer le FIM
@@ -1449,14 +1456,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' }, // open-weight, weights announced for end of October 2026
 		supportsSystemMessage: 'system-role',
-		// reasoning_effort is accepted ('high' in Mistral's own example) but the allowed
-		// enum is undocumented for this model, so no slider — sending a wrong value 400s.
-		reasoningCapabilities: {
-			supportsReasoning: true as const,
-			canIOReasoning: true,
-			canTurnOffReasoning: false,
-			openSourceThinkTags: ['<think>', '</think>'] as [string, string],
-		},
+		reasoningCapabilities: mistralLarge4ReasoningEffortCapabilities,
 	},
 	'mistral-large-latest': { // Mistral Large 3 — https://docs.mistral.ai/models/model-cards/mistral-large-3-25-12
 		contextWindow: 256_000,
@@ -2046,6 +2046,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'mistralai/mistral-large-4-0': {
 		...mistralModelOptions['mistral-large-4'],
+		contextWindow: 1_048_576, // https://openrouter.ai/mistralai/mistral-large-4-0
 		downloadable: false,
 	},
 	'mistralai/mistral-large-2512': {

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { hash } from '../../../../base/common/hash.js';
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { EndOfLinePreference, ITextModel } from '../../../../editor/common/model.js';
@@ -802,6 +803,7 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 						stopTokens: stopTokens,
 					}
 				}),
+				promptCacheKey: `autocomplete-${hash(model.uri.toString()).toString(36)}`, // hashed: the key shouldn't carry file paths
 				modelSelection,
 				modelSelectionOptions,
 				overridesOfModel,

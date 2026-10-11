@@ -53,7 +53,7 @@ type SendChatParams_Internal = InternalCommonMessageParams & {
 	promptCacheKey?: string;
 	promptCacheTTL?: '1h';
 }
-type SendFIMParams_Internal = InternalCommonMessageParams & { messages: LLMFIMMessage; separateSystemMessage: string | undefined; }
+type SendFIMParams_Internal = InternalCommonMessageParams & { messages: LLMFIMMessage; separateSystemMessage: string | undefined; promptCacheKey?: string; }
 export type ListParams_Internal<ModelResponse> = ModelListParams<ModelResponse>
 
 
@@ -877,7 +877,7 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 
 // ------------ MISTRAL ------------
 // https://docs.mistral.ai/api/#tag/fim
-const sendMistralFIM = ({ messages, onFinalMessage, onError, settingsOfProvider, overridesOfModel, modelName: modelName_, _setAborter, providerName }: SendFIMParams_Internal) => {
+const sendMistralFIM = ({ messages, onFinalMessage, onError, settingsOfProvider, overridesOfModel, modelName: modelName_, _setAborter, providerName, promptCacheKey }: SendFIMParams_Internal) => {
 	const { modelName, supportsFIM } = getModelCapabilities(providerName, modelName_, overridesOfModel)
 	if (!supportsFIM) {
 		if (modelName === modelName_)
@@ -888,6 +888,9 @@ const sendMistralFIM = ({ messages, onFinalMessage, onError, settingsOfProvider,
 	}
 
 	const mistral = new MistralCore({ apiKey: settingsOfProvider.mistral.apiKey })
+	// Autocomplete aborts the previous request on every keystroke; without this it ran to completion and was billed anyway.
+	const controller = new AbortController()
+	_setAborter(() => controller.abort())
 	fimComplete(mistral,
 		{
 			model: modelName,
@@ -896,11 +899,18 @@ const sendMistralFIM = ({ messages, onFinalMessage, onError, settingsOfProvider,
 			stream: false,
 			maxTokens: 300,
 			stop: messages.stopTokens,
-		})
+			promptCacheKey, // completions in the same file share most of their prompt
+		},
+		{ signal: controller.signal })
 		.then(async response => {
-
-			// unfortunately, _setAborter() does not exist
-			let content = response?.ok ? response.value.choices?.[0]?.message?.content ?? '' : '';
+			// the SDK returns HTTP errors (and aborts) instead of throwing them
+			if (!response.ok) {
+				const { error } = response
+				const isUnauthorized = (error as { statusCode?: number }).statusCode === 401
+				onError({ message: isUnauthorized ? invalidApiKeyMessage(providerName) : error.message, fullError: error })
+				return
+			}
+			const content = response.value.choices?.[0]?.message?.content ?? ''
 			const fullText = typeof content === 'string' ? content
 				: content.map(chunk => (chunk.type === 'text' ? chunk.text : '')).join('')
 

@@ -115,7 +115,7 @@ export const sendLLMMessage = async ({
 		}
 		if (messagesType === 'FIMMessage') {
 			if (sendFIM) {
-				await sendFIM({ messages: messages_, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName, _setAborter, providerName, separateSystemMessage })
+				await sendFIM({ messages: messages_, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName, _setAborter, providerName, separateSystemMessage, promptCacheKey })
 				return
 			}
 			onError({ message: `Error running Autocomplete with ${providerName} - ${modelName}.`, fullError: null })

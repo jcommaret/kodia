@@ -10,6 +10,7 @@ import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { spawn as ptySpawn, type IPty } from 'node-pty';
 import { isMacintosh } from '../../../../base/common/platform.js';
+import { removeAnsiEscapeCodes } from '../../../../base/common/strings.js';
 import {
 	AFM_HOMEBREW_FORMULA,
 	AFM_HOMEBREW_TAP,
@@ -19,6 +20,7 @@ import {
 	FM_CLI_DEFAULT_PORT,
 	FM_CLI_MIN_MACOS_VERSION,
 	FM_CLI_PATH,
+	FM_LICENSE_COMMAND,
 	IAppleFoundationModelsMainService,
 	MACLOCAL_API_REPO_URL,
 } from '../common/appleFoundationModelsTypes.js';
@@ -189,6 +191,15 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 			const crashInfo = getCrashInfo();
 			if (crashInfo) {
 				log.push(crashInfo);
+				// "YOU HAVE NOT AGREED TO THE FOUNDATION MODELS CLI LEGAL NOTICE & TERMS." — only the user can accept them
+				if (/have not agreed/i.test(crashInfo)) {
+					return {
+						ok: false,
+						reason: 'fm-license-required',
+						log,
+						errorMessage: `macOS needs Apple's Foundation Models terms accepted once on this Mac before \`fm\` can run. Run \`${FM_LICENSE_COMMAND}\` in a terminal, accept the terms, then retry.`,
+					};
+				}
 				return { ok: false, reason: 'fm-crashed', log, errorMessage: crashInfo };
 			}
 			await sleep(1000);
@@ -248,7 +259,8 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 			}
 		});
 		ptyProcess.onExit(({ exitCode, signal }) => {
-			crashInfo = `fm exited (code=${exitCode}, signal=${signal ?? 'null'}): ${output.join('').trim() || '(no output)'}`;
+			// the pty passes fm's terminal colors through; they'd show up as escape codes in the notification
+			crashInfo = `fm exited (code=${exitCode}, signal=${signal ?? 'null'}): ${removeAnsiEscapeCodes(output.join('')).trim() || '(no output)'}`;
 		});
 
 		this._child = wrapPty(ptyProcess);

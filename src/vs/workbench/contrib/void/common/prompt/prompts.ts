@@ -675,7 +675,7 @@ export const chat_userMessageContent = async (
 ) => {
 
 	const selnsStrs = await Promise.all(
-		(currSelns ?? []).map(async (s) =>
+		(currSelns ?? []).filter(s => s.type !== 'Image').map(async (s) => // images are sent as images, not as text
 			messageOfSelection(s, {
 				...opts,
 				folderOpts: { maxChildren: 100, maxCharsPerFile: 100_000, }

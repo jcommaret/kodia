@@ -91,7 +91,21 @@ export type StagingSelectionItem = {
 	uri: URI;
 	language?: undefined;
 	state?: undefined;
+} | {
+	// pasted or dropped into the chat; sent to the model as an image, not as text
+	type: 'Image';
+	id: string;
+	name: string;
+	mimeType: ChatImageMimeType;
+	dataBase64: string;
+	uri?: undefined;
+	language?: undefined;
+	state?: undefined;
 }
+
+// the image types every vision-capable provider accepts (Anthropic, OpenAI, Gemini)
+export const chatImageMimeTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+export type ChatImageMimeType = typeof chatImageMimeTypes[number]
 
 
 // a link to a symbol (an underlined link to a piece of code)

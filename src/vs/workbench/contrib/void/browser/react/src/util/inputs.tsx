@@ -20,6 +20,8 @@ import { URI } from '../../../../../../../base/common/uri.js';
 import { getBasename, getFolderName } from '../sidebar-tsx/SidebarChat.js';
 import { ChevronRight, File, Folder, FolderClosed, LucideProps } from 'lucide-react';
 import { StagingSelectionItem } from '../../../../common/chatThreadServiceTypes.js';
+import { getModelCapabilities } from '../../../../common/modelCapabilities.js';
+import { chatImageOfFile, isChatImageFile } from './chatImages.js';
 import { DiffEditorWidget } from '../../../../../../../editor/browser/widget/diffEditor/diffEditorWidget.js';
 import { extractSearchReplaceBlocks, ExtractedSearchReplaceBlock } from '../../../../common/helpers/extractCodeFromResult.js';
 import { IAccessibilitySignalService } from '../../../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
@@ -346,6 +348,7 @@ type InputBox2Props = {
 	placeholder: string;
 	multiline: boolean;
 	enableAtToMention?: boolean;
+	enableImageAttachments?: boolean; // paste or drop images to attach them to the chat message
 	fnsRef?: { current: null | TextAreaFns };
 	className?: string;
 	onChangeText?: (value: string) => void;
@@ -354,7 +357,7 @@ type InputBox2Props = {
 	onBlur?: (e: React.FocusEvent<HTMLTextAreaElement>) => void;
 	onChangeHeight?: (newHeight: number) => void;
 }
-export const VoidInputBox2 = forwardRef<HTMLTextAreaElement, InputBox2Props>(function X({ initValue, placeholder, multiline, enableAtToMention, fnsRef, className, onKeyDown, onFocus, onBlur, onChangeText }, ref) {
+export const VoidInputBox2 = forwardRef<HTMLTextAreaElement, InputBox2Props>(function X({ initValue, placeholder, multiline, enableAtToMention, enableImageAttachments, fnsRef, className, onKeyDown, onFocus, onBlur, onChangeText }, ref) {
 
 
 	// mirrors whatever is in ref
@@ -362,6 +365,48 @@ export const VoidInputBox2 = forwardRef<HTMLTextAreaElement, InputBox2Props>(fun
 
 	const chatThreadService = accessor.get('IChatThreadService')
 	const languageService = accessor.get('ILanguageService')
+	const notificationService = accessor.get('INotificationService')
+	const voidSettingsService = accessor.get('IVoidSettingsService')
+
+	// Attaches the image files among `files`; returns whether there were any (so the caller knows the
+	// paste/drop was about images). Refused up front when the chat model can't read images.
+	const attachImageFiles = useCallback((files: File[]): boolean => {
+		const images = files.filter(isChatImageFile)
+		if (images.length === 0) return false
+
+		const { modelSelectionOfFeature, overridesOfModel } = voidSettingsService.state
+		const modelSelection = modelSelectionOfFeature['Chat']
+		const supportsVision = !!modelSelection && !!getModelCapabilities(modelSelection.providerName, modelSelection.modelName, overridesOfModel).supportsVision
+		if (!supportsVision) {
+			notificationService.warn(`${modelSelection?.modelName ?? 'The selected model'} can't read images. Pick a model with vision (Claude, GPT, Gemini, Grok...), or enable "supportsVision" for it in the model settings.`)
+			return true
+		}
+
+		for (const file of images) {
+			chatImageOfFile(file)
+				.then(image => chatThreadService.addNewStagingSelection(image))
+				.catch(e => notificationService.warn(`Could not attach ${file.name || 'the image'}: ${e}`))
+		}
+		return true
+	}, [chatThreadService, notificationService, voidSettingsService])
+
+	const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+		if (!enableImageAttachments) return
+		if (attachImageFiles(Array.from(e.clipboardData.files))) e.preventDefault() // otherwise, a regular text paste
+	}, [enableImageAttachments, attachImageFiles])
+
+	const onDragOver = useCallback((e: React.DragEvent<HTMLTextAreaElement>) => {
+		if (!enableImageAttachments) return
+		if (Array.from(e.dataTransfer.items).some(item => item.kind === 'file' && item.type.startsWith('image/'))) e.preventDefault() // allow the drop
+	}, [enableImageAttachments])
+
+	const onDrop = useCallback((e: React.DragEvent<HTMLTextAreaElement>) => {
+		if (!enableImageAttachments) return
+		if (attachImageFiles(Array.from(e.dataTransfer.files))) {
+			e.preventDefault()
+			e.stopPropagation() // keep the workbench from also opening the file
+		}
+	}, [enableImageAttachments, attachImageFiles])
 
 	const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
 	const selectedOptionRef = useRef<HTMLDivElement>(null);
@@ -750,6 +795,10 @@ export const VoidInputBox2 = forwardRef<HTMLTextAreaElement, InputBox2Props>(fun
 
 			onFocus={onFocus}
 			onBlur={onBlur}
+
+			onPaste={onPaste}
+			onDragOver={onDragOver}
+			onDrop={onDrop}
 
 			disabled={!isEnabled}
 

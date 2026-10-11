@@ -1389,6 +1389,11 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		const originalFileCode = model.getValue(EndOfLinePreference.LF)
 		const originalCode = startRange === 'fullFile' ? originalFileCode : originalFileCode.split('\n').slice((startRange[0] - 1), (startRange[1] - 1) + 1).join('\n')
 		const language = model.getLanguageId()
+		// what the model should output if it kept the code as is, in the format each prompt asks for
+		// (sent only to models with predicted outputs, which then write the unchanged parts much faster)
+		const prediction = from === 'ClickApply'
+			? `${tripleTick[0]}${language}\n${originalCode}\n${tripleTick[1]}`
+			: `${tripleTick[0]}${language}\n<${quickEditFIMTags.midTag}>${originalCode}</${quickEditFIMTags.midTag}>\n${tripleTick[1]}`
 		let messages: LLMChatMessage[]
 		let separateSystemMessage: string | undefined
 		if (from === 'ClickApply') {
@@ -1513,6 +1518,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 					overridesOfModel,
 					separateSystemMessage,
 					chatMode: null, // not chat
+					prediction,
 					onText: (params) => {
 						const { fullText: fullText_ } = params
 						const newText_ = fullText_.substring(fullTextSoFar.length, Infinity)

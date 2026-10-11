@@ -127,6 +127,7 @@ type SendLLMType = {
 	chatMode: ChatMode | null;
 	promptCacheKey?: string; // the same for requests sharing a prefix (e.g. a thread's agent loop), to help provider-side prompt caching
 	promptCacheTTL?: '1h'; // Anthropic: keep the prompt cache 1 hour instead of 5 minutes
+	prediction?: string; // the output we expect (e.g. the code being rewritten), sent only to models with supportsPredictedOutputs
 } | {
 	messagesType: 'FIMMessage';
 	messages: LLMFIMMessage;
@@ -134,6 +135,7 @@ type SendLLMType = {
 	chatMode?: undefined;
 	promptCacheKey?: string; // the same for completions in one file (Mistral only)
 	promptCacheTTL?: undefined;
+	prediction?: undefined;
 }
 export type ServiceSendLLMMessageParams = {
 	onText: OnText;

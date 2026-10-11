@@ -52,6 +52,7 @@ type SendChatParams_Internal = InternalCommonMessageParams & {
 	mcpTools: InternalToolInfo[] | undefined;
 	promptCacheKey?: string;
 	promptCacheTTL?: '1h';
+	prediction?: string;
 }
 type SendFIMParams_Internal = InternalCommonMessageParams & { messages: LLMFIMMessage; separateSystemMessage: string | undefined; promptCacheKey?: string; }
 export type ListParams_Internal<ModelResponse> = ModelListParams<ModelResponse>
@@ -471,13 +472,14 @@ const openAICompatibleUsage = (usage: unknown): LLMUsage | undefined => {
 	return { input: u.prompt_tokens - cacheRead, output: u.completion_tokens ?? 0, cacheRead }
 }
 
-const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, modelName: modelName_, _setAborter, providerName, chatMode, separateSystemMessage, overridesOfModel, mcpTools, promptCacheKey }: SendChatParams_Internal) => {
+const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, modelName: modelName_, _setAborter, providerName, chatMode, separateSystemMessage, overridesOfModel, mcpTools, promptCacheKey, prediction }: SendChatParams_Internal) => {
 	const {
 		modelName,
 		specialToolFormat,
 		reasoningCapabilities,
 		additionalOpenAIPayload,
 		contextWindow,
+		supportsPredictedOutputs,
 	} = getModelCapabilities(providerName, modelName_, overridesOfModel)
 
 	const { providerReasoningIOSettings } = getProviderCapabilities(providerName)
@@ -514,6 +516,8 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		stream: true,
 		...(providersWithStreamUsageOption.has(providerName) ? { stream_options: { include_usage: true } } : {}),
 		...(promptCacheKey && providersWithPromptCacheKey.has(providerName) ? { prompt_cache_key: promptCacheKey } : {}),
+		// the model generates the unchanged parts of a rewrite much faster when it's told what to expect
+		...(prediction && supportsPredictedOutputs ? { prediction: { type: 'content' as const, content: prediction } } : {}),
 		...nativeToolsObj,
 		...reasoningAndExtraPayload,
 		// max_completion_tokens: maxTokens,

@@ -50,6 +50,7 @@ type SendChatParams_Internal = InternalCommonMessageParams & {
 	separateSystemMessage: string | undefined;
 	chatMode: ChatMode | null;
 	mcpTools: InternalToolInfo[] | undefined;
+	promptCacheKey?: string;
 }
 type SendFIMParams_Internal = InternalCommonMessageParams & { messages: LLMFIMMessage; separateSystemMessage: string | undefined; }
 export type ListParams_Internal<ModelResponse> = ModelListParams<ModelResponse>
@@ -450,6 +451,12 @@ const _trimMessagesForToolBudget = (
 // API version) may reject the unknown param; we still read `usage` from them if they send it anyway.
 const providersWithStreamUsageOption: ReadonlySet<ProviderName> = new Set<ProviderName>(['openAI', 'openRouter', 'xAI', 'deepseek'])
 
+// Mistral caches prompt prefixes on its own (billed at 10% of the input price); sending the same
+// `prompt_cache_key` for requests that share a prefix raises the hit rate. Strict APIs reject unknown
+// params, so only providers that document it get it.
+// https://docs.mistral.ai/studio-api/conversations/advanced/prompt-caching
+const providersWithPromptCacheKey: ReadonlySet<ProviderName> = new Set<ProviderName>(['mistral'])
+
 // OpenAI-compatible `prompt_tokens` includes cached tokens (DeepSeek reports them as `prompt_cache_hit_tokens`).
 const openAICompatibleUsage = (usage: unknown): LLMUsage | undefined => {
 	if (!usage || typeof usage !== 'object') return undefined
@@ -463,7 +470,7 @@ const openAICompatibleUsage = (usage: unknown): LLMUsage | undefined => {
 	return { input: u.prompt_tokens - cacheRead, output: u.completion_tokens ?? 0, cacheRead }
 }
 
-const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, modelName: modelName_, _setAborter, providerName, chatMode, separateSystemMessage, overridesOfModel, mcpTools }: SendChatParams_Internal) => {
+const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, modelName: modelName_, _setAborter, providerName, chatMode, separateSystemMessage, overridesOfModel, mcpTools, promptCacheKey }: SendChatParams_Internal) => {
 	const {
 		modelName,
 		specialToolFormat,
@@ -505,6 +512,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		messages: preparedMessages,
 		stream: true,
 		...(providersWithStreamUsageOption.has(providerName) ? { stream_options: { include_usage: true } } : {}),
+		...(promptCacheKey && providersWithPromptCacheKey.has(providerName) ? { prompt_cache_key: promptCacheKey } : {}),
 		...nativeToolsObj,
 		...reasoningAndExtraPayload,
 		// max_completion_tokens: maxTokens,

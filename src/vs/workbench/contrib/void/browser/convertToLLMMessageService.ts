@@ -6,7 +6,7 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ChatMessage, StagingSelectionItem } from '../common/chatThreadServiceTypes.js';
-import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities } from '../common/modelCapabilities.js';
+import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities, anthropicModelFeatures } from '../common/modelCapabilities.js';
 import { estimateTokens } from '../common/tokenizer.js';
 import { reParsedToolXMLString, chat_systemMessage, chat_filesOverview, chat_workspaceContext } from '../common/prompt/prompts.js';
 import { AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
@@ -173,7 +173,16 @@ type AnthropicOrOpenAILLMMessage = AnthropicLLMChatMessage | OpenAILLMChatMessag
 
 type AnthropicToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string; }
 
-const prepareMessages_anthropic_tools = (messages: SimpleLLMMessage[], supportsAnthropicReasoning: boolean): AnthropicOrOpenAILLMMessage[] => {
+// The <workspace_context> block chatThreadService appends to user messages (chat_workspaceContext)
+const splitWorkspaceContext = (content: string): { text: string, workspaceContext: string | null } => {
+	const start = content.lastIndexOf('<workspace_context>\n')
+	if (start === -1 || !content.endsWith('</workspace_context>')) return { text: content, workspaceContext: null }
+	return { text: content.slice(0, start).trimEnd(), workspaceContext: content.slice(start) }
+}
+
+// sendWorkspaceContextAsSystem: send each user message's editor context as a `role: "system"` message right
+// after it — the operator channel, which text typed into a user message can't imitate.
+const prepareMessages_anthropic_tools = (messages: SimpleLLMMessage[], supportsAnthropicReasoning: boolean, sendWorkspaceContextAsSystem: boolean): AnthropicOrOpenAILLMMessage[] => {
 	const newMessages: AnthropicLLMChatMessage[] = []
 
 	// the current turn: its assistant message, and the user message collecting its tool results
@@ -199,10 +208,12 @@ const prepareMessages_anthropic_tools = (messages: SimpleLLMMessage[], supportsA
 		}
 
 		if (currMsg.role === 'user') {
+			const { text, workspaceContext } = sendWorkspaceContextAsSystem ? splitWorkspaceContext(currMsg.content) : { text: currMsg.content, workspaceContext: null }
 			newMessages.push({
 				role: 'user',
-				content: currMsg.images?.length ? [...currMsg.images.map(anthropicImageBlock), { type: 'text', text: currMsg.content }] : currMsg.content,
+				content: currMsg.images?.length ? [...currMsg.images.map(anthropicImageBlock), { type: 'text', text }] : text,
 			})
+			if (workspaceContext) newMessages.push({ role: 'system', content: workspaceContext })
 			turn = null
 			continue
 		}
@@ -297,6 +308,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	contextWindow,
 	reservedOutputTokenSpace,
 	imageFormat,
+	sendWorkspaceContextAsSystem,
 }: {
 	messages: SimpleLLMMessage[],
 	systemMessage: string,
@@ -307,6 +319,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	contextWindow: number,
 	reservedOutputTokenSpace: number | null | undefined,
 	imageFormat: ImageFormat, // only used by XML tool calling, whose messages can go to any provider
+	sendWorkspaceContextAsSystem: boolean,
 }): { messages: AnthropicOrOpenAILLMMessage[], separateSystemMessage: string | undefined } => {
 
 	reservedOutputTokenSpace = Math.max(
@@ -430,7 +443,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 		llmChatMessages = prepareMessages_XML_tools(messages as SimpleLLMMessage[], supportsAnthropicReasoning, imageFormat)
 	}
 	else if (specialToolFormat === 'anthropic-style') {
-		llmChatMessages = prepareMessages_anthropic_tools(messages as SimpleLLMMessage[], supportsAnthropicReasoning)
+		llmChatMessages = prepareMessages_anthropic_tools(messages as SimpleLLMMessage[], supportsAnthropicReasoning, sendWorkspaceContextAsSystem)
 	}
 	else if (specialToolFormat === 'openai-style') {
 		llmChatMessages = prepareMessages_openai_tools(messages as SimpleLLMMessage[])
@@ -564,14 +577,15 @@ const prepareMessages = (params: {
 	supportsAnthropicReasoning: boolean,
 	contextWindow: number,
 	reservedOutputTokenSpace: number | null | undefined,
-	providerName: ProviderName
+	providerName: ProviderName,
+	sendWorkspaceContextAsSystem?: boolean,
 }): { messages: LLMChatMessage[], separateSystemMessage: string | undefined } => {
 
 	const specialFormat = params.specialToolFormat // this is just for ts stupidness
 
 	// if need to convert to gemini style of messaes, do that (treat as anthropic style, then convert to gemini style)
 	if (params.providerName === 'gemini' || specialFormat === 'gemini-style') {
-		const res = prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat === 'gemini-style' ? 'anthropic-style' : undefined, imageFormat: 'anthropic' })
+		const res = prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat === 'gemini-style' ? 'anthropic-style' : undefined, imageFormat: 'anthropic', sendWorkspaceContextAsSystem: false })
 		const messages = res.messages as AnthropicLLMChatMessage[]
 		const messages2 = prepareGeminiMessages(messages)
 		return { messages: messages2, separateSystemMessage: res.separateSystemMessage }
@@ -579,7 +593,7 @@ const prepareMessages = (params: {
 
 	// with XML tools, the messages still go to the provider's own API, which sets the image format
 	const imageFormat: ImageFormat = params.providerName === 'anthropic' ? 'anthropic' : 'openai'
-	return prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat, imageFormat })
+	return prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat, imageFormat, sendWorkspaceContextAsSystem: !!params.sendWorkspaceContextAsSystem })
 }
 
 
@@ -801,6 +815,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 			contextWindow,
 			supportsSystemMessage,
 			supportsVision,
+			recognizedModelName,
 		} = getModelCapabilities(providerName, modelName, overridesOfModel)
 
 		const { disableSystemMessage } = this.voidSettingsService.state.globalSettings;
@@ -823,6 +838,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 			contextWindow,
 			reservedOutputTokenSpace,
 			providerName,
+			sendWorkspaceContextAsSystem: providerName === 'anthropic' && !!recognizedModelName && anthropicModelFeatures.midConversationSystemMessages.has(recognizedModelName),
 		})
 		return { messages, separateSystemMessage };
 	}

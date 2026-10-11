@@ -1497,6 +1497,26 @@ export const Settings = () => {
 
 
 										<div className='w-full'>
+											<h4 className={`text-base`}>Prompt cache</h4>
+											<div className='text-sm text-void-fg-3 mt-1'>{`Claude keeps a thread cached for 5 minutes: a reply after that pays the full input price again. With 1 hour, writing the cache costs 2× the input price instead of 1.25×, which pays off from 3 requests.`}</div>
+
+											<div className='my-2'>
+												<ErrorBoundary>
+													<div className='flex items-center gap-x-2 my-2'>
+														<VoidSwitch
+															size='xs'
+															value={!!settingsState.globalSettings.oneHourPromptCache}
+															onChange={(newVal) => voidSettingsService.setGlobalSetting('oneHourPromptCache', newVal)}
+														/>
+														<span className='text-void-fg-3 text-xs pointer-events-none'>Keep Claude's prompt cache for 1 hour</span>
+													</div>
+												</ErrorBoundary>
+											</div>
+										</div>
+
+
+
+										<div className='w-full'>
 											<h4 className={`text-base`}>Editor</h4>
 											<div className='text-sm text-void-fg-3 mt-1'>{`Settings that control the visibility of Kodia suggestions in the code editor.`}</div>
 

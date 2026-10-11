@@ -21,6 +21,8 @@ export const FM_CLI_PATH = '/usr/bin/fm';
 export const FM_CLI_MIN_MACOS_VERSION = 27;
 /** distinct default port so a leftover/manually-started `afm` process never gets mistaken for `fm serve` (or vice versa) */
 export const FM_CLI_DEFAULT_PORT = 9998;
+/** `fm` refuses to run (exit 69) until an admin accepts Apple's terms once for the whole machine, with this command */
+export const FM_LICENSE_COMMAND = 'sudo fm license';
 
 /** model ids Kodia will actually try to chat-complete against for this provider; excludes embedding-only ids like `apple-nl-contextual-en` that `afm`/`fm` also list in /v1/models */
 export const APPLE_FOUNDATION_MODELS_CHAT_MODEL_IDS = ['foundation', 'system', 'pcc'] as const;
@@ -37,6 +39,7 @@ export type AppleFoundationModelsEnsureFailureReason =
 	| 'install-failed'
 	| 'afm-missing'
 	| 'fm-missing'
+	| 'fm-license-required'
 	| 'fm-crashed'
 	| 'server-timeout';
 

@@ -100,3 +100,6 @@ import '../common/voidUpdateService.js'
 
 // model service
 import '../common/voidModelService.js'
+
+// project memory (.kodia/memory.md)
+import '../common/projectMemoryService.js'

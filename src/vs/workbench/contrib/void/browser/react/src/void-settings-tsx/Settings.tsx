@@ -21,7 +21,8 @@ import { getModelCapabilities, modelOverrideKeys, ModelOverrides } from '../../.
 import { TransferEditorType, TransferFilesInfo } from '../../../extensionTransferTypes.js';
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { useMCPServiceState } from '../util/services.js';
-import { OPT_OUT_KEY, PROJECT_MEMORY_STORAGE_KEY } from '../../../../common/storageKeys.js';
+import { OPT_OUT_KEY } from '../../../../common/storageKeys.js';
+import { PROJECT_MEMORY_FILE_PATH } from '../../../../common/projectMemoryService.js';
 import { StorageScope, StorageTarget } from '../../../../../../../platform/storage/common/storage.js';
 
 type Tab =
@@ -1201,7 +1202,20 @@ export const Settings = () => {
 	const [s, ss] = useState(0)
 
 	const workspaceName = workspaceContextService.getWorkspace().folders[0]?.name
-	const [projectMemory, setProjectMemory] = useState(() => storageService.get(PROJECT_MEMORY_STORAGE_KEY, StorageScope.WORKSPACE) ?? '')
+	const projectMemoryService = accessor.get('IProjectMemoryService')
+	const [projectMemory, setProjectMemory] = useState(() => projectMemoryService.getMemory())
+	const projectMemoryDraftRef = useRef(projectMemory)
+	useEffect(() => {
+		// the file changed (agent, editor, git): show it, unless it's what this page just saved
+		const d = projectMemoryService.onDidChange(() => {
+			const memory = projectMemoryService.getMemory()
+			if (memory === projectMemoryDraftRef.current) return
+			projectMemoryDraftRef.current = memory
+			setProjectMemory(memory)
+			ss(s => s + 1) // remount the box with the new text
+		})
+		return () => d.dispose()
+	}, [projectMemoryService])
 
 	const handleUpload = (t: 'Chats' | 'Settings') => (e: React.ChangeEvent<HTMLInputElement>,) => {
 		const files = e.target.files
@@ -1703,10 +1717,10 @@ Alternatively, place a \`.voidrules\` file in the root of your workspace.
 								<div className='max-w-[600px]'>
 									<h2 className='text-3xl mb-2'>Project Memory</h2>
 									<h4 className='text-void-fg-3 mb-4'>
-										{`Durable notes the agent has saved across sessions (via write_project_memory), stored locally on this machine.`}
+										{`Durable notes the agent keeps across sessions (via write_project_memory), in ${PROJECT_MEMORY_FILE_PATH} in the project: commit it to share it with your team, or add it to .gitignore.`}
 									</h4>
 									<div className='text-void-fg-3 text-xs mb-4'>
-										{`Showing memory for the currently open project only: ${workspaceName ? `"${workspaceName}"` : 'this workspace'}. Each project keeps its own separate memory — open a different project to view or manage its memory instead.`}
+										{`Showing memory for the currently open project only: ${workspaceName ? `"${workspaceName}"` : 'this workspace'}. Each project keeps its own memory — open a different project to view or manage its memory instead.`}
 									</div>
 									<ErrorBoundary>
 										<VoidInputBox2
@@ -1716,18 +1730,30 @@ Alternatively, place a \`.voidrules\` file in the root of your workspace.
 											placeholder='No project memory stored yet.'
 											multiline
 											onChangeText={(newText) => {
-												setProjectMemory(newText)
-												storageService.store(PROJECT_MEMORY_STORAGE_KEY, newText, StorageScope.WORKSPACE, StorageTarget.MACHINE)
+												projectMemoryDraftRef.current = newText
+											}}
+											onBlur={() => { // saved when leaving the box, not on every keystroke (it's a file)
+												const draft = projectMemoryDraftRef.current
+												if (draft === projectMemory) return
+												setProjectMemory(draft)
+												projectMemoryService.setMemory(draft).catch(e => notificationService.error(`Could not save the project memory: ${e}`))
 											}}
 										/>
 									</ErrorBoundary>
-									<div className='mt-2'>
+									<div className='mt-2 flex items-center gap-x-2'>
+										{projectMemoryService.memoryFileURI() && <VoidButtonBgDarken
+											className='px-4 py-1'
+											onClick={() => commandService.executeCommand('vscode.open', projectMemoryService.memoryFileURI())}
+										>
+											Open {PROJECT_MEMORY_FILE_PATH}
+										</VoidButtonBgDarken>}
 										<ConfirmButton
 											className='px-4 py-1'
 											onConfirm={() => {
-												storageService.remove(PROJECT_MEMORY_STORAGE_KEY, StorageScope.WORKSPACE)
+												projectMemoryDraftRef.current = ''
 												setProjectMemory('')
 												ss(s => s + 1)
+												projectMemoryService.setMemory('').catch(e => notificationService.error(`Could not delete the project memory: ${e}`))
 											}}
 										>
 											Delete Project Memory

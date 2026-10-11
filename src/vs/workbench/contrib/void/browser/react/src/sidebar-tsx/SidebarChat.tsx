@@ -1658,7 +1658,8 @@ const toolNameToDesc = (toolName: BuiltinToolName, _toolParams: BuiltinToolCallP
 		},
 		'write_project_memory': () => {
 			const toolParams = _toolParams as BuiltinToolCallParams['write_project_memory']
-			return { desc1: toolParams.mode === 'replace' ? 'Replacing memory' : 'Appending to memory' }
+			if (!toolParams.section) return { desc1: '' } // threads from before sections
+			return { desc1: toolParams.content.trim() ? `"${toolParams.section}"` : `Delete "${toolParams.section}"` }
 		}
 	}
 

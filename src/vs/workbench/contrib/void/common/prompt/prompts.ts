@@ -298,6 +298,7 @@ export const builtinTools: {
 		},
 	},
 
+	// not offered anymore (see toolsNotOfferedToModels): the memory is in every system prompt. Kept so older threads that used it still render.
 	read_project_memory: {
 		name: 'read_project_memory',
 		description: `Returns durable notes you've previously saved about this project (architecture, conventions, past decisions, gotchas) via write_project_memory. Empty if nothing has been saved yet.`,
@@ -343,10 +344,10 @@ export const builtinTools: {
 
 	write_project_memory: {
 		name: 'write_project_memory',
-		description: `Saves a durable note about this project that will persist across sessions and be readable via read_project_memory next time. Use this for things worth remembering long-term: architecture decisions, conventions, gotchas. Never save secrets, credentials, or other sensitive information. Capped at ~${MAX_PROJECT_MEMORY_TOKENS} tokens; oldest content is trimmed automatically once the cap is exceeded.`,
+		description: `Saves durable notes about this project for future sessions, in the project memory (\`.kodia/memory.md\` in the repo, shown to you in PROJECT MEMORY at the start of every conversation). The memory is organized in "## " sections; this rewrites one whole section, so merge what's already there into the new content rather than repeating it. Save things worth knowing in every session: architecture, conventions, commands, decisions and their reasons, pitfalls. Keep it short and current: replace outdated notes, and delete a section by passing empty content. Never save secrets, credentials, or other sensitive information. The whole memory is capped at ~${MAX_PROJECT_MEMORY_TOKENS} tokens; a write that would exceed it is rejected, so condense other sections first.`,
 		params: {
-			content: { description: `The note to save.` },
-			mode: { description: `Optional. "append" (default) adds to existing memory; "replace" overwrites it entirely.` },
+			section: { description: `The section title, e.g. "Architecture", "Conventions", "Commands", "Pitfalls". Reuse an existing title to rewrite that section.` },
+			content: { description: `The full new text of the section (markdown, no "## " heading). Empty to delete the section.` },
 		},
 	},
 
@@ -405,11 +406,15 @@ export const isABuiltinToolName = (toolName: string): toolName is BuiltinToolNam
 
 
 
+// built-in tools kept for older threads, but no longer given to models
+const toolsNotOfferedToModels: ReadonlySet<BuiltinToolName> = new Set(['read_project_memory'])
+
 export const availableTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined) => {
 
+	const offeredToolNames = (Object.keys(builtinTools) as BuiltinToolName[]).filter(toolName => !toolsNotOfferedToModels.has(toolName))
 	const builtinToolNames: BuiltinToolName[] | undefined = chatMode === 'normal' ? undefined
-		: chatMode === 'gather' ? (Object.keys(builtinTools) as BuiltinToolName[]).filter(toolName => !(toolName in approvalTypeOfBuiltinToolName))
-			: chatMode === 'agent' ? Object.keys(builtinTools) as BuiltinToolName[]
+		: chatMode === 'gather' ? offeredToolNames.filter(toolName => !(toolName in approvalTypeOfBuiltinToolName))
+			: chatMode === 'agent' ? offeredToolNames
 				: undefined
 
 	const effectiveBuiltinTools = builtinToolNames?.map(toolName => builtinTools[toolName]) ?? undefined

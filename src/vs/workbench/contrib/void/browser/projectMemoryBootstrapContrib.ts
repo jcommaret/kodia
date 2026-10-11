@@ -4,17 +4,22 @@
  *--------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
-import { PROJECT_MEMORY_BOOTSTRAP_ATTEMPTED_KEY, PROJECT_MEMORY_STORAGE_KEY } from '../common/storageKeys.js';
+import { IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
+import { PROJECT_MEMORY_BOOTSTRAP_ATTEMPTED_KEY } from '../common/storageKeys.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { isFeatureNameDisabled } from '../common/voidSettingsTypes.js';
 import { IChatThreadService } from './chatThreadService.js';
+import { VOID_OPEN_SIDEBAR_ACTION_ID } from './sidebarPane.js';
 
-const BOOTSTRAP_PROMPT = `This project has no saved project memory yet. Briefly explore this codebase (structure, purpose, tech stack, and any conventions worth remembering) and then call write_project_memory once with a concise initial summary to help future sessions. Don't make any other changes and don't ask any questions.`
+const BOOTSTRAP_PROMPT = `This project has no project memory yet. Briefly explore this codebase (purpose, structure, tech stack, how to build and test it, conventions worth following) and save what future sessions should know with write_project_memory, one section at a time (for example "Overview", "Architecture", "Commands", "Conventions"). Keep it concise. Don't make any other changes and don't ask any questions.`
 
-// Automatically bootstraps project memory the first time a workspace is opened, if none exists yet.
+// The first time a workspace without project memory is opened, offers to have the agent write it — in a
+// thread of its own, since it reads the codebase and costs tokens.
 class ProjectMemoryBootstrapContribution extends Disposable implements IWorkbenchContribution {
 	static readonly ID = 'workbench.contrib.void.projectMemoryBootstrap'
 
@@ -23,6 +28,9 @@ class ProjectMemoryBootstrapContribution extends Disposable implements IWorkbenc
 		@IWorkspaceContextService private readonly workspaceContext: IWorkspaceContextService,
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 		@IChatThreadService private readonly chatThreadService: IChatThreadService,
+		@IProjectMemoryService private readonly projectMemoryService: IProjectMemoryService,
+		@INotificationService private readonly notificationService: INotificationService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super()
 
@@ -33,7 +41,9 @@ class ProjectMemoryBootstrapContribution extends Disposable implements IWorkbenc
 	private async _maybeBootstrap() {
 		if (this.workspaceContext.getWorkspace().folders.length === 0) return
 		if (this.storageService.getBoolean(PROJECT_MEMORY_BOOTSTRAP_ATTEMPTED_KEY, StorageScope.WORKSPACE, false)) return
-		if (this.storageService.get(PROJECT_MEMORY_STORAGE_KEY, StorageScope.WORKSPACE)) return // already has memory; never overwrite
+
+		await this.projectMemoryService.whenReady
+		if (this.projectMemoryService.getMemory().trim()) return // already has memory (e.g. committed by a teammate)
 
 		await this.voidSettingsService.waitForInitState
 
@@ -42,11 +52,24 @@ class ProjectMemoryBootstrapContribution extends Disposable implements IWorkbenc
 		if (settingsState.globalSettings.chatMode !== 'agent') return // needs tool-calling to write memory
 		if (isFeatureNameDisabled('Chat', settingsState)) return // no usable model configured yet
 
-		// re-check after the await, and mark as attempted before running so we never fire twice
+		// re-check after the await, and mark as attempted before asking so we ask once per workspace
 		if (this.storageService.getBoolean(PROJECT_MEMORY_BOOTSTRAP_ATTEMPTED_KEY, StorageScope.WORKSPACE, false)) return
 		this.storageService.store(PROJECT_MEMORY_BOOTSTRAP_ATTEMPTED_KEY, true, StorageScope.WORKSPACE, StorageTarget.MACHINE)
 
+		this.notificationService.prompt(
+			Severity.Info,
+			`Kodia's agent can explore this project and write notes for future sessions in ${PROJECT_MEMORY_FILE_PATH}. It reads part of the codebase, which uses tokens.`,
+			[
+				{ label: 'Explore the project', run: () => this._bootstrap() },
+				{ label: 'Not now', run: () => { } },
+			],
+		)
+	}
+
+	private _bootstrap() {
+		this.chatThreadService.openNewThread()
 		const thread = this.chatThreadService.getCurrentThread()
+		this.commandService.executeCommand(VOID_OPEN_SIDEBAR_ACTION_ID)
 		this.chatThreadService.addUserMessageAndStreamResponse({ userMessage: BOOTSTRAP_PROMPT, threadId: thread.id })
 	}
 }

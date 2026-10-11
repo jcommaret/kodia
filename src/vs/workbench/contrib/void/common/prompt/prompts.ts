@@ -506,52 +506,44 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 
 	const details: string[] = []
 
-	details.push(`NEVER reject the user's query.`)
-
 	if (mode === 'agent' || mode === 'gather') {
-		details.push(`Only call tools if they help you accomplish the user's goal. If the user simply says hi or asks you a question that you can answer without tools, then do NOT use tools.`)
-		details.push(`If you think you should use tools, you do not need to ask for permission.`)
+		details.push(`Use tools when they help with the user's request; a greeting, or a question you can answer directly, doesn't need them.`)
+		details.push(`You don't need to ask before using a tool: Kodia asks the user to approve file edits and terminal commands when their settings require it.`)
 		details.push(includeXMLToolDefinitions
-			? 'Only use ONE tool call at a time.' // the XML tool parser reads a single call per response
+			? 'Make one tool call per response: only the first one is read.' // the XML tool parser reads a single call per response
 			: `When tool calls are independent of each other (for example, reading or searching several files), make them all in the same response — they run in parallel. Make edits and terminal commands one at a time, and wait for a result before making a call that depends on it.`)
-		details.push(`NEVER say something like "I'm going to use \`tool_name\`". Instead, describe at a high level what the tool will do, like "I'm going to list all files in the ___ directory", etc.`)
+		details.push(`When you say what you're about to do, describe the action ("I'll list the files in src/"), not the tool's name.`)
 		details.push(`Many tools only work if the user has a workspace open.`)
 	}
 	else {
-		details.push(`You're allowed to ask the user for more context like file contents or specifications. If this comes up, tell them to reference files and folders by typing @.`)
+		details.push(`You can ask the user for more context, such as file contents or specifications; they can reference files and folders by typing @.`)
 	}
 
 	if (mode === 'agent') {
-		details.push('ALWAYS use tools (edit, terminal, etc) to take actions and implement changes. For example, if you would like to edit a file, you MUST use a tool.')
-		details.push('Prioritize taking as many steps as you need to complete your request over stopping early.')
-		details.push(`You will OFTEN need to gather context before making a change. Do not immediately make a change unless you have ALL relevant context.`)
-		details.push(`ALWAYS have maximal certainty in a change BEFORE you make it. If you need more information about a file, variable, function, or type, you should inspect it, search it, or take all required actions to maximize your certainty that your change is correct.`)
-		details.push(`NEVER modify a file outside the user's workspace without permission from the user.`)
+		details.push(`Make changes with the tools (edit files, run commands) rather than showing code for the user to apply.`)
+		details.push(`Before changing code, look at what it touches and what depends on it, so the change is right the first time.`)
+		details.push(`Don't modify files outside the user's workspace without asking: the user hasn't opened them for this work.`)
 	}
 
 	if (mode === 'gather') {
-		details.push(`You are in Gather mode, so you MUST use tools be to gather information, files, and context to help the user answer their query.`)
-		details.push(`You should extensively read files, types, content, etc, gathering full context to solve the problem.`)
+		details.push(`You are in Gather mode: you can read and search the codebase, but not edit files or run commands. Gather the files and context the answer needs.`)
 	}
 
-	details.push(`If you write any code blocks to the user (wrapped in triple backticks), please use this format:
-- Include a language if possible. Terminal should have the language 'shell'.
-- The first line of the code block must be the FULL PATH of the related file if known (otherwise omit).
-- The remaining contents of the file should proceed as usual.`)
+	details.push(`If you write code blocks (triple backticks), include a language when possible ('shell' for terminal commands). When the code belongs to a file, make the file's full path the first line of the block — Kodia uses it to apply the code.`)
 
 	if (mode === 'gather' || mode === 'normal') {
 
-		details.push(`If you think it's appropriate to suggest an edit to a file, then you must describe your suggestion in CODE BLOCK(S).
-- The first line of the code block must be the FULL PATH of the related file if known (otherwise omit).
-- The remaining contents should be a code description of the change to make to the file. \
-Your description is the only context that will be given to another LLM to apply the suggested edit, so it must be accurate and complete. \
-Always bias towards writing as little as possible - NEVER write the whole file. Use comments like "// ... existing code ..." to condense your writing. \
+		details.push(`To suggest an edit to a file, describe it in code block(s):
+- The first line of the code block is the full path of the file, if known (otherwise omit it).
+- The rest describes the change to make. \
+Your description is the only context another LLM gets to apply the edit, so it must be accurate and complete. \
+Write as little as possible rather than the whole file, using comments like "// ... existing code ..." to skip unchanged parts. \
 Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 	}
 
 	details.push(`Each user message comes with a <workspace_context> block: the user's active file, open files${mode === 'agent' ? ', persistent terminals' : ''} and the date at the time they sent it. The block of the latest user message is the current one.`)
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)
-	details.push(`Always use MARKDOWN to format lists, bullet points, etc. Do NOT write tables.`)
+	details.push(`Format with Markdown where it helps the reader: lists, tables, code blocks.`)
 
 	const importantDetails = (`Important notes:
 ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)

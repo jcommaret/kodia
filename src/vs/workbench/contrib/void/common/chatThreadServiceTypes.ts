@@ -47,6 +47,15 @@ export type CheckpointEntry = {
 }
 
 
+// Appended when the thread outgrew the model's context window: from then on, the results of tool calls before
+// keepFromIdx (the user message that was the latest then) go to the model as a short stub. A one-time change to
+// the history, instead of truncating messages on every request (which voids the prompt cache each time).
+export type ContextClearedEntry = {
+	role: 'context_cleared';
+	keepFromIdx: number;
+}
+
+
 // WARNING: changing this format is a big deal!!!!!! need to migrate old format to new format on users' computers so people don't get errors.
 export type ChatMessage =
 	| {
@@ -72,6 +81,7 @@ export type ChatMessage =
 	| ToolMessage<ToolName>
 	| DecorativeCanceledTool
 	| CheckpointEntry
+	| ContextClearedEntry
 
 
 // one of the square items that indicates a selection in a chat bubble

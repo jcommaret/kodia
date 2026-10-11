@@ -554,6 +554,22 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		this._setStreamState(threadId, undefined)
 	}
 
+	// The thread no longer fits the model's context window: from now on, send the results of the tool calls made
+	// before the latest user message as a stub (ContextClearedEntry). Returns false if there was nothing to clear.
+	private _clearOldToolResults(threadId: string): boolean {
+		const messages = this.state.allThreads[threadId]?.messages
+		if (!messages) return false
+
+		const latestUserIdx = findLastIdx(messages, m => m.role === 'user')
+		const lastClearing = findLast(messages, m => m.role === 'context_cleared')
+		const alreadyClearedBefore = lastClearing?.role === 'context_cleared' ? lastClearing.keepFromIdx : 0
+		if (latestUserIdx <= alreadyClearedBefore) return false
+		if (!messages.slice(alreadyClearedBefore, latestUserIdx).some(m => m.role === 'tool')) return false
+
+		this._addMessageToThread(threadId, { role: 'context_cleared', keepFromIdx: latestUserIdx })
+		return true
+	}
+
 	// every tool still marked running — several when a turn's calls run in parallel
 	private _rejectRunningTools(threadId: string) {
 		const messages = this.state.allThreads[threadId]?.messages ?? [] // snapshot: updates below replace the array, not mutate it
@@ -832,13 +848,16 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 			this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
 
-			const chatMessages = this.state.allThreads[threadId]?.messages ?? []
-			const { messages, separateSystemMessage } = await this._convertToLLMMessagesService.prepareLLMChatMessages({
-				chatMessages,
+			const prepare = () => this._convertToLLMMessagesService.prepareLLMChatMessages({
+				chatMessages: this.state.allThreads[threadId]?.messages ?? [],
 				modelSelection,
 				chatMode,
 				turnId, // the same system prompt for every request of this turn, so the prompt cache holds
 			})
+			let prepared = await prepare()
+			// too long for the model: clear old tool results once, rather than truncating messages on every request
+			if (prepared.wasOverBudget && this._clearOldToolResults(threadId)) prepared = await prepare()
+			const { messages, separateSystemMessage, estimatedInputTokens } = prepared
 
 			if (interruptedWhenIdle) {
 				this._setStreamState(threadId, undefined)
@@ -874,6 +893,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 						this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: fullText, reasoningSoFar: fullReasoning, toolCallSoFar: toolCall ?? null }, interrupt: Promise.resolve(() => { if (llmCancelToken) this._llmMessageService.abort(llmCancelToken) }) })
 					},
 					onFinalMessage: async ({ fullText, fullReasoning, toolCalls, anthropicReasoning, usage }) => {
+						if (usage && modelSelection) this._convertToLLMMessagesService.recordInputTokens(modelSelection, estimatedInputTokens, usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))
 						resMessageIsDonePromise({ type: 'llmDone', toolCalls, info: { fullText, fullReasoning, anthropicReasoning, usage } }) // resolve with tool calls
 					},
 					onError: async (error) => {

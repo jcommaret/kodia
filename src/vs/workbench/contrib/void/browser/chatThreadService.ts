@@ -805,6 +805,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		// above just defines helpers, below starts the actual function
 		const { chatMode } = this._settingsService.state.globalSettings // should not change as we loop even if user changes it, so it goes here
 		const { overridesOfModel } = this._settingsService.state
+		const turnId = generateUuid()
 
 		let nMessagesSent = 0
 		let shouldSendAnotherMessage = true
@@ -835,7 +836,8 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			const { messages, separateSystemMessage } = await this._convertToLLMMessagesService.prepareLLMChatMessages({
 				chatMessages,
 				modelSelection,
-				chatMode
+				chatMode,
+				turnId, // the same system prompt for every request of this turn, so the prompt cache holds
 			})
 
 			if (interruptedWhenIdle) {
@@ -1303,7 +1305,11 @@ We only need to do it for files that were edited since `from`, ie files between 
 		const currSelns: StagingSelectionItem[] = _chatSelections ?? thread.state.stagingSelections
 
 		const userMessageContent = await chat_userMessageContent(instructions, currSelns, { directoryStrService: this._directoryStringService, fileService: this._fileService }) // user message + names of files (NOT content)
-		const userHistoryElt: ChatMessage = { role: 'user', content: userMessageContent, displayContent: instructions, selections: currSelns, state: defaultMessageState }
+		// the editor state (active file, open files...) now, frozen into the message: in the system prompt, it
+		// would change between messages and void the prompt cache of the whole thread
+		const workspaceContext = this._convertToLLMMessagesService.getWorkspaceContext(this._settingsService.state.globalSettings.chatMode)
+		const content = workspaceContext ? `${userMessageContent}\n\n${workspaceContext}` : userMessageContent
+		const userHistoryElt: ChatMessage = { role: 'user', content, displayContent: instructions, selections: currSelns, state: defaultMessageState }
 		this._addMessageToThread(threadId, userHistoryElt)
 
 		this._setThreadState(threadId, { currCheckpointIdx: null }) // no longer at a checkpoint because started streaming

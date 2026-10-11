@@ -472,7 +472,12 @@ const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] |
 // ======================================================== chat (normal, gather, agent) ========================================================
 
 
-export const chat_systemMessage = ({ workspaceFolders, openedURIs, activeURI, persistentTerminalIDs, directoryStr, chatMode: mode, mcpTools, includeXMLToolDefinitions }: { workspaceFolders: string[], directoryStr: string, openedURIs: string[], activeURI: string | undefined, persistentTerminalIDs: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean }) => {
+// Providers cache the prompt prefix, and the conversation comes after the system prompt: anything that
+// changes in the system prompt re-bills the whole thread at the full input price. So the system prompt
+// only holds what stays the same from one message to the next (this static part, then the guidelines,
+// the project memory and the file tree — see prepareLLMChatMessages), and what changes with every message
+// (active file, open files, terminals, date) goes at the end of the user message (chat_workspaceContext).
+export const chat_systemMessage = ({ workspaceFolders, chatMode: mode, mcpTools, includeXMLToolDefinitions }: { workspaceFolders: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean }) => {
 	const header = (`You are an expert coding ${mode === 'agent' ? 'agent' : 'assistant'} whose job is \
 ${mode === 'agent' ? `to help the user develop, run, and make changes to their codebase.`
 			: mode === 'gather' ? `to search, understand, and reference files in the user's codebase.`
@@ -489,21 +494,7 @@ Please assist the user with their query.`)
 
 - The user's workspace contains these folders:
 ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
-
-- Active file:
-${activeURI}
-
-- Open files:
-${openedURIs.join('\n') || 'NO OPENED FILES'}${''/* separator */}${mode === 'agent' && persistentTerminalIDs.length !== 0 ? `
-
-- Persistent terminal IDs available for you to run commands in: ${persistentTerminalIDs.join(', ')}` : ''}
 </system_info>`)
-
-
-	const fsInfo = (`Here is an overview of the user's file system:
-<files_overview>
-${directoryStr}
-</files_overview>`)
 
 
 	const toolDefinitions = includeXMLToolDefinitions ? systemToolsXMLPrompt(mode, mcpTools) : null
@@ -553,9 +544,9 @@ Always bias towards writing as little as possible - NEVER write the whole file. 
 Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 	}
 
+	details.push(`Each user message ends with a <workspace_context> block: the user's active file, open files${mode === 'agent' ? ', persistent terminals' : ''} and the date at the time they sent it. The block of the latest user message is the current one.`)
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)
 	details.push(`Always use MARKDOWN to format lists, bullet points, etc. Do NOT write tables.`)
-	details.push(`Today's date is ${new Date().toDateString()}.`)
 
 	const importantDetails = (`Important notes:
 ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)
@@ -567,7 +558,6 @@ ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)
 	ansStrs.push(sysInfo)
 	if (toolDefinitions) ansStrs.push(toolDefinitions)
 	ansStrs.push(importantDetails)
-	ansStrs.push(fsInfo)
 
 	const fullSystemMsgStr = ansStrs
 		.join('\n\n\n')
@@ -578,11 +568,28 @@ ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)
 
 }
 
+// last in the system prompt: it changes whenever a file is created or deleted
+export const chat_filesOverview = (directoryStr: string) => `Here is an overview of the user's file system:
+<files_overview>
+${directoryStr}
+</files_overview>`
+
+// the editor state when the user sends a message; stored at the end of that message, so it never changes afterwards
+export const chat_workspaceContext = ({ openedURIs, activeURI, persistentTerminalIDs, chatMode: mode }: { openedURIs: string[], activeURI: string | undefined, persistentTerminalIDs: string[], chatMode: ChatMode }) => {
+	const lines = [
+		`- Active file: ${activeURI ?? 'none'}`,
+		`- Open files:\n${openedURIs.join('\n') || 'none'}`,
+	]
+	if (mode === 'agent' && persistentTerminalIDs.length !== 0) lines.push(`- Persistent terminal IDs available for you to run commands in: ${persistentTerminalIDs.join(', ')}`)
+	lines.push(`- Date: ${new Date().toDateString()}`)
+	return `<workspace_context>\n${lines.join('\n')}\n</workspace_context>`
+}
+
 
 // // log all prompts
 // for (const chatMode of ['agent', 'gather', 'normal'] satisfies ChatMode[]) {
 // 	console.log(`========================================= SYSTEM MESSAGE FOR ${chatMode} ===================================\n`,
-// 		chat_systemMessage({ chatMode, workspaceFolders: [], openedURIs: [], activeURI: 'pee', persistentTerminalIDs: [], directoryStr: 'lol', }))
+// 		chat_systemMessage({ chatMode, workspaceFolders: [], mcpTools: undefined, includeXMLToolDefinitions: false }))
 // }
 
 export const DEFAULT_FILE_SIZE_LIMIT = 2_000_000

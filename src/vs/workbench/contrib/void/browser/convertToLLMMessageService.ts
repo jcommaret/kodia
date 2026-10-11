@@ -8,7 +8,7 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { ChatMessage, StagingSelectionItem } from '../common/chatThreadServiceTypes.js';
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities } from '../common/modelCapabilities.js';
 import { estimateTokens } from '../common/tokenizer.js';
-import { reParsedToolXMLString, chat_systemMessage } from '../common/prompt/prompts.js';
+import { reParsedToolXMLString, chat_systemMessage, chat_filesOverview, chat_workspaceContext } from '../common/prompt/prompts.js';
 import { AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, modelSelectionsEqual, ProviderName } from '../common/voidSettingsTypes.js';
@@ -588,7 +588,10 @@ const prepareMessages = (params: {
 export interface IConvertToLLMMessageService {
 	readonly _serviceBrand: undefined;
 	prepareLLMSimpleMessages: (opts: { simpleMessages: SimpleLLMMessage[], systemMessage: string, modelSelection: ModelSelection | null, featureName: FeatureName }) => { messages: LLMChatMessage[], separateSystemMessage: string | undefined }
-	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined }>
+	// turnId: the same for every request of one agent turn, which then reuses one system prompt (see _chatSystemMessage)
+	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined }>
+	// the editor state to append to a chat message when the user sends it ('' if the system message is disabled)
+	getWorkspaceContext(chatMode: ChatMode): string
 	prepareFIMMessage(opts: { messages: LLMFIMMessage, }): { prefix: string, suffix: string, stopTokens: string[] }
 }
 
@@ -635,6 +638,13 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		return this.storageService.get(PROJECT_MEMORY_STORAGE_KEY, StorageScope.WORKSPACE) ?? ''
 	}
 
+	// The user's own instructions: from settings and .voidrules files
+	private _getGuidelines(): string {
+		const globalAIInstructions = this.voidSettingsService.state.globalSettings.aiInstructions;
+		const voidRulesFileContent = this._getVoidRulesFileContents();
+		return [globalAIInstructions, voidRulesFileContent].filter(s => !!s).join('\n\n')
+	}
+
 	// Get combined AI instructions from settings, .voidrules files, and saved project memory
 	private _getCombinedAIInstructions(): string {
 		const globalAIInstructions = this.voidSettingsService.state.globalSettings.aiInstructions;
@@ -649,26 +659,57 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 	}
 
 
-	// system message
-	private _generateChatMessagesSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined) => {
-		const workspaceFolders = this.workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
+	// The chat system prompt, from the most stable part to the most changing one, so that a provider's
+	// prompt cache keeps the longest possible prefix:
+	//   static instructions -> the user's guidelines -> project memory (the agent writes it) -> file tree (changes when files are created)
+	private _generateChatSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean) => {
+		const sections: string[] = []
 
-		const openedURIs = this.modelService.getModels().filter(m => m.isAttachedToEditor()).map(m => m.uri.fsPath) || [];
-		const activeURI = this.editorService.activeEditor?.resource?.fsPath;
+		if (!disableSystemMessage) {
+			const workspaceFolders = this.workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
+			const includeXMLToolDefinitions = !specialToolFormat
+			const mcpTools = this.mcpService.getMCPTools()
+			sections.push(chat_systemMessage({ workspaceFolders, chatMode, mcpTools, includeXMLToolDefinitions }))
+		}
 
-		const directoryStr = await this.directoryStrService.getAllDirectoriesStr({
-			cutOffMessage: chatMode === 'agent' || chatMode === 'gather' ?
-				`...Directories string cut off, use tools to read more...`
-				: `...Directories string cut off, ask user for more if necessary...`
-		})
+		const guidelines = this._getGuidelines()
+		if (guidelines) sections.push(`GUIDELINES (from the user's settings and .voidrules file):\n${guidelines}`)
 
-		const includeXMLToolDefinitions = !specialToolFormat
+		const projectMemory = this._getProjectMemory()
+		if (projectMemory) sections.push(`PROJECT MEMORY (notes saved automatically in previous sessions via write_project_memory):\n${projectMemory}`)
 
-		const mcpTools = this.mcpService.getMCPTools()
+		if (!disableSystemMessage) {
+			const directoryStr = await this.directoryStrService.getAllDirectoriesStr({
+				cutOffMessage: chatMode === 'agent' || chatMode === 'gather' ?
+					`...Directories string cut off, use tools to read more...`
+					: `...Directories string cut off, ask user for more if necessary...`
+			})
+			sections.push(chat_filesOverview(directoryStr))
+		}
 
-		const persistentTerminalIDs = this.terminalToolService.listPersistentTerminalIds()
-		const systemMessage = chat_systemMessage({ workspaceFolders, openedURIs, directoryStr, activeURI, persistentTerminalIDs, chatMode, mcpTools, includeXMLToolDefinitions })
+		return sections.join('\n\n\n')
+	}
+
+	// One system prompt per agent turn. The agent changes the file tree (creating files) and the project
+	// memory while it works; rebuilding the system prompt for each request of the turn would then miss the
+	// cache for the whole thread. The model already knows what it just changed, and tools read the rest.
+	private _systemMessageOfTurn: { key: string, systemMessage: string } | undefined = undefined
+	private async _chatSystemMessage(turnId: string | undefined, chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean) {
+		const key = `${turnId}|${chatMode}|${specialToolFormat}|${disableSystemMessage}`
+		if (turnId && this._systemMessageOfTurn?.key === key) return this._systemMessageOfTurn.systemMessage
+
+		const systemMessage = await this._generateChatSystemMessage(chatMode, specialToolFormat, disableSystemMessage)
+		if (turnId) this._systemMessageOfTurn = { key, systemMessage }
 		return systemMessage
+	}
+
+	getWorkspaceContext: IConvertToLLMMessageService['getWorkspaceContext'] = (chatMode) => {
+		if (this.voidSettingsService.state.globalSettings.disableSystemMessage) return ''
+
+		const openedURIs = this.modelService.getModels().filter(m => m.isAttachedToEditor()).map(m => m.uri.fsPath)
+		const activeURI = this.editorService.activeEditor?.resource?.fsPath
+		const persistentTerminalIDs = this.terminalToolService.listPersistentTerminalIds()
+		return chat_workspaceContext({ openedURIs, activeURI, persistentTerminalIDs, chatMode })
 	}
 
 
@@ -749,7 +790,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		})
 		return { messages, separateSystemMessage };
 	}
-	prepareLLMChatMessages: IConvertToLLMMessageService['prepareLLMChatMessages'] = async ({ chatMessages, chatMode, modelSelection }) => {
+	prepareLLMChatMessages: IConvertToLLMMessageService['prepareLLMChatMessages'] = async ({ chatMessages, chatMode, modelSelection, turnId }) => {
 		if (modelSelection === null) return { messages: [], separateSystemMessage: undefined }
 
 		const { overridesOfModel } = this.voidSettingsService.state
@@ -763,13 +804,11 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		} = getModelCapabilities(providerName, modelName, overridesOfModel)
 
 		const { disableSystemMessage } = this.voidSettingsService.state.globalSettings;
-		const fullSystemMessage = await this._generateChatMessagesSystemMessage(chatMode, specialToolFormat)
-		const systemMessage = disableSystemMessage ? '' : fullSystemMessage;
+		// includes the guidelines and project memory, in cache-friendly order
+		const systemMessage = await this._chatSystemMessage(turnId, chatMode, specialToolFormat, !!disableSystemMessage)
 
 		const modelSelectionOptions = this.voidSettingsService.state.optionsOfModelSelection['Chat'][modelSelection.providerName]?.[modelSelection.modelName]
 
-		// Get combined AI instructions
-		const aiInstructions = this._getCombinedAIInstructions();
 		const isReasoningEnabled = getIsReasoningEnabledState('Chat', providerName, modelName, modelSelectionOptions, overridesOfModel)
 		const reservedOutputTokenSpace = getReservedOutputTokenSpace(providerName, modelName, { isReasoningEnabled, overridesOfModel })
 		const llmMessages = this._chatMessagesToSimpleMessages(chatMessages, modelSelection, !!supportsVision)
@@ -777,7 +816,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		const { messages, separateSystemMessage } = prepareMessages({
 			messages: llmMessages,
 			systemMessage,
-			aiInstructions,
+			aiInstructions: '', // already in systemMessage
 			supportsSystemMessage,
 			specialToolFormat,
 			supportsAnthropicReasoning: providerName === 'anthropic',

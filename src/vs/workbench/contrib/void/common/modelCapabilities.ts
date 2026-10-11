@@ -156,7 +156,6 @@ export const defaultModelsOfProvider = {
 	],
 	mistral: [ // https://docs.mistral.ai/getting-started/models/models_overview/
 		'zai-glm-5-3',
-		'zai-glm-5-2',
 		'mistral-large-4',
 		'mistral-large-latest',
 		'mistral-medium-latest',
@@ -1443,6 +1442,8 @@ const glm53ReasoningEffortCapabilities = {
 	openSourceThinkTags: ['<think>', '</think>'] as [string, string],
 }
 
+// Mistral bills prompt-cache hits at 10% of the input price, so cache_read is input / 10 (except GLM, priced by Z.ai).
+// https://docs.mistral.ai/studio-api/conversations/advanced/prompt-caching
 const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/models_overview/
 	'zai-glm-5-3': { // Z.ai GLM 5.3 — https://docs.mistral.ai/models/zai-glm-5-3
 		contextWindow: 1_000_000,
@@ -1454,6 +1455,8 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: glm53ReasoningEffortCapabilities,
 	},
+	// Mistral retires GLM 5.2 on 2026-10-31, so it's no longer a default model. Kept for users who added it
+	// and for OpenRouter, which still serves it.
 	'zai-glm-5-2': { // Z.ai GLM 5.2 — https://docs.mistral.ai/models/zai-glm-5-2
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 128_000,
@@ -1485,7 +1488,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 	'mistral-large-latest': { // Mistral Large 3 — https://docs.mistral.ai/models/model-cards/mistral-large-3-25-12
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 8_192,
-		cost: { input: 0.50, output: 1.50 },
+		cost: { input: 0.50, cache_read: 0.05, output: 1.50 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
 		specialToolFormat: 'openai-style',
@@ -1496,7 +1499,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 	'mistral-medium-latest': { // Mistral Medium 3.5 — https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 8_192,
-		cost: { input: 1.50, output: 7.50 },
+		cost: { input: 1.50, cache_read: 0.15, output: 7.50 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
 		specialToolFormat: 'openai-style',
@@ -1507,7 +1510,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 	'mistral-small-latest': { // Mistral Small 4 — https://docs.mistral.ai/models/model-cards/mistral-small-4-0-26-03
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 8_192,
-		cost: { input: 0.15, output: 0.60 },
+		cost: { input: 0.15, cache_read: 0.015, output: 0.60 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
 		specialToolFormat: 'openai-style',
@@ -1518,27 +1521,17 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 	'codestral-latest': { // Codestral 25.08 — https://docs.mistral.ai/models/model-cards/codestral-25-08
 		contextWindow: 128_000,
 		reservedOutputTokenSpace: 8_192,
-		cost: { input: 0.30, output: 0.90 },
+		cost: { input: 0.30, cache_read: 0.03, output: 0.90 },
 		supportsFIM: true,
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 13 },
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: false,
 	},
-	'devstral-medium-latest': { // Devstral 2 — https://docs.mistral.ai/models/model-cards/devstral-2-25-12
-		contextWindow: 256_000,
-		reservedOutputTokenSpace: 8_192,
-		cost: { input: 0.40, output: 2.00 },
-		supportsFIM: true, // Activer le FIM
-		specialToolFormat: 'openai-style',
-		downloadable: { sizeGb: 'not-known' },
-		supportsSystemMessage: 'system-role',
-		reasoningCapabilities: false,
-	},
 	'ministral-14b-latest': { // Ministral 3 14B — https://docs.mistral.ai/models/model-cards/ministral-3-14b-25-12
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 4_096,
-		cost: { input: 0.20, output: 0.20 },
+		cost: { input: 0.20, cache_read: 0.02, output: 0.20 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
 		specialToolFormat: 'openai-style',
@@ -1549,7 +1542,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 	'ministral-8b-latest': { // Ministral 3 8B — https://docs.mistral.ai/models/model-cards/ministral-3-8b-25-12
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 4_096,
-		cost: { input: 0.15, output: 0.15 },
+		cost: { input: 0.15, cache_read: 0.015, output: 0.15 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
 		specialToolFormat: 'openai-style',
@@ -1560,7 +1553,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 	'ministral-3b-latest': { // Ministral 3 3B — https://docs.mistral.ai/models/model-cards/ministral-3-3b-25-12
 		contextWindow: 256_000,
 		reservedOutputTokenSpace: 4_096,
-		cost: { input: 0.10, output: 0.10 },
+		cost: { input: 0.10, cache_read: 0.01, output: 0.10 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
 		specialToolFormat: 'openai-style',
@@ -1580,7 +1573,6 @@ const mistralSettings: VoidStaticProviderInfo = {
 			else fallbackName = 'zai-glm-5-3'
 		}
 		else if (lower.includes('codestral')) fallbackName = 'codestral-latest'
-		else if (lower.includes('devstral')) fallbackName = 'devstral-medium-latest'
 		else if (lower.includes('ministral')) {
 			if (lower.includes('14')) fallbackName = 'ministral-14b-latest'
 			else if (lower.includes('8')) fallbackName = 'ministral-8b-latest'
@@ -2077,9 +2069,16 @@ const openRouterModelOptions_assumingOpenAICompat = {
 		...mistralModelOptions['mistral-large-latest'],
 		downloadable: false,
 	},
-	'mistralai/devstral-2512': {
-		...mistralModelOptions['devstral-medium-latest'],
+	// Mistral retired Devstral 2 from its API on 2026-07-31 (Medium 3.5 replaces it), but OpenRouter still serves it.
+	'mistralai/devstral-2512': { // https://openrouter.ai/mistralai/devstral-2512
+		contextWindow: 262_144,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 0.40, cache_read: 0.04, output: 2.00 },
+		supportsFIM: true,
+		specialToolFormat: 'openai-style',
 		downloadable: false,
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: false,
 	},
 	'z-ai/glm-5.3': {
 		...mistralModelOptions['zai-glm-5-3'],

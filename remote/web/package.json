@@ -19,7 +19,7 @@
     "@xterm/addon-webgl": "^0.20.0-beta.212",
     "@xterm/xterm": "^6.1.0-beta.213",
     "jschardet": "3.1.4",
-    "katex": "^0.16.22",
+    "katex": "^0.18.2",
     "tas-client": "0.3.1",
     "vscode-oniguruma": "1.7.0",
     "vscode-textmate": "^9.3.2"

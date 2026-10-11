@@ -2816,6 +2816,17 @@ const _ChatBubble = ({ threadId, chatMessage, currCheckpointIdx, isCommitted, me
 		/>
 	}
 
+	else if (role === 'context_cleared') {
+		return <div
+			className={`text-void-fg-4 text-xs text-center select-none my-1 ${isCheckpointGhost ? 'opacity-50' : ''}`}
+			data-tooltip-id='void-tooltip'
+			data-tooltip-content='The thread outgrew the model’s context window. Results of earlier tool calls are now sent as a short note; the model calls the tool again if it needs one.'
+			data-tooltip-place='top'
+		>
+			Older tool results cleared to fit the context window
+		</div>
+	}
+
 }
 
 const CommandBarInChat = () => {

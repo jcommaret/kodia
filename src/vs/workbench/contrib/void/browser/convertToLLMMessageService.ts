@@ -1,5 +1,6 @@
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { deepClone } from '../../../../base/common/objects.js';
+import { findLast } from '../../../../base/common/arraysFind.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
@@ -23,6 +24,7 @@ import { IStorageService, StorageScope } from '../../../../platform/storage/comm
 import { PROJECT_MEMORY_STORAGE_KEY } from '../common/storageKeys.js';
 
 export const EMPTY_MESSAGE = '(empty message)'
+const CLEARED_TOOL_RESULT = '(This result was cleared to fit the context window. Call the tool again if you need it.)'
 
 
 
@@ -309,6 +311,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	reservedOutputTokenSpace,
 	imageFormat,
 	sendWorkspaceContextAsSystem,
+	tokenRatio,
 }: {
 	messages: SimpleLLMMessage[],
 	systemMessage: string,
@@ -320,10 +323,12 @@ const prepareOpenAIOrAnthropicMessages = ({
 	reservedOutputTokenSpace: number | null | undefined,
 	imageFormat: ImageFormat, // only used by XML tool calling, whose messages can go to any provider
 	sendWorkspaceContextAsSystem: boolean,
-}): { messages: AnthropicOrOpenAILLMMessage[], separateSystemMessage: string | undefined } => {
+	tokenRatio: number, // real tokens per estimated token, for this model (see recordInputTokens)
+}): { messages: AnthropicOrOpenAILLMMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasOverBudget: boolean } => {
 
-	reservedOutputTokenSpace = Math.max(
-		contextWindow * 1 / 2, // reserve at least 1/4 of the token window length
+	// the model's real output limit; capped at half the window so small local models keep room for input
+	reservedOutputTokenSpace = Math.min(
+		contextWindow / 2,
 		reservedOutputTokenSpace ?? 4_096 // defaults to 4096
 	)
 	let messages: (SimpleLLMMessage | { role: 'system', content: string })[] = deepClone(messages_)
@@ -389,10 +394,14 @@ const prepareOpenAIOrAnthropicMessages = ({
 
 	let totalTokens = 0
 	for (const m of messages) { totalTokens += estimateTokens(m.content) }
+	// in estimated tokens: the budget is in real tokens, and estimates run below them (other tokenizer, tool schemas)
 	const tokensNeedToTrim = totalTokens - Math.max(
-		contextWindow - reservedOutputTokenSpace, // can be 0, in which case tokensNeedToTrim=everything, bad
+		(contextWindow - reservedOutputTokenSpace) / tokenRatio, // can be 0, in which case tokensNeedToTrim=everything, bad
 		1_250 // ensure we don't trim below this floor (just a random small value)
 	)
+	// the caller can clear old tool results (once) instead of the lossy trimming below
+	const wasOverBudget = tokensNeedToTrim > 0
+	const estimatedInputTokens = totalTokens
 
 
 	// <----------------------------------------->
@@ -508,6 +517,8 @@ const prepareOpenAIOrAnthropicMessages = ({
 	return {
 		messages: llmMessages,
 		separateSystemMessage: separateSystemMessageStr,
+		estimatedInputTokens,
+		wasOverBudget,
 	} as const
 }
 
@@ -579,21 +590,22 @@ const prepareMessages = (params: {
 	reservedOutputTokenSpace: number | null | undefined,
 	providerName: ProviderName,
 	sendWorkspaceContextAsSystem?: boolean,
-}): { messages: LLMChatMessage[], separateSystemMessage: string | undefined } => {
+	tokenRatio?: number,
+}): { messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasOverBudget: boolean } => {
 
 	const specialFormat = params.specialToolFormat // this is just for ts stupidness
 
 	// if need to convert to gemini style of messaes, do that (treat as anthropic style, then convert to gemini style)
 	if (params.providerName === 'gemini' || specialFormat === 'gemini-style') {
-		const res = prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat === 'gemini-style' ? 'anthropic-style' : undefined, imageFormat: 'anthropic', sendWorkspaceContextAsSystem: false })
+		const res = prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat === 'gemini-style' ? 'anthropic-style' : undefined, imageFormat: 'anthropic', sendWorkspaceContextAsSystem: false, tokenRatio: params.tokenRatio ?? 1 })
 		const messages = res.messages as AnthropicLLMChatMessage[]
 		const messages2 = prepareGeminiMessages(messages)
-		return { messages: messages2, separateSystemMessage: res.separateSystemMessage }
+		return { messages: messages2, separateSystemMessage: res.separateSystemMessage, estimatedInputTokens: res.estimatedInputTokens, wasOverBudget: res.wasOverBudget }
 	}
 
 	// with XML tools, the messages still go to the provider's own API, which sets the image format
 	const imageFormat: ImageFormat = params.providerName === 'anthropic' ? 'anthropic' : 'openai'
-	return prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat, imageFormat, sendWorkspaceContextAsSystem: !!params.sendWorkspaceContextAsSystem })
+	return prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat, imageFormat, sendWorkspaceContextAsSystem: !!params.sendWorkspaceContextAsSystem, tokenRatio: params.tokenRatio ?? 1 })
 }
 
 
@@ -603,7 +615,10 @@ export interface IConvertToLLMMessageService {
 	readonly _serviceBrand: undefined;
 	prepareLLMSimpleMessages: (opts: { simpleMessages: SimpleLLMMessage[], systemMessage: string, modelSelection: ModelSelection | null, featureName: FeatureName }) => { messages: LLMChatMessage[], separateSystemMessage: string | undefined }
 	// turnId: the same for every request of one agent turn, which then reuses one system prompt (see _chatSystemMessage)
-	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined }>
+	// wasOverBudget: the history didn't fit and older messages were truncated (clear old tool results and prepare again)
+	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasOverBudget: boolean }>
+	// calibrates token estimates for this model with the input tokens the provider reported for that request
+	recordInputTokens(modelSelection: ModelSelection, estimatedInputTokens: number, actualInputTokens: number): void
 	// the editor state to append to a chat message when the user sends it ('' if the system message is disabled)
 	getWorkspaceContext(chatMode: ChatMode): string
 	prepareFIMMessage(opts: { messages: LLMFIMMessage, }): { prefix: string, suffix: string, stopTokens: string[] }
@@ -734,9 +749,15 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 	private _chatMessagesToSimpleMessages(chatMessages: ChatMessage[], modelSelection: ModelSelection, supportsVision: boolean): SimpleLLMMessage[] {
 		const simpleLLMMessages: SimpleLLMMessage[] = []
 
-		for (const m of chatMessages) {
+		// tool results before this index were cleared to fit the context window (ContextClearedEntry)
+		const lastClearing = findLast(chatMessages, m => m.role === 'context_cleared')
+		const clearedBeforeIdx = lastClearing?.role === 'context_cleared' ? lastClearing.keepFromIdx : 0
+
+		for (let idx = 0; idx < chatMessages.length; idx += 1) {
+			const m = chatMessages[idx]
 			if (m.role === 'checkpoint') continue
 			if (m.role === 'interrupted_streaming_tool') continue
+			if (m.role === 'context_cleared') continue
 			if (m.role === 'assistant') {
 				// thinking signatures are only valid for the model that produced them — after a model
 				// switch, resending them gets a 400, so keep just the text. (No modelSelection = stored
@@ -751,7 +772,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 			else if (m.role === 'tool') {
 				simpleLLMMessages.push({
 					role: m.role,
-					content: m.content,
+					content: idx < clearedBeforeIdx ? CLEARED_TOOL_RESULT : m.content,
 					name: m.name,
 					id: m.id,
 					rawParams: m.rawParams,
@@ -804,8 +825,24 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		})
 		return { messages, separateSystemMessage };
 	}
+	// Real tokens per estimated token, per model. Estimates use one tokenizer for every model (o200k), and don't
+	// count tool schemas; the providers' usage reports give the real input size.
+	private readonly _tokenRatioOf = new Map<string, number>()
+	private _tokenRatio(modelSelection: ModelSelection) {
+		// until the first response calibrates it: Claude's tokenizer produces up to ~1.35x more tokens than o200k
+		const fallback = modelSelection.providerName === 'anthropic' ? 1.3 : 1.15
+		return this._tokenRatioOf.get(`${modelSelection.providerName}:${modelSelection.modelName}`) ?? fallback
+	}
+	recordInputTokens: IConvertToLLMMessageService['recordInputTokens'] = (modelSelection, estimatedInputTokens, actualInputTokens) => {
+		if (estimatedInputTokens < 500 || actualInputTokens <= 0) return // too small to be meaningful
+		const ratio = Math.min(Math.max(actualInputTokens / estimatedInputTokens, 0.5), 3)
+		const key = `${modelSelection.providerName}:${modelSelection.modelName}`
+		const previous = this._tokenRatioOf.get(key)
+		this._tokenRatioOf.set(key, previous === undefined ? ratio : previous * 0.7 + ratio * 0.3)
+	}
+
 	prepareLLMChatMessages: IConvertToLLMMessageService['prepareLLMChatMessages'] = async ({ chatMessages, chatMode, modelSelection, turnId }) => {
-		if (modelSelection === null) return { messages: [], separateSystemMessage: undefined }
+		if (modelSelection === null) return { messages: [], separateSystemMessage: undefined, estimatedInputTokens: 0, wasOverBudget: false }
 
 		const { overridesOfModel } = this.voidSettingsService.state
 
@@ -828,7 +865,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		const reservedOutputTokenSpace = getReservedOutputTokenSpace(providerName, modelName, { isReasoningEnabled, overridesOfModel })
 		const llmMessages = this._chatMessagesToSimpleMessages(chatMessages, modelSelection, !!supportsVision)
 
-		const { messages, separateSystemMessage } = prepareMessages({
+		return prepareMessages({
 			messages: llmMessages,
 			systemMessage,
 			aiInstructions: '', // already in systemMessage
@@ -839,8 +876,8 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 			reservedOutputTokenSpace,
 			providerName,
 			sendWorkspaceContextAsSystem: providerName === 'anthropic' && !!recognizedModelName && anthropicModelFeatures.midConversationSystemMessages.has(recognizedModelName),
+			tokenRatio: this._tokenRatio(modelSelection),
 		})
-		return { messages, separateSystemMessage };
 	}
 
 

@@ -22,7 +22,7 @@ export const MAX_DIRSTR_RESULTS_TOTAL_BEGINNING = 100
 export const MAX_DIRSTR_RESULTS_TOTAL_TOOL = 100
 
 // tool info
-export const MAX_FILE_CHARS_PAGE = 500_000
+export const MAX_FILE_CHARS_PAGE = 100_000 // ~25k tokens: each result stays in the thread for good
 export const MAX_CHILDREN_URIs_PAGE = 500
 
 // terminal tool info
@@ -201,8 +201,8 @@ export const builtinTools: {
 		description: `Returns full contents of a given file.`,
 		params: {
 			...uriParam('file'),
-			start_line: { description: 'Optional. Do NOT fill this field in unless you were specifically given exact line numbers to search. Defaults to the beginning of the file.' },
-			end_line: { description: 'Optional. Do NOT fill this field in unless you were specifically given exact line numbers to search. Defaults to the end of the file.' },
+			start_line: { description: 'Optional. Read from this line (1-based). For a large file, when you know the lines you need (from search_in_file, go_to_definition, find_references, or a lint error), read just that range instead of the whole file. Defaults to the beginning of the file.' },
+			end_line: { description: 'Optional. Read up to this line (inclusive). Defaults to the end of the file.' },
 			...paginationParam,
 		},
 	},

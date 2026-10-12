@@ -245,6 +245,8 @@
     "mermaid": "^11.17.2"
   },
   "overrides": {
-    "lodash-es": "4.18.1"
+    "katex": "^0.18.2",
+    "lodash-es": "4.18.1",
+    "postcss-selector-parser": "^7.1.6"
   }
 }

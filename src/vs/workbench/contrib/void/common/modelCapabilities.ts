@@ -332,12 +332,14 @@ const openSourceModelOptions_assumingOAICompat = {
 	// llama 4 https://ai.meta.com/blog/llama-4-multimodal-intelligence/
 	'llama4-scout': {
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: false,
 		contextWindow: 10_000_000, reservedOutputTokenSpace: 4_096,
 	},
 	'llama4-maverick': {
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: false,
 		contextWindow: 10_000_000, reservedOutputTokenSpace: 4_096,
@@ -413,6 +415,20 @@ const openSourceModelOptions_assumingOAICompat = {
 
 
 
+// Whether an unlisted model accepts images, from its name (lowercase). The fallbacks below group models by family, and
+// families mix vision and text-only models (Mistral Large 3 vs a local mistral:7b, gemma3:27b vs gemma3:1b), so the
+// family's flag can't be inherited. Covers the multimodal cloud families and the vision models local servers serve
+// (Ollama, LM Studio, vLLM...): llava, qwen2.5vl, llama3.2-vision, gemma3, llama4, minicpm-v...
+export const looksLikeVisionModel = (lower: string): boolean => {
+	if (/claude|gemini|grok-?[4-9]|gpt-?(4o|4\.1|[5-9])/.test(lower)) return true
+	if (/vision|llava|moondream|minicpm-v|internvl|pixtral|llama-?4|scout|maverick/.test(lower)) return true
+	if (/vl(?=$|[-_.:\d])/.test(lower)) return true // qwen2.5vl, qwen3-vl, kimi-vl
+	if (/glm-?\d+(\.\d+)?v/.test(lower)) return true // glm-4.5v
+	if (/gemma-?[34]/.test(lower)) return !/(^|[-_.:])(270m|1b)($|[-_.:])/.test(lower) // gemma3:1b and 270m are text-only
+	if (/mistral-small-?3\.[12]|mistral-(medium|large)-(3|4|2512|26)|ministral-3/.test(lower)) return true
+	return false
+}
+
 // keep modelName, but use the fallback's defaults
 const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallback'] = (modelName, fallbackKnownValues) => {
 
@@ -431,6 +447,7 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 			modelName,
 			...opts,
 			supportsSystemMessage: supportsSystemMessage,
+			supportsVision: looksLikeVisionModel(lower),
 			cost: { input: 0, output: 0 },
 			downloadable: false,
 			...fallbackKnownValues
@@ -1399,6 +1416,8 @@ const deepseekSettings: VoidStaticProviderInfo = {
 		const lower = modelName.toLowerCase()
 		let fallbackName: keyof typeof deepseekModelOptions | null = null
 		if (lower.includes('v4-pro') || lower.includes('v4_pro')) fallbackName = 'deepseek-v4-pro'
+		// deepseek-v4-flash-vision-exp: V4-Flash with image input — https://api-docs.deepseek.com/news/news260821
+		else if (lower.includes('vision')) fallbackName = 'deepseek-flash'
 		else if (lower.includes('v4-flash') || lower.includes('v4_flash')) fallbackName = 'deepseek-v4-flash'
 		else if (lower.includes('flash') || lower.includes('v4.1') || lower.includes('r1') || lower.includes('v4') || lower.includes('deepseek')) fallbackName = 'deepseek-flash'
 		if (fallbackName) return { modelName: fallbackName, recognizedModelName: fallbackName, ...deepseekModelOptions[fallbackName] }
@@ -1623,6 +1642,7 @@ const groqModelOptions = { // https://console.groq.com/docs/models, https://groq
 		cost: { input: 0.80, output: 4.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true, // the one Groq model with image input (up to 3 per request) — https://console.groq.com/docs/vision
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { supportsReasoning: true, canTurnOffReasoning: true, canIOReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
@@ -2227,7 +2247,8 @@ export const getModelCapabilities = (
 		return { ...result, ...overrides, modelName: result.modelName, isUnrecognizedModel: false };
 	}
 
-	return { modelName, ...defaultModelOptions, ...overrides, isUnrecognizedModel: true };
+	// an unknown family can still be a known kind of vision model (llava, moondream, minicpm-v...)
+	return { modelName, ...defaultModelOptions, supportsVision: looksLikeVisionModel(modelName.toLowerCase()), ...overrides, isUnrecognizedModel: true };
 }
 
 // Dollars for one request. `cost` is per million tokens; cache rates fall back to the input rate

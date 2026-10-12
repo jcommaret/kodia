@@ -663,6 +663,9 @@ export const messageOfSelection = async (
 		const contentStr = [folderStructure, ...strOfFiles].join('\n\n')
 		return contentStr
 	}
+	else if (s.type === 'TextFile') {
+		return `${s.name} (attached file):\n${tripleTick[0]}${s.languageId}\n${s.text}\n${tripleTick[1]}`
+	}
 	else
 		return ''
 
@@ -679,7 +682,7 @@ export const chat_userMessageContent = async (
 ) => {
 
 	const selnsStrs = await Promise.all(
-		(currSelns ?? []).filter(s => s.type !== 'Image').map(async (s) => // images are sent as images, not as text
+		(currSelns ?? []).filter(s => s.type !== 'Image' && s.type !== 'PDF').map(async (s) => // images and PDFs are sent as media, not as text
 			messageOfSelection(s, {
 				...opts,
 				folderOpts: { maxChildren: 100, maxCharsPerFile: 100_000, }

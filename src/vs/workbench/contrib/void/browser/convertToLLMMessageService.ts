@@ -10,7 +10,7 @@ import { ChatMessage, StagingSelectionItem } from '../common/chatThreadServiceTy
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities, anthropicModelFeatures } from '../common/modelCapabilities.js';
 import { estimateTokens } from '../common/tokenizer.js';
 import { reParsedToolXMLString, chat_systemMessage, chat_filesOverview, chat_workspaceContext } from '../common/prompt/prompts.js';
-import { AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
+import { AnthropicDocumentBlock, AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, OpenAIFilePart, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, modelSelectionsEqual, ProviderName } from '../common/voidSettingsTypes.js';
 import { IDirectoryStrService } from '../common/directoryStrService.js';
@@ -27,7 +27,10 @@ const CLEARED_TOOL_RESULT = '(This result was cleared to fit the context window.
 
 
 
-type ChatImage = { mimeType: string; dataBase64: string }
+// images and PDFs attached to a user message, sent as media blocks rather than text
+type ChatMedia =
+	| { kind: 'image'; mimeType: string; dataBase64: string }
+	| { kind: 'pdf'; name: string; dataBase64: string; pageCount: number }
 
 type SimpleLLMMessage = {
 	role: 'tool';
@@ -38,7 +41,7 @@ type SimpleLLMMessage = {
 } | {
 	role: 'user';
 	content: string;
-	images?: ChatImage[]; // only set for models that accept images
+	media?: ChatMedia[]; // only the kinds the model accepts (supportsVision, supportsPDF)
 } | {
 	role: 'assistant';
 	content: string;
@@ -50,14 +53,25 @@ type SimpleLLMMessage = {
 const TRIM_TO_LEN = 120
 
 
-// --- images: each format puts them before the text, as providers recommend ---
+// --- images and PDFs: each format puts them before the text, as providers recommend ---
 type ImageFormat = 'anthropic' | 'openai' // Gemini converts from the Anthropic format
 
-const anthropicImageBlock = (image: ChatImage): AnthropicImageBlock => ({ type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.dataBase64 } })
-const openAIImagePart = (image: ChatImage): OpenAIImagePart => ({ type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.dataBase64}` } })
+const anthropicMediaBlock = (media: ChatMedia): AnthropicImageBlock | AnthropicDocumentBlock => media.kind === 'pdf'
+	? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: media.dataBase64 }, title: media.name }
+	: { type: 'image', source: { type: 'base64', media_type: media.mimeType, data: media.dataBase64 } }
+const openAIMediaPart = (media: ChatMedia): OpenAIImagePart | OpenAIFilePart => media.kind === 'pdf'
+	? { type: 'file', file: { filename: media.name, file_data: `data:application/pdf;base64,${media.dataBase64}` } }
+	: { type: 'image_url', image_url: { url: `data:${media.mimeType};base64,${media.dataBase64}` } }
 
-const imagePartsOf = (images: ChatImage[] | undefined, format: ImageFormat): (AnthropicImageBlock | OpenAIImagePart)[] =>
-	(images ?? []).map(image => format === 'anthropic' ? anthropicImageBlock(image) : openAIImagePart(image))
+const mediaPartsOf = (media: ChatMedia[] | undefined, format: ImageFormat): (AnthropicImageBlock | AnthropicDocumentBlock | OpenAIImagePart | OpenAIFilePart)[] =>
+	(media ?? []).map(m => format === 'anthropic' ? anthropicMediaBlock(m) : openAIMediaPart(m))
+
+// Rough input tokens of attached media, which the text estimate doesn't see: an image downscaled to ~1568px
+// (chatImages.ts), and per PDF page its text plus a rendered image (Anthropic counts both).
+const IMAGE_TOKENS = 1_600
+const PDF_PAGE_TOKENS = 2_000
+const mediaTokensOf = (media: ChatMedia[] | undefined) =>
+	(media ?? []).reduce((sum, m) => sum + (m.kind === 'pdf' ? m.pageCount * PDF_PAGE_TOKENS : IMAGE_TOKENS), 0)
 
 
 
@@ -106,10 +120,10 @@ const prepareMessages_openai_tools = (messages: SimpleLLMMessage[]): AnthropicOr
 				newMessages.push(turnAssistant)
 			} else {
 				turnAssistant = undefined
-				// built explicitly (not pushed as-is) so `images` doesn't leak into the payload
+				// built explicitly (not pushed as-is) so `media` doesn't leak into the payload
 				newMessages.push({
 					role: 'user',
-					content: currMsg.images?.length ? [...currMsg.images.map(openAIImagePart), { type: 'text', text: currMsg.content }] : currMsg.content,
+					content: currMsg.media?.length ? [...currMsg.media.map(openAIMediaPart), { type: 'text', text: currMsg.content }] : currMsg.content,
 				})
 			}
 			continue
@@ -212,7 +226,7 @@ const prepareMessages_anthropic_tools = (messages: SimpleLLMMessage[], supportsA
 			const { text, workspaceContext } = sendWorkspaceContextAsSystem ? splitWorkspaceContext(currMsg.content) : { text: currMsg.content, workspaceContext: null }
 			newMessages.push({
 				role: 'user',
-				content: currMsg.images?.length ? [...currMsg.images.map(anthropicImageBlock), { type: 'text', text }] : text,
+				content: currMsg.media?.length ? [...currMsg.media.map(anthropicMediaBlock), { type: 'text', text }] : text,
 			})
 			if (workspaceContext) newMessages.push({ role: 'system', content: workspaceContext })
 			turn = null
@@ -275,7 +289,7 @@ const prepareMessages_XML_tools = (messages: SimpleLLMMessage[], supportsAnthrop
 		// add user or tool to the previous user message
 		else if (c.role === 'user' || c.role === 'tool') {
 			const text = c.role === 'tool' ? `<${c.name}_result>\n${c.content}\n</${c.name}_result>` : c.content
-			const imageParts = c.role === 'user' ? imagePartsOf(c.images, imageFormat) : []
+			const imageParts = c.role === 'user' ? mediaPartsOf(c.media, imageFormat) : []
 
 			const prev = llmChatMessages[llmChatMessages.length - 1]
 			if (prev?.role !== 'user') {
@@ -287,7 +301,7 @@ const prepareMessages_XML_tools = (messages: SimpleLLMMessage[], supportsAnthrop
 			else if (typeof prev.content === 'string' && imageParts.length === 0) {
 				prev.content += '\n\n' + text
 			}
-			else { // images on either side: merge as blocks
+			else { // media on either side: merge as blocks
 				const prevBlocks = typeof prev.content === 'string' ? [{ type: 'text' as const, text: prev.content }] : prev.content
 				prev.content = [...prevBlocks, ...imageParts, { type: 'text', text }] as typeof prev.content
 			}
@@ -392,7 +406,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	}
 
 	let totalTokens = 0
-	for (const m of messages) { totalTokens += estimateTokens(m.content) }
+	for (const m of messages) { totalTokens += estimateTokens(m.content) + (m.role === 'user' ? mediaTokensOf(m.media) : 0) }
 	// in estimated tokens: the budget is in real tokens, and estimates run below them (other tokenizer, tool schemas)
 	const tokensNeedToTrim = totalTokens - Math.max(
 		(contextWindow - reservedOutputTokenSpace) / tokenRatio, // can be 0, in which case tokensNeedToTrim=everything, bad
@@ -478,7 +492,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 		const firstContent = llmMessages[0].content
 		const newFirstMessage = {
 			role: 'user',
-			// the first message's content is blocks when it carries images
+			// the first message's content is blocks when it carries media
 			content: typeof firstContent === 'string' ? `${sysMsgPrefix}${firstContent}` : [{ type: 'text', text: sysMsgPrefix }, ...firstContent]
 		} as AnthropicOrOpenAILLMMessage
 		llmMessages.splice(0, 1) // delete first message
@@ -562,7 +576,7 @@ const prepareGeminiMessages = (messages: AnthropicLLMChatMessage[]) => {
 						if (!toolName) return null
 						return { functionResponse: { id: c.tool_use_id, name: toolName, response: { output: c.content } } }
 					}
-					else if (c.type === 'image') {
+					else if (c.type === 'image' || c.type === 'document') {
 						return { inlineData: { mimeType: c.source.media_type, data: c.source.data } }
 					}
 					else return null
@@ -746,7 +760,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 
 	// --- LLM Chat messages ---
 
-	private _chatMessagesToSimpleMessages(chatMessages: ChatMessage[], modelSelection: ModelSelection, supportsVision: boolean): SimpleLLMMessage[] {
+	private _chatMessagesToSimpleMessages(chatMessages: ChatMessage[], modelSelection: ModelSelection, { supportsVision, supportsPDF }: { supportsVision: boolean, supportsPDF: boolean }): SimpleLLMMessage[] {
 		const simpleLLMMessages: SimpleLLMMessage[] = []
 
 		// tool results before this index were cleared to fit the context window (ContextClearedEntry)
@@ -779,13 +793,21 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 				})
 			}
 			else if (m.role === 'user') {
-				const images = (m.selections ?? []).filter((s): s is StagingSelectionItem & { type: 'Image' } => s.type === 'Image')
-				// for a model without vision (e.g. after switching models), leave the images out but say so
-				const nOmitted = supportsVision ? 0 : images.length
+				const selections = m.selections ?? []
+				const images = selections.filter((s): s is StagingSelectionItem & { type: 'Image' } => s.type === 'Image')
+				const pdfs = selections.filter((s): s is StagingSelectionItem & { type: 'PDF' } => s.type === 'PDF')
+				// for a model that can't read them (e.g. after switching models), leave them out but say so
+				const notes: string[] = []
+				if (!supportsVision && images.length > 0) notes.push(`(${images.length} attached image${images.length === 1 ? ' was' : 's were'} left out: the current model doesn't accept images.)`)
+				if (!supportsPDF && pdfs.length > 0) notes.push(`(${pdfs.length} attached PDF${pdfs.length === 1 ? ' was' : 's were'} left out: the current model doesn't read PDFs.)`)
+				const media: ChatMedia[] = [
+					...(supportsVision ? images.map((i): ChatMedia => ({ kind: 'image', mimeType: i.mimeType, dataBase64: i.dataBase64 })) : []),
+					...(supportsPDF ? pdfs.map((p): ChatMedia => ({ kind: 'pdf', name: p.name, dataBase64: p.dataBase64, pageCount: p.pageCount })) : []),
+				]
 				simpleLLMMessages.push({
 					role: m.role,
-					content: nOmitted === 0 ? m.content : `${m.content}\n\n(${nOmitted} attached image${nOmitted === 1 ? ' was' : 's were'} left out: the current model doesn't accept images.)`,
-					images: supportsVision && images.length > 0 ? images.map(i => ({ mimeType: i.mimeType, dataBase64: i.dataBase64 })) : undefined,
+					content: notes.length === 0 ? m.content : `${m.content}\n\n${notes.join('\n')}`,
+					media: media.length > 0 ? media : undefined,
 				})
 			}
 		}
@@ -852,6 +874,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 			contextWindow,
 			supportsSystemMessage,
 			supportsVision,
+			supportsPDF,
 			recognizedModelName,
 		} = getModelCapabilities(providerName, modelName, overridesOfModel)
 
@@ -863,7 +886,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 
 		const isReasoningEnabled = getIsReasoningEnabledState('Chat', providerName, modelName, modelSelectionOptions, overridesOfModel)
 		const reservedOutputTokenSpace = getReservedOutputTokenSpace(providerName, modelName, { isReasoningEnabled, overridesOfModel })
-		const llmMessages = this._chatMessagesToSimpleMessages(chatMessages, modelSelection, !!supportsVision)
+		const llmMessages = this._chatMessagesToSimpleMessages(chatMessages, modelSelection, { supportsVision: !!supportsVision, supportsPDF: !!supportsPDF })
 
 		return prepareMessages({
 			messages: llmMessages,

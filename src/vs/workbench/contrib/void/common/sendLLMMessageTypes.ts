@@ -31,6 +31,9 @@ export const getErrorMessage: (error: unknown) => string = (error) => {
 
 export type AnthropicImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
 export type OpenAIImagePart = { type: 'image_url'; image_url: { url: string } }
+// PDFs: Anthropic document blocks, OpenAI-compatible file parts (data URL); Gemini converts from the Anthropic block
+export type AnthropicDocumentBlock = { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string }; title?: string }
+export type OpenAIFilePart = { type: 'file'; file: { filename: string; file_data: string } }
 
 export type AnthropicLLMChatMessage = {
 	role: 'assistant',
@@ -40,7 +43,7 @@ export type AnthropicLLMChatMessage = {
 } | {
 	role: 'user',
 	content: string | (
-		{ type: 'text'; text: string; } | { type: 'tool_result'; tool_use_id: string; content: string; } | AnthropicImageBlock
+		{ type: 'text'; text: string; } | { type: 'tool_result'; tool_use_id: string; content: string; } | AnthropicImageBlock | AnthropicDocumentBlock
 	)[]
 } | {
 	role: 'system', // mid-conversation system message, on the Claude models that accept one (anthropicModelFeatures)
@@ -51,7 +54,7 @@ export type OpenAILLMChatMessage = {
 	content: string;
 } | {
 	role: 'user';
-	content: string | ({ type: 'text'; text: string } | OpenAIImagePart)[];
+	content: string | ({ type: 'text'; text: string } | OpenAIImagePart | OpenAIFilePart)[];
 } | {
 	role: 'assistant',
 	content: string | (AnthropicReasoning | { type: 'text'; text: string })[];

@@ -111,6 +111,26 @@ export type StagingSelectionItem = {
 	uri?: undefined;
 	language?: undefined;
 	state?: undefined;
+} | {
+	// attached with the + button or dropped in; sent as a document to models that read PDFs (supportsPDF)
+	type: 'PDF';
+	id: string;
+	name: string;
+	dataBase64: string;
+	pageCount: number; // estimated when attached, for the context budget
+	uri?: undefined;
+	language?: undefined;
+	state?: undefined;
+} | {
+	// a text or code file attached from anywhere (not a workspace file); its content goes into the message as text
+	type: 'TextFile';
+	id: string;
+	name: string;
+	languageId: string; // for the code fence
+	text: string;
+	uri?: undefined;
+	language?: undefined;
+	state?: undefined;
 }
 
 // the image types every vision-capable provider accepts (Anthropic, OpenAI, Gemini)

@@ -289,12 +289,20 @@
 	"overrides": {
 		"node-gyp-build": "4.8.1",
 		"@electron/get": "3.1.0",
+		"@microsoft/dev-tunnels-connections": {
+			"uuid": "^11.1.1"
+		},
 		"kerberos@2.1.1": {
 			"node-addon-api": "7.1.0"
 		},
+		"postcss": "^8.5.23",
+		"postcss-selector-parser": "^7.1.6",
 		"serialize-javascript": "^7.0.3",
 		"ssh2": {
 			"cpu-features": "0.0.0"
+		},
+		"tsup": {
+			"esbuild": "^0.28.1"
 		}
 	},
 	"repository": {

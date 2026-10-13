@@ -26,9 +26,6 @@ import { CopilotAgent } from './copilot/copilotAgent.js';
 import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeSdkPackage } from './claude/claudeAgentSdkService.js';
 import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
-import { MistralAgent } from './mistral/mistralAgent.js';
-import { IMistralApiService, MistralApiService } from './mistral/mistralApiService.js';
-import { ServiceCollection } from '../../instantiation/common/serviceCollection.js';
 import { createCodexProviderConfiguration } from './codex/codexProviderConfiguration.js';
 import { ByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
 import { IAgentHostProxyResolver } from './agentHostProxyResolver.js';
@@ -191,15 +188,8 @@ async function startAgentHost(): Promise<void> {
 			registerCodexIfEnabled();
 			disposables.add(agentConfigurationService.onDidRootConfigChange(registerCodexIfEnabled));
 		}
-		// Kodia: the Mistral agent provider is always registered (like Copilot) so it appears in the
-		// Agents Window whenever the agent host runs. There is no external SDK to gate on: the agentic
-		// loop and tool execution are native (see `node/mistral/`). The API key comes from
-		// `VSCODE_AGENT_HOST_MISTRAL_API_KEY` (forwarded by the starters from the
-		// `chat.agentHost.mistralAgent.apiKey` setting, which Kodia mirrors from the Mistral key in its
-		// settings); without it the agent lists models but a turn fails fast with a clear error.
-		const mistralApiService = disposables.add(instantiationService.createInstance(MistralApiService));
-		const mistralInstantiationService = instantiationService.createChild(new ServiceCollection([IMistralApiService, mistralApiService]));
-		providerService.registerProvider(mistralInstantiationService.createInstance(MistralAgent));
+		// Kodia: the Mistral agent (node/mistral/) is not registered until it is ported to the
+		// 1.141 agent API (chats instead of sessions); the agent host starters still forward its key.
 		completionTriggerCharacters = runtimeServices.completions.triggerCharacters;
 	} catch (err) {
 		logService.error('Failed to create AgentService', err);

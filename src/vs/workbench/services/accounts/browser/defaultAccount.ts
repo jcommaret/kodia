@@ -165,12 +165,12 @@ export class DefaultAccountService extends Disposable implements IDefaultAccount
 					default: { id: 'void', name: 'Kodia' },
 					enterprise: { id: 'void', name: 'Kodia' },
 					enterpriseProviderConfig: '',
-					enterpriseProviderUriSetting: '',
 					scopes: [],
 				},
 				entitlementUrl: '',
 				tokenEntitlementUrl: '',
 				mcpRegistryDataUrl: '',
+				managedSettingsUrl: '',
 			};
 			this.initBarrier.open();
 		}

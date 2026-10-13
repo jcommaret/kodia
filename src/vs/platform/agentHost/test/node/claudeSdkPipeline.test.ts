@@ -86,11 +86,6 @@ class ImmediatelyDoneQuery implements Query {
 	reconnectMcpServer(): never { throw new Error('not modeled'); }
 	toggleMcpServer(): never { throw new Error('not modeled'); }
 	setMcpServers(): never { throw new Error('not modeled'); }
-	setMcpPermissionModeOverride(): never { throw new Error('not modeled'); }
-	reinitialize(): never { throw new Error('not modeled'); }
-	usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): never { throw new Error('not modeled'); }
-	reloadSkills(): never { throw new Error('not modeled'); }
-	backgroundTasks(): never { throw new Error('not modeled'); }
 	setSlashCommandHooks(): never { throw new Error('not modeled'); }
 	getServerInfo(): never { throw new Error('not modeled'); }
 	getMcpResources(): never { throw new Error('not modeled'); }

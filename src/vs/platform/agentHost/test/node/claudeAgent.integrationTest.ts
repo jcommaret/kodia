@@ -527,7 +527,6 @@ class RoundTripQuery implements AsyncGenerator<SDKMessage, void> {
 					toolUseID: item.toolUseID,
 					requestId: item.toolUseID,
 				});
-				if (result === null) { throw new Error('integration test: canUseTool returned null'); }
 				this._sdk.canUseToolResults.push(result);
 				continue;
 			}
@@ -579,11 +578,6 @@ class RoundTripQuery implements AsyncGenerator<SDKMessage, void> {
 	reconnectMcpServer(): never { throw new Error('not modeled'); }
 	toggleMcpServer(): never { throw new Error('not modeled'); }
 	setMcpServers(): never { throw new Error('not modeled'); }
-	setMcpPermissionModeOverride(): never { throw new Error('not modeled'); }
-	reinitialize(): never { throw new Error('not modeled'); }
-	usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): never { throw new Error('not modeled'); }
-	reloadSkills(): never { throw new Error('not modeled'); }
-	backgroundTasks(): never { throw new Error('not modeled'); }
 	streamInput(): never { throw new Error('not modeled'); }
 	stopTask(): never { throw new Error('not modeled'); }
 	reloadSkills(): never { throw new Error('not modeled'); }

@@ -41,9 +41,6 @@ import { CopilotAgent } from './copilot/copilotAgent.js';
 import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeSdkPackage } from './claude/claudeAgentSdkService.js';
 import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
-import { MistralAgent } from './mistral/mistralAgent.js';
-import { IMistralApiService, MistralApiService } from './mistral/mistralApiService.js';
-import { ServiceCollection } from '../../instantiation/common/serviceCollection.js';
 import { createCodexProviderConfiguration } from './codex/codexProviderConfiguration.js';
 import { IAgentSdkDownloader, type IAgentSdkDownloadProgress } from './agentSdkDownloader.js';
 import { IAgentHostProviderService } from './agentHostProviderService.js';
@@ -270,13 +267,8 @@ async function main(): Promise<void> {
 			registerCodexIfEnabled();
 			disposables.add(agentConfigurationService.onDidRootConfigChange(() => registerCodexIfEnabled()));
 		}
-		// Kodia: the Mistral agent is always registered (like Copilot) so it appears in the Agents
-		// Window whenever the agent host runs. Its API key is read from
-		// `VSCODE_AGENT_HOST_MISTRAL_API_KEY` when present.
-		const mistralApiService = disposables.add(instantiationService.createInstance(MistralApiService));
-		const mistralInstantiationService = instantiationService.createChild(new ServiceCollection([IMistralApiService, mistralApiService]));
-		providerService.registerProvider(mistralInstantiationService.createInstance(MistralAgent));
-		log('MistralAgent registered');
+		// Kodia: the Mistral agent (node/mistral/) is not registered until it is ported to the
+		// 1.141 agent API (chats instead of sessions); the agent host starters still forward its key.
 	}
 
 	// Surface agent-SDK download progress to clients as generic `progress`

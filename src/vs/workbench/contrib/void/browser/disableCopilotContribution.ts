@@ -9,7 +9,7 @@ import { IExtensionsWorkbenchService } from '../../extensions/common/extensions.
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { ChatConfiguration } from '../../chat/common/constants.js';
+import { ChatAIDisabledSettingId } from '../../../../platform/chat/common/chatSettings.js';
 
 const COPILOT_EXTENSION_IDS = [
 	'GitHub.copilot-chat',
@@ -29,8 +29,8 @@ export class DisableCopilotContribution extends Disposable implements IWorkbench
 	}
 
 	private async initialize(): Promise<void> {
-		if (this.configurationService.getValue<boolean>(ChatConfiguration.AIDisabled) !== true) {
-			await this.configurationService.updateValue(ChatConfiguration.AIDisabled, true);
+		if (this.configurationService.getValue<boolean>(ChatAIDisabledSettingId) !== true) {
+			await this.configurationService.updateValue(ChatAIDisabledSettingId, true);
 		}
 
 		await this.extensionsWorkbenchService.queryLocal();

@@ -9,13 +9,13 @@
 
 import { IServerChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+// Kodia: the MCP SDK is imported as types only and loaded where it is used. A static import of an npm
+// package makes the packaged app fail to start: since VS Code 1.141 the main process is one bundle whose
+// static imports resolve before the node_modules.asar lookup hook is installed.
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { MCPConfigFileJSON, MCPConfigFileEntryJSON, MCPServer, RawMCPToolCall, MCPToolErrorResponse, MCPServerEventResponse, MCPToolCallParams, removeMCPToolNamePrefix } from '../common/mcpServiceTypes.js';
-import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { MCPUserStateOfName } from '../common/voidSettingsTypes.js';
 
 const getClientConfig = (serverName: string) => {
@@ -163,6 +163,12 @@ export class MCPChannel implements IServerChannel {
 
 	private async _createClientUnsafe(server: MCPConfigFileEntryJSON, serverName: string, isOn: boolean): Promise<ClientInfo> {
 
+		const [{ Client }, { StdioClientTransport }, { StreamableHTTPClientTransport }, { SSEClientTransport }] = await Promise.all([
+			import('@modelcontextprotocol/sdk/client/index.js'),
+			import('@modelcontextprotocol/sdk/client/stdio.js'),
+			import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+			import('@modelcontextprotocol/sdk/client/sse.js'),
+		])
 		const clientConfig = getClientConfig(serverName)
 		const client = new Client(clientConfig)
 		let transport: Transport;

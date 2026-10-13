@@ -8,7 +8,9 @@ import { promisify } from 'util';
 import { exec as _exec } from 'child_process';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
-import { spawn as ptySpawn, type IPty } from 'node-pty';
+// Kodia: node-pty is loaded with `await import(...)`; a static import of an npm package makes the packaged
+// app fail to start (VS Code 1.141 bundles the main process into one file).
+import type { IPty } from 'node-pty';
 import { isMacintosh } from '../../../../base/common/platform.js';
 import { removeAnsiEscapeCodes } from '../../../../base/common/strings.js';
 import {
@@ -242,6 +244,7 @@ export class AppleFoundationModelsMainService implements IAppleFoundationModelsM
 		// unaffected either way. node-pty is already a dependency here (used for the integrated
 		// terminal).
 		log.push(`Starting fm: fm serve --port ${port} --host 127.0.0.1…`);
+		const { spawn: ptySpawn } = await import('node-pty');
 		const ptyProcess = ptySpawn(fmPath, ['serve', '--port', String(port), '--host', '127.0.0.1'], {
 			name: 'xterm-256color',
 			cols: 120,

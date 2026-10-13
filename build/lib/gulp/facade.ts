@@ -27,7 +27,7 @@ import buffer_ from 'gulp-buffer';
 import vinylZip_ from '@vscode/gulp-vinyl-zip';
 import sort_ from 'gulp-sort';
 import g from 'gulp';
-import es from 'event-stream';
+import vfs from 'vinyl-fs';
 
 export const filter = filter_;
 export type { FileFunction } from 'gulp-filter';
@@ -48,14 +48,12 @@ export const sort = sort_;
 
 export const gulp = {
 	// Import task, sequence and parallel from "../lib/task"!
-	// Kodia runs gulp 5 (vinyl-fs 4), which differs from gulp 4 in two ways the build relies on:
-	// - it decodes every file as UTF-8 by default, destroying binary assets (.node addons, images,
-	//   fonts) as they flow through packaging streams, so src() reads raw buffers unless the call
-	//   site picks an encoding;
-	// - its streamx-based readables unconditionally call dest.end() when piped, and the bare merge
-	//   streams of event-stream have no end() method, so a classic through stream after src() keeps
-	//   every source mergeable with es.merge().
-	src: ((globs: Parameters<typeof g.src>[0], opt?: Parameters<typeof g.src>[1]) =>
-		g.src(globs, { encoding: false, ...opt } as Parameters<typeof g.src>[1]).pipe(es.through())) as unknown as typeof g.src,
+	// Kodia runs gulp 5, whose vinyl-fs 4 src() breaks the build where gulp 4 (upstream) does not:
+	// - it decodes every file as UTF-8 by default, destroying binary assets (.node addons, images, fonts);
+	// - its streamx-based readables cannot be merged with event-stream's es.merge();
+	// - it resolves relative symlinks against the working directory instead of the link's folder
+	//   (ENOENT on foundry-local-sdk's libonnxruntime.dylib -> libonnxruntime.1.dylib when packaging).
+	// Read sources with vinyl-fs 3, the implementation behind gulp 4's src().
+	src: vfs.src,
 	dest: g.dest
 };

@@ -320,10 +320,6 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			// add autoAcceptLLMChanges feature
 			if (readS.globalSettings.autoAcceptLLMChanges === undefined) readS.globalSettings.autoAcceptLLMChanges = false;
 
-			// Apple Foundation Models auto-setup (macOS only; default off on other platforms)
-			if (readS.globalSettings.autoSetupAppleFoundationModels === undefined) {
-				readS.globalSettings.autoSetupAppleFoundationModels = isMacintosh;
-			}
 			if (readS.globalSettings.autoSetupMlx === undefined) {
 				readS.globalSettings.autoSetupMlx = isMacintosh;
 			}

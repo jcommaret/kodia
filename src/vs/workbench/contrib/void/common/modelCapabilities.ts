@@ -52,9 +52,6 @@ export const defaultProviderSettings = {
 	mlx: {
 		endpoint: 'http://127.0.0.1:8080',
 	},
-	appleFoundationModels: {
-		endpoint: 'http://127.0.0.1:9999',
-	},
 	liteLLM: { // https://docs.litellm.ai/docs/providers/openai_compatible
 		endpoint: '',
 	},
@@ -136,7 +133,6 @@ export const defaultModelsOfProvider = {
 	],
 	lmStudio: [], // autodetected
 	mlx: [], // autodetected — mlx_lm.server
-	appleFoundationModels: [], // autodetected via afm /v1/models (model id: `foundation`)
 	openRouter: [ // https://openrouter.ai/models — one model per provider
 		'anthropic/claude-fable-5.1',
 		'google/gemini-3.8-flash',
@@ -1870,48 +1866,6 @@ const mlxSettings: VoidStaticProviderInfo = {
 	},
 }
 
-const appleFoundationModelCapabilities = {
-	// measured empirically against `fm serve` (macOS 27+): requests around ~3900 total tokens (prompt+completion)
-	// succeed, ~4500+ fail with "The session's transcript exceeded the model's context size" — the real window is ~4096.
-	contextWindow: 4_096,
-	reservedOutputTokenSpace: 1_024,
-	cost: { input: 0, output: 0 },
-	downloadable: false as const,
-	supportsFIM: false,
-	supportsSystemMessage: 'system-role' as const,
-	specialToolFormat: 'openai-style' as const,
-	reasoningCapabilities: false as const,
-}
-
-const appleFoundationModelsModelOptions = {
-	'foundation': { // maclocal-api afm — https://github.com/scouzi1966/maclocal-api
-		...appleFoundationModelCapabilities,
-	},
-	'system': { // fm serve (macOS 27+) — on-device Apple Foundation Model
-		...appleFoundationModelCapabilities,
-	},
-	'pcc': { // fm serve (macOS 27+) — Apple Foundation Model on Private Cloud Compute; larger window than on-device `system`
-		...appleFoundationModelCapabilities,
-		contextWindow: 32_000,
-		reservedOutputTokenSpace: 4_096,
-	},
-} as const satisfies { [s: string]: VoidStaticModelInfo }
-
-const appleFoundationModelsSettings: VoidStaticProviderInfo = {
-	modelOptions: appleFoundationModelsModelOptions,
-	modelOptionsFallback: (modelName) => {
-		const lower = modelName.toLowerCase()
-		if (lower.includes('foundation') || lower.includes('apple') || lower.includes('afm')) {
-			return { modelName, recognizedModelName: 'foundation', ...appleFoundationModelsModelOptions['foundation'] }
-		}
-		return extensiveModelOptionsFallback(modelName, { downloadable: false, contextWindow: 32_768 })
-	},
-	providerReasoningIOSettings: {
-		input: { includeInPayload: openAICompatIncludeInPayloadReasoning },
-		output: { needsManualParse: true },
-	},
-}
-
 const ollamaSettings: VoidStaticProviderInfo = {
 	modelOptionsFallback: (modelName) => {
 		const res = extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' } })
@@ -2186,7 +2140,6 @@ const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProvi
 	liteLLM: liteLLMSettings,
 	lmStudio: lmStudioSettings,
 	mlx: mlxSettings,
-	appleFoundationModels: appleFoundationModelsSettings,
 
 	googleVertex: googleVertexSettings,
 	microsoftAzure: microsoftAzureSettings,

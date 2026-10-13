@@ -49,7 +49,6 @@ const refreshBasedOn: { [k in RefreshableProviderName]: (keyof SettingsOfProvide
 	vLLM: ['_didFillInProviderSettings', 'endpoint'],
 	lmStudio: ['_didFillInProviderSettings', 'endpoint'],
 	mlx: ['_didFillInProviderSettings', 'endpoint'],
-	appleFoundationModels: ['_didFillInProviderSettings', 'endpoint'],
 	// openAICompatible: ['_didFillInProviderSettings', 'endpoint', 'apiKey'],
 }
 const REFRESH_INTERVAL = 5_000
@@ -148,7 +147,6 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 		vLLM: { state: 'init', timeoutId: null },
 		lmStudio: { state: 'init', timeoutId: null },
 		mlx: { state: 'init', timeoutId: null },
-		appleFoundationModels: { state: 'init', timeoutId: null },
 	}
 
 
@@ -175,7 +173,7 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 				// set the models to the detected models
 				const modelNames = models.map(model => {
 					if (providerName === 'ollama') return (model as OllamaModelResponse).name;
-					else if (providerName === 'vLLM' || providerName === 'lmStudio' || providerName === 'mlx' || providerName === 'appleFoundationModels') {
+					else if (providerName === 'vLLM' || providerName === 'lmStudio' || providerName === 'mlx') {
 						return (model as OpenaiCompatibleModelResponse).id;
 					}
 					else throw new Error('refreshMode fn: unknown provider', providerName);

@@ -30,7 +30,6 @@
 	"linuxIconName": "void-editor",
 	"licenseFileName": "LICENSE.txt",
 	"reportIssueUrl": "https://github.com/voideditor/void/issues/new",
-	"nodejsRepository": "https://nodejs.org",
 	"urlProtocol": "void",
 	"extensionsGallery": {
 		"serviceUrl": "https://marketplace.visualstudio.com/_apis/public/gallery",
@@ -78,6 +77,10 @@
 			"apple": {
 				"id": "void",
 				"name": "Void"
+			},
+			"microsoft": {
+				"id": "microsoft",
+				"name": "Microsoft"
 			}
 		},
 		"providerExtensionId": "void.void",
@@ -96,8 +99,15 @@
 		"resolveMergeConflictsCommand": "",
 		"completionsAdvancedSetting": "",
 		"completionsEnablementSetting": "",
-		"nextEditSuggestionsSetting": ""
+		"nextEditSuggestionsSetting": "",
+		"optimizeUsageDocumentationUrl": "https://aka.ms/token-usage-tips",
+		"mcpConnectorsUrl": "https://api.github.com/copilot-connectors/api/v1",
+		"managedSettingsUrl": "https://api.github.com/copilot_internal/managed_settings"
 	},
 	"quality": "stable",
-	"builtInExtensionsEnabledWithAutoUpdates": []
+	"builtInExtensionsEnabledWithAutoUpdates": [],
+	"linuxDesktopName": "com.visualstudio.CodeOSS",
+	"nodejsArtifactFeed": "",
+	"electronArtifactFeed": "",
+	"voiceWsUrl": "wss://falcon-caas.mai.microsoft.com/voice-code/api/v1/realtime/voice"
 }

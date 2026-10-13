@@ -1960,7 +1960,7 @@
     "yaml": "^2.8.3",
     "@vscode/markdown-editor": "0.0.2-107",
     "@vscode/observables": "^0.1.1-0",
-    "katex": "^0.18.2",
+    "katex": "^0.19.0",
     "mermaid": "^11.15.0"
   },
   "devDependencies": {

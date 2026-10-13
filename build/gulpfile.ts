@@ -14,14 +14,6 @@ import * as task from './lib/gulp/task.ts';
 import * as util from './lib/util.ts';
 import { runEsbuildTranspile } from './lib/esbuild.ts';
 
-// gulp 5 (vinyl-fs 4) decodes every file as UTF-8 by default, which destroys
-// binary assets (.node addons, images, fonts) as they flow through packaging
-// streams. Restore the gulp 4 behavior of reading raw buffers; call sites can
-// still opt into an encoding explicitly.
-const originalGulpSrc = gulp.src.bind(gulp);
-gulp.src = ((globs: Parameters<typeof gulp.src>[0], opt?: Parameters<typeof gulp.src>[1]) =>
-	originalGulpSrc(globs, { encoding: false, ...opt } as Parameters<typeof gulp.src>[1])) as typeof gulp.src;
-
 // Extension point names
 task.task(compilation.compileExtensionPointNamesTask);
 

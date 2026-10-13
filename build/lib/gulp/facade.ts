@@ -48,9 +48,14 @@ export const sort = sort_;
 
 export const gulp = {
 	// Import task, sequence and parallel from "../lib/task"!
-	// Kodia runs gulp 5, whose streamx-based readables unconditionally call dest.end() when piped;
-	// the bare merge streams of event-stream have no end() method. A classic through stream after
-	// src() keeps every source mergeable with es.merge().
-	src: ((...args: Parameters<typeof g.src>) => g.src(...args).pipe(es.through())) as unknown as typeof g.src,
+	// Kodia runs gulp 5 (vinyl-fs 4), which differs from gulp 4 in two ways the build relies on:
+	// - it decodes every file as UTF-8 by default, destroying binary assets (.node addons, images,
+	//   fonts) as they flow through packaging streams, so src() reads raw buffers unless the call
+	//   site picks an encoding;
+	// - its streamx-based readables unconditionally call dest.end() when piped, and the bare merge
+	//   streams of event-stream have no end() method, so a classic through stream after src() keeps
+	//   every source mergeable with es.merge().
+	src: ((globs: Parameters<typeof g.src>[0], opt?: Parameters<typeof g.src>[1]) =>
+		g.src(globs, { encoding: false, ...opt } as Parameters<typeof g.src>[1]).pipe(es.through())) as unknown as typeof g.src,
 	dest: g.dest
 };

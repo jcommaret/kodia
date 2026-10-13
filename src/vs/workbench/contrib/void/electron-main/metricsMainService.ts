@@ -12,7 +12,9 @@ import { StorageTarget, StorageScope } from '../../../../platform/storage/common
 import { IApplicationStorageMainService } from '../../../../platform/storage/electron-main/storageMainService.js';
 
 import { IMetricsService } from '../common/metricsService.js';
-import { PostHog } from 'posthog-node'
+// Kodia: posthog-node is loaded with `await import(...)`, as a static import of an npm package makes the
+// packaged app fail to start (VS Code 1.141 bundles the main process into one file).
+import type { PostHog } from 'posthog-node'
 import { OPT_OUT_KEY } from '../common/storageKeys.js';
 
 
@@ -35,7 +37,7 @@ const osInfo = _getOSInfo()
 export class MetricsMainService extends Disposable implements IMetricsService {
 	_serviceBrand: undefined;
 
-	private readonly client: PostHog
+	private readonly client: Promise<PostHog>
 
 	private _initProperties: object = {}
 
@@ -88,9 +90,9 @@ export class MetricsMainService extends Disposable implements IMetricsService {
 		@IApplicationStorageMainService private readonly _appStorage: IApplicationStorageMainService,
 	) {
 		super()
-		this.client = new PostHog('phc_UanIdujHiLp55BkUTjB1AuBXcasVkdqRwgnwRlWESH2', {
+		this.client = import('posthog-node').then(({ PostHog }) => new PostHog('phc_UanIdujHiLp55BkUTjB1AuBXcasVkdqRwgnwRlWESH2', {
 			host: 'https://us.i.posthog.com',
-		})
+		}))
 
 		this.initialize() // async
 	}
@@ -126,7 +128,7 @@ export class MetricsMainService extends Disposable implements IMetricsService {
 	const didOptOut = true // Force opt-out for AI Stats
 
 	console.log('User is opted out of basic Kodia metrics?', didOptOut)
-	this.client.optOut()
+	this.client.then(client => client.optOut())
 
 
 		console.log('Kodia posthog metrics info:', JSON.stringify(identifyMessage, null, 2))
@@ -136,7 +138,7 @@ export class MetricsMainService extends Disposable implements IMetricsService {
 	capture: IMetricsService['capture'] = (event, params) => {
 		const capture = { distinctId: this.distinctId, event, properties: params } as const
 		// console.log('full capture:', this.distinctId)
-		this.client.capture(capture)
+		this.client.then(client => client.capture(capture))
 	}
 
 	setOptOut: IMetricsService['setOptOut'] = (newVal: boolean) => {

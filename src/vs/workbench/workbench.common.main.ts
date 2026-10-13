@@ -399,8 +399,10 @@ import './contrib/welcomeWalkthrough/browser/walkThrough.contribution.js';
 import './contrib/welcomeViews/common/viewsWelcome.contribution.js';
 import './contrib/welcomeViews/common/newFile.contribution.js';
 
-// Welcome Onboarding — Microsoft Copilot onboarding (Kodia uses voidOnboardingService)
-// import './contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.js';
+// Welcome Onboarding — registers the onboarding service the startup page depends on since 1.141.
+// The Microsoft Copilot onboarding itself never shows in Kodia (guard in onboardingVariationA.ts;
+// Kodia uses voidOnboardingService).
+import './contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.js';
 
 // Onboarding (scenario engine)
 import './contrib/onboarding/browser/onboarding.contribution.js';

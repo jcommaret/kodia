@@ -9,8 +9,9 @@ import { ILogger } from '../logging';
 import { MarkdownContributionProvider } from '../markdownExtensions';
 import { Disposable } from '../util/dispose';
 import { isMarkdownFile } from '../util/file';
+import { getSafeNotificationMessage } from '../util/notification';
 import { MdLinkOpener } from '../util/openDocumentLink';
-import { areUrisEqual, WebviewResourceProvider } from '../util/resources';
+import { areUrisEqual, getMarkdownLocalResourceRoots, WebviewResourceProvider } from '../util/resources';
 import { urlToUri } from '../util/url';
 import { ImageInfo, MdDocumentRenderer } from './documentRenderer';
 import { MarkdownPreviewConfigurationManager } from './previewConfig';
@@ -40,6 +41,13 @@ interface MarkdownPreviewDelegate {
 	getLineChanges?(): MarkdownPreviewLineChanges | Promise<MarkdownPreviewLineChanges | undefined> | undefined;
 	getDiffScrollSync?(): DiffScrollSyncData | Promise<DiffScrollSyncData | undefined> | undefined;
 	openPreviewLinkToMarkdownFile(markdownLink: vscode.Uri, fragment: string | undefined): void;
+}
+
+export function getStylesLoadErrorMessage(unloadedStyles: readonly string[]): string {
+	return getSafeNotificationMessage(
+		vscode.l10n.t("Could not load 'markdown.styles': {0}", unloadedStyles.join(', ')),
+		vscode.l10n.t("Could not load the styles configured in 'markdown.styles'."),
+	);
 }
 
 function getFirstChangedLine(lineChanges: MarkdownPreviewLineChanges): number | undefined {
@@ -79,6 +87,7 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 
 	readonly #resource: vscode.Uri;
 	readonly #webviewPanel: vscode.WebviewPanel;
+	readonly #isDiffView: boolean;
 
 	#line: number | undefined;
 	readonly #scrollToFragment: string | undefined;
@@ -126,7 +135,8 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 		this.#webviewPanel = webview;
 		this.#resource = resource;
 
-		this.#scrollToFirstDiffChange = !startingScroll && !!delegate.getLineChanges;
+		this.#isDiffView = !!delegate.getLineChanges;
+		this.#scrollToFirstDiffChange = !startingScroll && this.#isDiffView;
 
 		switch (startingScroll?.type) {
 			case 'line':
@@ -195,10 +205,11 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 					vscode.commands.executeCommand('markdown.showPreviewSecuritySelector', e.source);
 					break;
 
-				case 'previewStyleLoadError':
-					vscode.window.showWarningMessage(
-						vscode.l10n.t("Could not load 'markdown.styles': {0}", e.unloadedStyles.join(', ')));
+				case 'previewStyleLoadError': {
+					this.#logger.trace('previewStyleLoadError', e.unloadedStyles.join(', '));
+					vscode.window.showWarningMessage(getStylesLoadErrorMessage(e.unloadedStyles));
 					break;
+				}
 			}
 		}));
 
@@ -213,6 +224,7 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 		this.#disposed = true;
 
 		clearTimeout(this.#throttleTimer);
+		clearTimeout(this.#scrollingTimer);
 		for (const entry of this.#fileWatchersBySrc.values()) {
 			entry.dispose();
 		}
@@ -221,6 +233,10 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 
 	public get resource(): vscode.Uri {
 		return this.#resource;
+	}
+
+	public get isDiffView(): boolean {
+		return this.#isDiffView;
 	}
 
 	public get state() {
@@ -457,19 +473,7 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 	}
 
 	#getLocalResourceRoots(): ReadonlyArray<vscode.Uri> {
-		const baseRoots = Array.from(this.#contributionProvider.contributions.previewResourceRoots);
-
-		const folder = vscode.workspace.getWorkspaceFolder(this.#resource);
-		if (folder) {
-			const workspaceRoots = vscode.workspace.workspaceFolders?.map(folder => folder.uri);
-			if (workspaceRoots) {
-				baseRoots.push(...workspaceRoots);
-			}
-		} else {
-			baseRoots.push(uri.Utils.dirname(this.#resource));
-		}
-
-		return baseRoots;
+		return getMarkdownLocalResourceRoots(this.#resource, this.#contributionProvider.contributions.previewResourceRoots);
 	}
 
 	async #onDidClickPreviewLink(href: string) {
@@ -477,7 +481,7 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 		const openLinks = config.get<string>('preview.openMarkdownLinks', 'inPreview');
 		if (openLinks === 'inPreview') {
 			const resolved = await this.#opener.resolveDocumentLink(href, this.resource);
-			if (resolved.kind === 'file') {
+			if (resolved?.kind === 'file') {
 				try {
 					const doc = await vscode.workspace.openTextDocument(vscode.Uri.from(resolved.uri));
 					if (isMarkdownFile(doc)) {
@@ -519,6 +523,7 @@ export interface IManagedMarkdownPreview {
 
 	readonly resource: vscode.Uri;
 	readonly resourceColumn: vscode.ViewColumn;
+	readonly isDiffView: boolean;
 
 	readonly onDispose: vscode.Event<void>;
 	readonly onDidChangeViewState: vscode.Event<vscode.WebviewPanelOnDidChangeViewStateEvent>;
@@ -665,6 +670,10 @@ export class StaticMarkdownPreview extends Disposable implements IManagedMarkdow
 
 	public get resourceColumn() {
 		return this.#webviewPanel.viewColumn || vscode.ViewColumn.One;
+	}
+
+	public get isDiffView(): boolean {
+		return this.#preview.isDiffView;
 	}
 }
 
@@ -822,6 +831,10 @@ export class DynamicMarkdownPreview extends Disposable implements IManagedMarkdo
 
 	public get resourceColumn() {
 		return this.#resourceColumn;
+	}
+
+	public get isDiffView(): boolean {
+		return this.#preview.isDiffView;
 	}
 
 	public reveal(viewColumn: vscode.ViewColumn) {

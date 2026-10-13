@@ -34,7 +34,7 @@ import { IInstantiationService } from '../../../../platform/instantiation/common
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { URI } from '../../../../base/common/uri.js';
-import { IExtension, ExtensionState, IExtensionsWorkbenchService, AutoUpdateConfigurationKey, AutoCheckUpdatesConfigurationKey, HasOutdatedExtensionsContext, AutoUpdateConfigurationValue, InstallExtensionOptions, ExtensionRuntimeState, ExtensionRuntimeActionType, AutoRestartConfigurationKey, VIEWLET_ID, IExtensionsViewPaneContainer, IExtensionsNotification } from '../common/extensions.js';
+import { IExtension, ExtensionState, IExtensionsWorkbenchService, AutoUpdateConfigurationKey, AutoUpdateDelayConfigurationKey, AutoCheckUpdatesConfigurationKey, HasOutdatedExtensionsContext, AutoUpdateConfigurationValue, InstallExtensionOptions, ExtensionRuntimeState, ExtensionRuntimeActionType, AutoRestartConfigurationKey, VIEWLET_ID, IExtensionsViewPaneContainer, IExtensionsNotification } from '../common/extensions.js';
 import { ACTIVE_GROUP, IEditorService, MODAL_GROUP, SIDE_GROUP } from '../../../services/editor/common/editorService.js';
 import { IURLService, IURLHandler, IOpenURLOptions } from '../../../../platform/url/common/url.js';
 import { ExtensionsInput, IExtensionEditorOptions } from '../common/extensionsInput.js';
@@ -52,7 +52,7 @@ import { FileAccess } from '../../../../base/common/network.js';
 import { IIgnoredExtensionsManagementService } from '../../../../platform/userDataSync/common/ignoredExtensions.js';
 import { IUserDataAutoSyncService, IUserDataSyncEnablementService, SyncResource } from '../../../../platform/userDataSync/common/userDataSync.js';
 import { IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
-import { isBoolean, isDefined, isString, isUndefined } from '../../../../base/common/types.js';
+import { isDefined, isString, isUndefined } from '../../../../base/common/types.js';
 import { IExtensionManifestPropertiesService } from '../../../services/extensions/common/extensionManifestPropertiesService.js';
 import { IExtensionService, IExtensionsStatus as IExtensionRuntimeStatus, toExtension, toExtensionDescription } from '../../../services/extensions/common/extensions.js';
 import { isWeb, language } from '../../../../base/common/platform.js';
@@ -64,15 +64,16 @@ import { IUserDataProfileService } from '../../../services/userDataProfile/commo
 import { mainWindow } from '../../../../base/browser/window.js';
 import { IDialogService, IFileDialogService, IPromptButton } from '../../../../platform/dialogs/common/dialogs.js';
 import { IUpdateService, StateType } from '../../../../platform/update/common/update.js';
-import { areApiProposalsCompatible, isEngineValid } from '../../../../platform/extensions/common/extensionValidator.js';
+import { isEngineValid } from '../../../../platform/extensions/common/extensionValidator.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ShowCurrentReleaseNotesActionId } from '../../update/common/update.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { IMarkdownString, MarkdownString } from '../../../../base/common/htmlContent.js';
-import { ExtensionGalleryResourceType, getExtensionGalleryManifestResourceUri, IExtensionGalleryManifestService } from '../../../../platform/extensionManagement/common/extensionGalleryManifest.js';
+import { ExtensionGalleryResourceType, ExtensionGalleryServiceUrlConfigKey, getExtensionGalleryManifestResourceUri, IExtensionGalleryManifest, IExtensionGalleryManifestService } from '../../../../platform/extensionManagement/common/extensionGalleryManifest.js';
 import { fromNow } from '../../../../base/common/date.js';
+import { hash } from '../../../../base/common/hash.js';
 import { IUserDataProfilesService } from '../../../../platform/userDataProfile/common/userDataProfile.js';
 import { IMeteredConnectionService } from '../../../../platform/meteredConnection/common/meteredConnection.js';
 
@@ -1104,6 +1105,15 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 		}
 
 		this.initializeAutoUpdate();
+		this.extensionGalleryManifestService.getExtensionGalleryManifest()
+			.then(manifest => {
+				if (this._store.isDisposed) {
+					return;
+				}
+				this.updateExtensionGalleryManifest(manifest);
+				this._register(this.extensionGalleryManifestService.onDidChangeExtensionGalleryManifest(manifest => this.updateExtensionGalleryManifest(manifest)));
+			})
+			.catch(e => this.logService.error('Error while fetching extension gallery manifest', e));
 		this.updateExtensionsNotificaiton();
 		this.reportInstalledExtensionsTelemetry();
 		this._register(this.storageService.onDidChangeValue(StorageScope.PROFILE, EXTENSIONS_DISMISSED_NOTIFICATIONS_KEY, this._store)(e => this.onDidDismissedNotificationsValueChange()));
@@ -1112,6 +1122,11 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 		this._register(Event.debounce(this.onChange, () => undefined, 100)(() => {
 			this.updateExtensionsNotificaiton();
 			this.reportProgressFromOtherSources();
+		}));
+		this._register(this.configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(ExtensionGalleryServiceUrlConfigKey)) {
+				this.updateExtensionsNotificaiton();
+			}
 		}));
 	}
 
@@ -1122,6 +1137,15 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 				if (this.isAutoUpdateEnabled()) {
 					this.eventuallyAutoUpdateExtensions();
 				}
+				// The auto update value affects whether an extension is shown as delayed
+				this._onChange.fire(undefined);
+			}
+			if (e.affectsConfiguration(AutoUpdateDelayConfigurationKey)) {
+				if (this.isAutoUpdateEnabled()) {
+					this.eventuallyAutoUpdateExtensions();
+				}
+				// The delay affects whether an extension is shown as delayed
+				this._onChange.fire(undefined);
 			}
 			if (e.affectsConfiguration(AutoCheckUpdatesConfigurationKey)) {
 				if (this.isAutoCheckUpdatesEnabled()) {
@@ -1130,7 +1154,7 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 			}
 		}));
 		this._register(this.extensionEnablementService.onEnablementChanged(platformExtensions => {
-			if (this.isAutoCheckUpdatesEnabled() && this.getAutoUpdateValue() === 'onlyEnabledExtensions' && platformExtensions.some(e => this.extensionEnablementService.isEnabled(e))) {
+			if (this.isAutoCheckUpdatesEnabled() && this.getAutoUpdateValue() === 'on' && platformExtensions.some(e => this.extensionEnablementService.isEnabled(e))) {
 				this.checkForUpdates('Extension enablement changed');
 			}
 		}));
@@ -1184,20 +1208,68 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 		}));
 	}
 
+	private extensionGalleryManifest: IExtensionGalleryManifest | null = null;
+	private updateExtensionGalleryManifest(manifest: IExtensionGalleryManifest | null): void {
+		this.extensionGalleryManifest = manifest;
+		this.updateExtensionsNotificaiton();
+	}
+
 	private isAutoUpdateEnabled(): boolean {
 		if (this.meteredConnectionService.isConnectionMetered) {
 			return false;
 		}
-		return this.getAutoUpdateValue() !== false;
+		return this.getAutoUpdateValue() !== 'off';
 	}
 
 	getAutoUpdateValue(): AutoUpdateConfigurationValue {
-		const autoUpdate = this.configurationService.getValue<AutoUpdateConfigurationValue>(AutoUpdateConfigurationKey);
-		// eslint-disable-next-line local/code-no-any-casts
-		if (<any>autoUpdate === 'onlySelectedExtensions') {
+		const autoUpdate = this.configurationService.getValue<AutoUpdateConfigurationValue | boolean | 'onlyEnabledExtensions' | 'onlySelectedExtensions' | 'delayed'>(AutoUpdateConfigurationKey);
+		if (autoUpdate === 'off' || autoUpdate === false || autoUpdate === 'onlySelectedExtensions') {
+			return 'off';
+		}
+		return 'on';
+	}
+
+	isAutoUpdateDelayed(extension: IExtension): boolean {
+		if (!extension.outdated) {
 			return false;
 		}
-		return isBoolean(autoUpdate) || autoUpdate === 'onlyEnabledExtensions' ? autoUpdate : true;
+		if (!this.shouldAutoUpdateExtension(extension)) {
+			return false;
+		}
+		return this.getAutoUpdateDelayRemaining(extension) > 0;
+	}
+
+	getAutoUpdateDelayRemaining(extension: IExtension): number {
+		// Extensions from publishers trusted by the product are auto updated without delay.
+		if (this.isFromTrustedPublisher(extension)) {
+			return 0;
+		}
+		const lastUpdated = extension.gallery?.lastUpdated;
+		if (!Number.isFinite(lastUpdated) || !lastUpdated) {
+			return 0;
+		}
+		const elapsed = Date.now() - lastUpdated;
+		if (elapsed < 0) {
+			// Future timestamp (clock skew) — treat as not delayed
+			return 0;
+		}
+		const delayPeriod = this.getAutoUpdateDelay();
+		return Math.max(0, delayPeriod - elapsed);
+	}
+
+	getAutoUpdateDelay(): number {
+		const delayHours = this.configurationService.getValue<number>(AutoUpdateDelayConfigurationKey) ?? 12;
+		return delayHours * 60 * 60 * 1000; // Convert hours to milliseconds
+	}
+
+	private isFromTrustedPublisher(extension: IExtension): boolean {
+		const trustedPublishers = this.productService.trustedExtensionPublishers;
+		if (!trustedPublishers?.length) {
+			return false;
+		}
+		const publisher = extension.publisher.toLowerCase();
+		return trustedPublishers.includes(publisher)
+			|| trustedPublishers.includes(extension.publisherDisplayName.toLowerCase());
 	}
 
 	async updateAutoUpdateForAllExtensions(isAutoUpdateEnabled: boolean): Promise<void> {
@@ -1209,8 +1281,8 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 		const result = await this.dialogService.confirm({
 			title: nls.localize('confirmEnableDisableAutoUpdate', "Auto Update Extensions"),
 			message: isAutoUpdateEnabled
-				? nls.localize('confirmEnableAutoUpdate', "Do you want to enable auto update for all extensions?")
-				: nls.localize('confirmDisableAutoUpdate', "Do you want to disable auto update for all extensions?"),
+				? nls.localize('confirmEnableAutoUpdate', "Do you want to enable auto update for extensions?")
+				: nls.localize('confirmDisableAutoUpdate', "Do you want to disable auto update for extensions?"),
 			detail: nls.localize('confirmEnableDisableAutoUpdateDetail', "This will reset any auto update settings you have set for individual extensions."),
 		});
 		if (!result.confirmed) {
@@ -1220,7 +1292,7 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 		// Reset extensions enabled for auto update first to prevent them from being updated
 		this.setEnabledAutoUpdateExtensions([]);
 
-		await this.configurationService.updateValue(AutoUpdateConfigurationKey, isAutoUpdateEnabled);
+		await this.configurationService.updateValue(AutoUpdateConfigurationKey, isAutoUpdateEnabled ? 'on' : 'off');
 
 		this.setDisabledAutoUpdateExtensions([]);
 		await this.updateExtensionsPinnedState(!isAutoUpdateEnabled);
@@ -1485,7 +1557,7 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 		const invalidExtensions = this.local.filter(e => e.enablementState === EnablementState.DisabledByInvalidExtension && !e.isWorkspaceScoped);
 		if (invalidExtensions.length) {
 			if (invalidExtensions.some(e => e.local && e.local.manifest.engines?.vscode &&
-				(!isEngineValid(e.local.manifest.engines.vscode, this.productService.version, this.productService.date) || areApiProposalsCompatible([...e.local.manifest.enabledApiProposals ?? []]))
+				!isEngineValid(e.local.manifest.engines.vscode, this.productService.version, this.productService.date)
 			)) {
 				computedNotificiations.push({
 					message: nls.localize('incompatibleExtensions', "Some extensions are disabled due to version incompatibility. Review and update them."),
@@ -1509,8 +1581,8 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 				const needsReload = restartRequiredExtensions.some(e => e.runtimeState?.action === ExtensionRuntimeActionType.ReloadWindow);
 				computedNotificiations.push({
 					message: needsReload
-						? nls.localize('extensions need reload', "Extensions require a window reload to take effect.")
-						: nls.localize('extensions need restart', "Extensions require a restart to take effect."),
+						? nls.localize('extensions need reload', "Extensions require a window reload to apply updates.")
+						: nls.localize('extensions need restart', "All extensions require a restart to apply updates."),
 					severity: Severity.Info,
 					extensions: restartRequiredExtensions,
 					query: '@restartrequired',
@@ -1538,6 +1610,24 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 				severity: Severity.Warning,
 				extensions: deprecatedExtensions,
 				key: 'deprecatedExtensions:' + deprecatedExtensions.sort((a, b) => a.identifier.id.localeCompare(b.identifier.id)).map(e => e.identifier.id.toLowerCase()).join('-'),
+			});
+		}
+
+		const privateMarketplaceUrl = this.configurationService.inspect<string>(ExtensionGalleryServiceUrlConfigKey).policyValue;
+		if (privateMarketplaceUrl) {
+			const message = new MarkdownString();
+			let linkUri: string | undefined = this.extensionGalleryManifest ? getExtensionGalleryManifestResourceUri(this.extensionGalleryManifest, ExtensionGalleryResourceType.ContactSupportUri) : undefined;
+			if (!linkUri) {
+				const settingsQuery = `@hasPolicy ${ExtensionGalleryServiceUrlConfigKey}`;
+				linkUri = `command:workbench.action.openSettings?${encodeURIComponent(JSON.stringify(settingsQuery))}`;
+				message.isTrusted = { enabledCommands: ['workbench.action.openSettings'] };
+			}
+			message.appendMarkdown(nls.localize('privateMarketplace', "This window is connected to a [private extension marketplace]({0}) managed by your organization.", linkUri));
+			computedNotificiations.push({
+				message,
+				severity: Severity.Info,
+				extensions: [],
+				key: `privateMarketplace:${hash(privateMarketplaceUrl)}:${hash(linkUri)}`,
 			});
 		}
 
@@ -1783,7 +1873,7 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 					}
 					return undefined;
 				} else {
-					if (isSameExtensionRunning) {
+					if (isSameExtensionRunning && !runningExtension.isUnderDevelopment) {
 						return { action: reloadAction, reason: nls.localize('postDisableTooltip', "Please {0} to disable this extension.", reloadActionLabel) };
 					}
 				}
@@ -2188,6 +2278,14 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 				disabledAutoUpdate.push(extension.identifier.id);
 				continue;
 			}
+			// New versions are auto updated only after the delay window has passed since they were published.
+			if (!extension.local?.forceAutoUpdate) {
+				const delayRemaining = this.getAutoUpdateDelayRemaining(extension);
+				if (delayRemaining > 0) {
+					this.logService.trace('Auto update delayed for extension', extension.identifier.id);
+					continue;
+				}
+			}
 			if (await this.shouldRequireConsentToUpdate(extension)) {
 				consentRequired.push(extension.identifier.id);
 				continue;
@@ -2246,7 +2344,7 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 
 		const autoUpdateValue = this.getAutoUpdateValue();
 
-		if (autoUpdateValue === false) {
+		if (autoUpdateValue === 'off') {
 			const extensionsToAutoUpdate = this.getEnabledAutoUpdateExtensions();
 			const extensionId = extension.identifier.id.toLowerCase();
 			if (extensionsToAutoUpdate.includes(extensionId)) {
@@ -2267,15 +2365,8 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
 			return false;
 		}
 
-		if (autoUpdateValue === true) {
-			return true;
-		}
-
-		if (autoUpdateValue === 'onlyEnabledExtensions') {
-			return extension.enablementState !== EnablementState.DisabledGlobally && extension.enablementState !== EnablementState.DisabledWorkspace;
-		}
-
-		return false;
+		// Auto-update is on; only update enabled extensions.
+		return extension.enablementState !== EnablementState.DisabledGlobally && extension.enablementState !== EnablementState.DisabledWorkspace;
 	}
 
 	async shouldRequireConsentToUpdate(extension: IExtension): Promise<string | undefined> {

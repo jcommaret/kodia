@@ -5,13 +5,14 @@
 
 // disable foreign import complaints
 /* eslint-disable */
-import Anthropic from '@anthropic-ai/sdk';
-import { Ollama } from 'ollama';
-import OpenAI, { ClientOptions, AzureOpenAI } from 'openai';
-import { MistralCore } from '@mistralai/mistralai/core.js';
-import { fimComplete } from '@mistralai/mistralai/funcs/fimComplete.js';
-import { Tool as GeminiTool, FunctionDeclaration, GoogleGenAI, ThinkingConfig, Schema, Type } from '@google/genai';
-import { GoogleAuth } from 'google-auth-library'
+// Kodia: the provider SDKs are imported as types only, and loaded with `await import(...)` where they
+// are used. Since VS Code 1.141 the main process is bundled into a single mainImpl.js whose static
+// imports resolve before the hook that finds npm packages in node_modules.asar is installed, so a
+// static import of an npm package makes the packaged app fail to start.
+import type Anthropic from '@anthropic-ai/sdk';
+import type OpenAI from 'openai';
+import type { ClientOptions, AzureOpenAI } from 'openai';
+import type { Tool as GeminiTool, FunctionDeclaration, ThinkingConfig, Schema, Type } from '@google/genai';
 /* eslint-enable */
 
 import { AnthropicLLMChatMessage, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, LLMUsage, ModelListParams, OllamaModelResponse, OnError, OnFinalMessage, OnText, RawToolCallObj, RawToolParamsObj } from '../../common/sendLLMMessageTypes.js';
@@ -23,6 +24,7 @@ import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
 
 const getGoogleApiKey = async () => {
+	const { GoogleAuth } = await import('google-auth-library')
 	// module‑level singleton
 	const auth = new GoogleAuth({ scopes: `https://www.googleapis.com/auth/cloud-platform` });
 	const key = await auth.getAccessToken()
@@ -119,6 +121,7 @@ const parseHeadersJSON = (s: string | undefined): Record<string, string | null |
 }
 
 const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { settingsOfProvider: SettingsOfProvider, providerName: ProviderName }) => {
+	const { default: OpenAI, AzureOpenAI } = await import('openai')
 	// Pick only the fields we actually set: typing this as the full ClientOptions would spread
 	// every optional field (e.g. openai v6's nullable `apiKey`, the new `provider`) into the
 	// AzureOpenAI construction below, which declares stricter `apiKey`/`provider` types.
@@ -229,6 +232,7 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 
 
 const _sendOpenAICompatibleFIM = async ({ messages: { prefix, suffix, stopTokens }, onFinalMessage, onError, settingsOfProvider, modelName: modelName_, _setAborter, providerName, overridesOfModel }: SendFIMParams_Internal) => {
+	const { default: OpenAI } = await import('openai')
 
 	const {
 		modelName,
@@ -454,6 +458,7 @@ const openAICompatibleUsage = (usage: unknown): LLMUsage | undefined => {
 }
 
 const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, modelName: modelName_, _setAborter, providerName, chatMode, separateSystemMessage, overridesOfModel, mcpTools, promptCacheKey, prediction }: SendChatParams_Internal) => {
+	const { default: OpenAI } = await import('openai')
 	const {
 		modelName,
 		specialToolFormat,
@@ -726,6 +731,7 @@ const anthropicUsage = (usage: Anthropic.Messages.Usage): LLMUsage => ({
 
 // ------------ ANTHROPIC ------------
 const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName: modelName_, _setAborter, separateSystemMessage, chatMode, mcpTools, promptCacheTTL }: SendChatParams_Internal) => {
+	const { default: Anthropic } = await import('@anthropic-ai/sdk')
 	const {
 		modelName,
 		recognizedModelName,
@@ -861,7 +867,7 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 
 // ------------ MISTRAL ------------
 // https://docs.mistral.ai/api/#tag/fim
-const sendMistralFIM = ({ messages, onFinalMessage, onError, settingsOfProvider, overridesOfModel, modelName: modelName_, _setAborter, providerName, promptCacheKey }: SendFIMParams_Internal) => {
+const sendMistralFIM = async ({ messages, onFinalMessage, onError, settingsOfProvider, overridesOfModel, modelName: modelName_, _setAborter, providerName, promptCacheKey }: SendFIMParams_Internal) => {
 	const { modelName, supportsFIM } = getModelCapabilities(providerName, modelName_, overridesOfModel)
 	if (!supportsFIM) {
 		if (modelName === modelName_)
@@ -871,6 +877,7 @@ const sendMistralFIM = ({ messages, onFinalMessage, onError, settingsOfProvider,
 		return
 	}
 
+	const [{ MistralCore }, { fimComplete }] = await Promise.all([import('@mistralai/mistralai/core.js'), import('@mistralai/mistralai/funcs/fimComplete.js')])
 	const mistral = new MistralCore({ apiKey: settingsOfProvider.mistral.apiKey })
 	// Autocomplete aborts the previous request on every keystroke; without this it ran to completion and was billed anyway.
 	const controller = new AbortController()
@@ -907,9 +914,10 @@ const sendMistralFIM = ({ messages, onFinalMessage, onError, settingsOfProvider,
 
 
 // ------------ OLLAMA ------------
-const newOllamaSDK = ({ endpoint }: { endpoint: string }) => {
+const newOllamaSDK = async ({ endpoint }: { endpoint: string }) => {
 	// if endpoint is empty, normally ollama will send to 11434, but we want it to fail - the user should type it in
 	if (!endpoint) throw new Error(`Ollama Endpoint was empty (please enter ${defaultProviderSettings.ollama.endpoint} in Kodia if you want the default url).`)
+	const { Ollama } = await import('ollama')
 	const ollama = new Ollama({ host: endpoint })
 	return ollama
 }
@@ -923,7 +931,7 @@ const ollamaList = async ({ onSuccess: onSuccess_, onError: onError_, settingsOf
 	}
 	try {
 		const thisConfig = settingsOfProvider.ollama
-		const ollama = newOllamaSDK({ endpoint: thisConfig.endpoint })
+		const ollama = await newOllamaSDK({ endpoint: thisConfig.endpoint })
 		ollama.list()
 			.then((response) => {
 				const { models } = response
@@ -938,9 +946,9 @@ const ollamaList = async ({ onSuccess: onSuccess_, onError: onError_, settingsOf
 	}
 }
 
-const sendOllamaFIM = ({ messages, onFinalMessage, onError, settingsOfProvider, modelName, _setAborter }: SendFIMParams_Internal) => {
+const sendOllamaFIM = async ({ messages, onFinalMessage, onError, settingsOfProvider, modelName, _setAborter }: SendFIMParams_Internal) => {
 	const thisConfig = settingsOfProvider.ollama
-	const ollama = newOllamaSDK({ endpoint: thisConfig.endpoint })
+	const ollama = await newOllamaSDK({ endpoint: thisConfig.endpoint })
 
 	let fullText = ''
 	ollama.generate({
@@ -971,16 +979,16 @@ const sendOllamaFIM = ({ messages, onFinalMessage, onError, settingsOfProvider, 
 
 // ---------------- GEMINI NATIVE IMPLEMENTATION ----------------
 
-const toGeminiFunctionDecl = (toolInfo: InternalToolInfo) => {
+const toGeminiFunctionDecl = (toolInfo: InternalToolInfo, GeminiType: typeof Type) => {
 	const { name, description, params } = toolInfo
 	return {
 		name,
 		description,
 		parameters: {
-			type: Type.OBJECT,
+			type: GeminiType.OBJECT,
 			properties: Object.entries(params).reduce((acc, [key, value]) => {
 				acc[key] = {
-					type: Type.STRING,
+					type: GeminiType.STRING,
 					description: value.description
 				};
 				return acc;
@@ -989,12 +997,12 @@ const toGeminiFunctionDecl = (toolInfo: InternalToolInfo) => {
 	} satisfies FunctionDeclaration
 }
 
-const geminiTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined): GeminiTool[] | null => {
+const geminiTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined, GeminiType: typeof Type): GeminiTool[] | null => {
 	const allowedTools = availableTools(chatMode, mcpTools)
 	if (!allowedTools || Object.keys(allowedTools).length === 0) return null
 	const functionDecls: FunctionDeclaration[] = []
 	for (const t in allowedTools ?? {}) {
-		functionDecls.push(toGeminiFunctionDecl(allowedTools[t]))
+		functionDecls.push(toGeminiFunctionDecl(allowedTools[t], GeminiType))
 	}
 	const tools: GeminiTool = { functionDeclarations: functionDecls, }
 	return [tools]
@@ -1044,7 +1052,8 @@ const sendGeminiChat = async ({
 				: undefined
 
 	// tools
-	const potentialTools = geminiTools(chatMode, mcpTools)
+	const { GoogleGenAI, Type } = await import('@google/genai')
+	const potentialTools = geminiTools(chatMode, mcpTools, Type)
 	const toolConfig = potentialTools && specialToolFormat === 'gemini-style' ?
 		potentialTools
 		: undefined

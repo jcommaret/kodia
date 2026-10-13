@@ -832,6 +832,7 @@ export class SCMInputWidget {
 		this.input = undefined;
 		this.repositoryDisposables.dispose();
 		this.clearValidation();
+		clearTimeout(this._validationTimer);
 		this.disposables.dispose();
 	}
 }
@@ -869,7 +870,7 @@ registerAction2(class extends Action2 {
 			return;
 		}
 
-		const result = await commandService.executeCommand(CHAT_SETUP_SUPPORT_ANONYMOUS_ACTION_ID);
+		const result = await commandService.executeCommand(CHAT_SETUP_SUPPORT_ANONYMOUS_ACTION_ID, { telemetrySource: 'scm' });
 		if (!result) {
 			return;
 		}

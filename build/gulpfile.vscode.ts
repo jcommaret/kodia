@@ -3,186 +3,69 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import gulp from 'gulp';
+import { gulp, rename, replace, filter, jsonEditor } from './lib/gulp/facade.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import es from 'event-stream';
 import vfs from 'vinyl-fs';
-import rename from 'gulp-rename';
-import replace from 'gulp-replace';
-import filter from 'gulp-filter';
 import electron from '@vscode/gulp-electron';
-import jsonEditor from 'gulp-json-editor';
 import * as util from './lib/util.ts';
 import { getVersion, getVoidVersion } from './lib/getVersion.ts';
 import { readISODate, writeISODate } from './lib/date.ts';
-import * as task from './lib/task.ts';
-import buildfile from './buildfile.ts';
-import * as optimize from './lib/optimize.ts';
+import * as task from './lib/gulp/task.ts';
 import { inlineMeta } from './lib/inlineMeta.ts';
+import { computeNLSMetadataHash } from './lib/nlsMetadata.ts';
 import packageJson from '../package.json' with { type: 'json' };
 import product from '../product.json' with { type: 'json' };
-import * as child_process from 'child_process';
 import * as crypto from 'crypto';
+import * as cp from 'child_process';
 import * as i18n from './lib/i18n.ts';
 import { getProductionDependencies } from './lib/dependencies.ts';
 import { config } from './lib/electron.ts';
 import { createAsar } from './lib/asar.ts';
 import minimist from 'minimist';
-import { compileBuildWithoutManglingTask, compileBuildWithManglingTask } from './gulpfile.compile.ts';
 import { compileNonNativeExtensionsBuildTask, compileNativeExtensionsBuildTask, compileAllExtensionsBuildTask, compileExtensionMediaBuildTask, cleanExtensionsBuildTask } from './gulpfile.extensions.ts';
-import { copyCodiconsTask } from './lib/compilation.ts';
-import { getCopilotExcludeFilter } from './lib/copilot.ts';
-import { useEsbuildTranspile } from './buildConfig.ts';
+import { checkApiProposalNamesTask, copyCodiconsTask } from './lib/compilation.ts';
+import { ensureCopilotPlatformPackage, getCopilotExcludeFilter, getCopilotRuntimePrebuildFiles, getCopilotRuntimeVersion, getCopilotTgrepExcludeFilter, getMxcExcludeFilter, getRipgrepExcludeFilter } from './lib/copilot.ts';
+import { ensureOSProxyResolverPlatformPackage, getOSProxyResolverExcludeFilter, getOSProxyResolverPlatformFiles } from './lib/osProxyResolver.ts';
+import { readAgentSdkResults } from './agent-sdk/common.ts';
+import { readDictationRuntimeResults } from './dictation-runtime/common.ts';
 import { promisify } from 'util';
 import globCallback from 'glob';
 import rceditCallback from 'rcedit';
 import { spawnTsgo } from './lib/tsgo.ts';
-import { runEsbuildTranspile, runEsbuildBundle } from './lib/esbuild.ts';
+import { runEsbuildTranspile, runEsbuildBundle, getBootstrapEntryPointsForTarget } from './lib/esbuild.ts';
+import { generateNodeCompileCache, shouldGenerateNodeCompileCache } from './lib/nodeCompileCache.ts';
 
 
 const glob = promisify(globCallback);
 const rcedit = promisify(rceditCallback);
 const root = path.dirname(import.meta.dirname);
 const commit = getVersion(root);
+const packageLock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8')) as {
+	readonly packages?: Readonly<Record<string, { readonly version?: string }>>;
+};
+const copilotRuntimeVersion = getCopilotRuntimeVersion(path.join(root, 'node_modules'));
+if (packageJson.copilotRuntimeVersion !== copilotRuntimeVersion) {
+	throw new Error(`package.json declares Copilot runtime ${packageJson.copilotRuntimeVersion}, but @github/copilot-sdk bundles ${copilotRuntimeVersion}.`);
+}
 
-// Build
-const vscodeEntryPoints = [
-	buildfile.workerEditor,
-	buildfile.workerExtensionHost,
-	buildfile.workerNotebook,
-	buildfile.workerLanguageDetection,
-	buildfile.workerLocalFileSearch,
-	buildfile.workerProfileAnalysis,
-	buildfile.workerOutputLinks,
-	buildfile.workerBackgroundTokenization,
-	buildfile.workbenchDesktop,
-	buildfile.code
-].flat();
+function getLockedPackageVersion(packageName: string): string {
+	const version = packageLock.packages?.[`node_modules/${packageName}`]?.version;
+	if (!version) {
+		throw new Error(`Package ${packageName} is missing a version in package-lock.json.`);
+	}
 
-const vscodeResourceIncludes = [
-
-	// NLS
-	'out-build/nls.messages.json',
-	'out-build/nls.keys.json',
-
-	// Workbench
-	'out-build/vs/code/electron-browser/workbench/workbench.html',
-	'out-build/vs/sessions/electron-browser/sessions.html',
-
-	// Electron Preload
-	'out-build/vs/base/parts/sandbox/electron-browser/preload.js',
-	'out-build/vs/base/parts/sandbox/electron-browser/preload-aux.js',
-	'out-build/vs/platform/browserView/electron-browser/preload-browserView.js',
-
-	// Node Scripts
-	'out-build/vs/base/node/{terminateProcess.sh,cpuUsage.sh,ps.sh}',
-
-	// Touchbar
-	'out-build/vs/workbench/browser/parts/editor/media/*.png',
-	'out-build/vs/workbench/contrib/debug/browser/media/*.png',
-
-	// External Terminal
-	'out-build/vs/workbench/contrib/externalTerminal/**/*.scpt',
-
-	// Terminal shell integration
-	'out-build/vs/workbench/contrib/terminal/common/scripts/*.fish',
-	'out-build/vs/workbench/contrib/terminal/common/scripts/*.ps1',
-	'out-build/vs/workbench/contrib/terminal/common/scripts/*.psm1',
-	'out-build/vs/workbench/contrib/terminal/common/scripts/*.sh',
-	'out-build/vs/workbench/contrib/terminal/common/scripts/*.zsh',
-	'out-build/vs/workbench/contrib/terminal/common/scripts/psreadline/**',
-
-	// Accessibility Signals
-	'out-build/vs/platform/accessibilitySignal/browser/media/*.mp3',
-
-	// Welcome
-	'out-build/vs/workbench/contrib/welcomeGettingStarted/common/media/**/*.{svg,png}',
-	'out-build/vs/workbench/contrib/welcomeOnboarding/browser/media/*.svg',
-
-	// Sessions
-	'out-build/vs/sessions/contrib/chat/browser/media/*.svg',
-	'out-build/vs/sessions/skills/**/SKILL.md',
-
-	// Extensions
-	'out-build/vs/workbench/contrib/extensions/browser/media/{theme-icon.png,language-icon.svg}',
-
-	// Webview
-	'out-build/vs/workbench/contrib/webview/browser/pre/*.{js,html}',
-
-	// Extension Host Worker
-	'out-build/vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html',
-
-	// Tree Sitter highlights
-	'out-build/vs/editor/common/languages/highlights/*.scm',
-
-	// Tree Sitter injection queries
-	'out-build/vs/editor/common/languages/injections/*.scm'
-];
-
-const vscodeResources = [
-
-	// Includes
-	...vscodeResourceIncludes,
-
-	// Excludes
-	'!out-build/vs/code/browser/**',
-	'!out-build/vs/editor/standalone/**',
-	'!out-build/vs/code/**/*-dev.html',
-	'!out-build/vs/workbench/contrib/issue/**/*-dev.html',
-	'!**/test/**'
-];
-
-const bootstrapEntryPoints = [
-	'out-build/main.js',
-	'out-build/cli.js',
-	'out-build/bootstrap-fork.js'
-];
-
-const bundleVSCodeTask = task.define('bundle-vscode', task.series(
-	util.rimraf('out-vscode'),
-	// Optimize: bundles source files automatically based on
-	// import statements based on the passed in entry points.
-	// In addition, concat window related bootstrap files into
-	// a single file.
-	optimize.bundleTask(
-		{
-			out: 'out-vscode',
-			esm: {
-				src: 'out-build',
-				entryPoints: [
-					...vscodeEntryPoints,
-					...bootstrapEntryPoints
-				],
-				resources: vscodeResources,
-				skipTSBoilerplateRemoval: entryPoint => entryPoint === 'vs/code/electron-browser/workbench/workbench' || entryPoint === 'vs/sessions/electron-browser/sessions'
-			}
-		}
-	)
-));
-gulp.task(bundleVSCodeTask);
+	return version;
+}
 
 const sourceMappingURLBase = `https://main.vscode-cdn.net/sourcemaps/${commit}`;
 const isCI = !!process.env['CI'] || !!process.env['BUILD_ARTIFACTSTAGINGDIRECTORY'] || !!process.env['GITHUB_WORKSPACE'];
 const useCdnSourceMapsForPackagingTasks = isCI;
 const stripSourceMapsInPackagingTasks = isCI;
-const minifyVSCodeTask = task.define('minify-vscode', task.series(
-	bundleVSCodeTask,
-	util.rimraf('out-vscode-min'),
-	optimize.minifyTask('out-vscode', `${sourceMappingURLBase}/core`)
-));
-gulp.task(minifyVSCodeTask);
 
-gulp.task(task.define('core-ci-old', task.series(
-	gulp.task('compile-build-with-mangling') as task.Task,
-	task.parallel(
-		gulp.task('minify-vscode') as task.Task,
-		gulp.task('minify-vscode-reh') as task.Task,
-		gulp.task('minify-vscode-reh-web') as task.Task,
-	)
-)));
-
-gulp.task(task.define('core-ci', task.series(
+task.task(task.define('core-ci', task.series(
+	checkApiProposalNamesTask,
 	copyCodiconsTask,
 	compileNonNativeExtensionsBuildTask,
 	compileExtensionMediaBuildTask,
@@ -233,22 +116,23 @@ function computeChecksum(filename: string): string {
 	return hash;
 }
 
+// foundry-local-sdk (on-device chat dictation) loads its N-API addons and shared
+// libraries from the per-user runtime cache. Exclude the package's native files,
+// which may require a newer glibc than VS Code's supported maximum.
+function getFoundryLocalExcludeFilter(): string[] {
+	return [
+		'**',
+		'!**/foundry-local-sdk/prebuilds/**',
+	];
+}
+
 /**
  * Some `.build` inputs (telemetry, policies, appx) are produced by external
  * pipeline steps that do not run in this build. Substitute an empty stream
  * when the directory is absent instead of failing the glob walk with ENOENT.
  */
 function optionalSrc(dir: string, globs: string | string[], opts: Parameters<typeof gulp.src>[1]): NodeJS.ReadWriteStream {
-	return fs.existsSync(dir) ? esSrc(globs, opts) : es.readArray([]);
-}
-
-/**
- * gulp 5 readables are streamx-based: when piped they unconditionally call
- * dest.end(), but the bare merge stream returned by es.merge has no end()
- * method. Interpose a classic through stream so the source can be merged.
- */
-function esSrc(globs: string | string[], opts?: Parameters<typeof gulp.src>[1]): NodeJS.ReadWriteStream {
-	return gulp.src(globs, opts).pipe(es.through());
+	return fs.existsSync(dir) ? gulp.src(globs, opts) : es.readArray([]);
 }
 
 /**
@@ -299,16 +183,18 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			.pipe(rename(function (path) { path.dirname = path.dirname!.replace(new RegExp('^' + out), 'out'); }))
 			.pipe(util.setExecutableBit(['**/*.sh']));
 
-		const platformSpecificBuiltInExtensionsExclusions = product.builtInExtensions.filter(ext => {
-			if (!(ext as { platforms?: string[] }).platforms) {
+		// Kodia's product.json lists no built-in extensions, which types the array as never[]
+		const builtInExtensions = product.builtInExtensions as readonly { name: string; platforms?: string[] }[];
+		const platformSpecificBuiltInExtensionsExclusions = builtInExtensions.filter(ext => {
+			if (!ext.platforms) {
 				return false;
 			}
 
-			const set = new Set((ext as { platforms?: string[] }).platforms);
+			const set = new Set(ext.platforms);
 			return !set.has(platform);
 		}).map(ext => `!.build/extensions/${ext.name}/**`);
 
-		const extensions = esSrc(['.build/extensions/**', '!.build/extensions/copilot/**', ...platformSpecificBuiltInExtensionsExclusions], { base: '.build', dot: true });
+		const extensions = gulp.src(['.build/extensions/**', '!.build/extensions/copilot/**', ...platformSpecificBuiltInExtensionsExclusions], { base: '.build', dot: true });
 
 		const sourceFilterPattern = stripSourceMapsInPackagingTasks
 			? ['**', '!**/*.{js,css}.map']
@@ -336,10 +222,29 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 
 		const productJsonEdit = (json: Record<string, unknown>) => {
 			json.commit = commit;
+			json.nlsMetadataHash = computeNLSMetadataHash(path.join(import.meta.dirname, '..', out), commit);
 			json.date = readISODate(out);
 			json.checksums = checksums;
 			json.version = version;
 			json.voidVersion = getVoidVersion(root, json.voidVersion as string);
+			json.copilotVersions = {
+				runtime: copilotRuntimeVersion,
+				sdk: getLockedPackageVersion('@github/copilot-sdk'),
+			};
+			// Stamp agentSdks from the per-platform results file produced
+			// by `build/agent-sdk/produce.ts` (an earlier pipeline step).
+			// Local dev: file absent → empty → not stamped.
+			const agentSdks = readAgentSdkResults();
+			if (Object.keys(agentSdks).length > 0) {
+				json.agentSdks = agentSdks;
+			}
+			// Stamp dictationRuntime from the per-platform results file
+			// produced by `build/dictation-runtime/produce.ts`. Local dev /
+			// unsupported target: file absent → undefined → not stamped.
+			const dictationRuntime = readDictationRuntimeResults();
+			if (dictationRuntime) {
+				json.dictationRuntime = dictationRuntime;
+			}
 			return json;
 		};
 		const productJsonContents = readEditedJson('product.json', productJsonEdit);
@@ -350,7 +255,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		if (fs.existsSync('licenses')) {
 			licenseGlobs.push('licenses/**');
 		}
-		const license = esSrc(licenseGlobs, { base: '.', allowEmpty: true });
+		const license = gulp.src(licenseGlobs, { base: '.', allowEmpty: true });
 
 		// TODO the API should be copied to `out` during compile, not here
 		const api = gulp.src('src/vscode-dts/vscode.d.ts').pipe(rename('out/vscode-dts/vscode.d.ts'));
@@ -361,10 +266,6 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 
 		const jsFilter = util.filter(data => !data.isDirectory() && /\.js$/.test(data.path));
 		const productionDependencies = getProductionDependencies(root);
-		// Exclude nested node_modules/.bin: the npm shims are relative symlinks
-		// which vinyl-fs 4 (gulp 5) stats against cwd instead of the link's
-		// directory (ENOENT lstat '../uuid/...'), and they are not needed at
-		// runtime anyway.
 		const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat().concat(['!**/*.mk', '!**/node_modules/.bin/**']);
 
 		const depFilterPattern = ['**', `!**/${config.version}/**`, '!**/bin/darwin-arm64-87/**', '!**/package-lock.json', '!**/yarn.lock'];
@@ -372,30 +273,58 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			depFilterPattern.push('!**/*.{js,css}.map');
 		}
 
-		const deps = gulp.src(dependenciesSrc, { base: '.', dot: true })
+		const cleanedDeps = gulp.src(dependenciesSrc, { base: '.', dot: true })
 			.pipe(filter(depFilterPattern))
 			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, '.moduleignore')))
-			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, `.moduleignore.${process.platform}`)))
+			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, `.moduleignore.${process.platform}`)));
+		ensureCopilotPlatformPackage(platform, arch);
+		const copilotRuntimePrebuilds = gulp.src(getCopilotRuntimePrebuildFiles(platform, arch), { base: '.', dot: true, allowEmpty: true });
+		ensureOSProxyResolverPlatformPackage(platform, arch);
+		const osProxyResolverPlatformPackage = gulp.src(getOSProxyResolverPlatformFiles(platform, arch), { base: '.', dot: true, allowEmpty: true });
+		const deps = es.merge(cleanedDeps, copilotRuntimePrebuilds, osProxyResolverPlatformPackage)
 			.pipe(filter(getCopilotExcludeFilter(platform, arch)))
+			.pipe(filter(getCopilotTgrepExcludeFilter(platform, arch)))
+			.pipe(filter(getRipgrepExcludeFilter(platform, arch)))
+			.pipe(filter(getMxcExcludeFilter(arch)))
+			.pipe(filter(getFoundryLocalExcludeFilter()))
+			.pipe(filter(getOSProxyResolverExcludeFilter(platform, arch)))
 			.pipe(jsFilter)
 			.pipe(util.rewriteSourceMappingURL(sourceMappingURLBase))
 			.pipe(jsFilter.restore)
 			.pipe(createAsar(path.join(process.cwd(), 'node_modules'), [
 				'**/*.node',
-				'**/@vscode/ripgrep/bin/*',
-				'**/@vscode/ripgrep-*/bin/*',
-				'**/@github/copilot-*/**',
+				'**/@vscode/ripgrep-universal/bin/**',
+				// The SDK runtime wrapper and native module must remain adjacent on disk.
+				'**/@github/copilot-sdk-{darwin,linux,linuxmusl,win32}-*/**',
+				// The Dev Container CLI is spawned as an external Node process,
+				// so its bundled entrypoint must be available outside the ASAR.
+				'**/@devcontainers/cli/**',
+				'**/@microsoft/mxc-sdk/bin/**',
 				'**/node-pty/build/Release/*',
 				'**/node-pty/build/Release/conpty/*',
 				'**/node-pty/lib/worker/conoutSocketWorker.js',
 				'**/node-pty/lib/shared/conout.js',
+				// node-pty spawns `conoutSocketWorker.js` as a Worker from the unpacked
+				// tree (Windows only). Unpack node-pty's `package.json` alongside it so
+				// Node finds a `package.json` without `"type": "module"` when walking up
+				// from the worker file. Otherwise the lookup reaches the app's own
+				// `package.json` (`"type": "module"`), the CommonJS worker is loaded as
+				// ESM and throws `exports is not defined`, the worker never signals ready,
+				// and node-pty blocks the pty host on `ConnectNamedPipe`.
+				'**/node-pty/package.json',
 				'**/*.wasm',
 				'**/@vscode/vsce-sign/bin/*',
 			], [
 				'**/*.mk',
-				'!node_modules/vsda/**' // stay compatible with extensions that depend on us shipping `vsda` into ASAR
 			], [
-				'node_modules/vsda/**' // retain copy of `vsda` in node_modules for internal use
+				'node_modules/vsda/**', // retain copy of `vsda` in node_modules for internal use
+				// The sandbox runtime is spawned as a standalone Node subprocess (no ASAR
+				// resolution hook), so it and its transitive JS dependencies must remain as
+				// real files under `node_modules`. Keep them duplicated out of the archive.
+				'node_modules/@vscode/sandbox-runtime/**', // includes its nested `commander`
+				'node_modules/@pondwader/socks5-server/**',
+				'node_modules/shell-quote/**',
+				'node_modules/zod/**'
 			], 'node_modules.asar'));
 
 		const mergeStreams = [
@@ -410,7 +339,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		let all = es.merge(...mergeStreams);
 
 		if (platform === 'win32') {
-			all = es.merge(all, esSrc([
+			all = es.merge(all, gulp.src([
 				'resources/win32/bower.ico',
 				'resources/win32/c.ico',
 				'resources/win32/code.ico',
@@ -433,6 +362,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 				'resources/win32/react.ico',
 				'resources/win32/ruby.ico',
 				'resources/win32/sass.ico',
+				'resources/win32/sessions.ico',
 				'resources/win32/shell.ico',
 				'resources/win32/sql.ico',
 				'resources/win32/typescript.ico',
@@ -445,7 +375,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		} else if (platform === 'linux') {
 			const policyDest = optionalSrc('.build/policies/linux', '.build/policies/linux/**', { base: '.build/policies/linux' })
 				.pipe(rename(f => f.dirname = `policies/${f.dirname}`));
-			all = es.merge(all, esSrc('resources/linux/code.png', { base: '.' }), policyDest);
+			all = es.merge(all, gulp.src('resources/linux/code.png', { base: '.' }), policyDest);
 		} else if (platform === 'darwin') {
 			const shortcut = gulp.src('resources/darwin/bin/code.sh')
 				.pipe(replace('@@APPNAME@@', product.applicationName))
@@ -487,7 +417,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		}
 
 		if (platform === 'win32') {
-			result = es.merge(result, esSrc('resources/win32/bin/code.js', { base: 'resources/win32', allowEmpty: true }));
+			result = es.merge(result, gulp.src('resources/win32/bin/code.js', { base: 'resources/win32', allowEmpty: true }));
 
 			if (versionedResourcesFolder) {
 				result = es.merge(result, gulp.src('resources/win32/versioned/bin/code.cmd', { base: 'resources/win32/versioned' })
@@ -552,7 +482,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		}
 
 		result = inlineMeta(result, {
-			targetPaths: bootstrapEntryPoints,
+			targetPaths: getBootstrapEntryPointsForTarget('desktop').map(entry => `${entry}.js`),
 			packageJsonFn: () => packageJsonContents,
 			productJsonFn: () => productJsonContents
 		});
@@ -563,9 +493,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 	return task;
 }
 
-// Rebuilds native Node.js modules (@vscode/spdlog) against the bundled Electron
-// version and ensures @vscode/ripgrep/bin exists (for copilot in dev mode and
-// for builds that don't use the new platform-specific ripgrep packages).
+// Rebuilds native Node.js modules (@vscode/spdlog) against the bundled Electron version.
 // Must run BEFORE packageTask so the compiled .node file is picked up
 // and placed outside the ASAR by the "**/*.node" exclusion rule.
 function rebuildElectronNativeModulesTask(platform: string, arch: string) {
@@ -580,54 +508,68 @@ function rebuildElectronNativeModulesTask(platform: string, arch: string) {
 		const spdlogDir = path.join(root, 'node_modules', '@vscode', 'spdlog');
 		if (!fs.existsSync(spdlogDir)) {
 			console.warn('[rebuildElectronNativeModules] @vscode/spdlog not found in node_modules, skipping');
-		} else {
-			const nodeGypBin = path.join(root, 'build', 'npm', 'gyp', 'node_modules', '.bin', 'node-gyp');
-			const nodeGypCmd = fs.existsSync(nodeGypBin) ? nodeGypBin : 'node-gyp';
-			const nodeArch = arch === 'armhf' ? 'arm' : arch;
-
-			await new Promise<void>((resolve, reject) => {
-				const proc = child_process.spawn(
-					nodeGypCmd,
-					[
-						'rebuild',
-						'--loglevel=silent',
-						`--target=${electronVersion}`,
-						`--arch=${nodeArch}`,
-						'--dist-url=https://electronjs.org/headers',
-						'--runtime=electron',
-					],
-					{ cwd: spdlogDir, stdio: 'pipe', shell: process.platform === 'win32' }
-				);
-				proc.on('close', (code: number) => {
-					if (code === 0) {
-						console.log(`[rebuildElectronNativeModules] spdlog rebuilt for Electron ${electronVersion} (${platform}-${nodeArch})`);
-						resolve();
-					} else {
-						reject(new Error(`[rebuildElectronNativeModules] node-gyp exited with code ${code}`));
-					}
-				});
-				proc.on('error', reject);
-			});
+			return;
 		}
+		const nodeGypBin = path.join(root, 'build', 'npm', 'gyp', 'node_modules', '.bin', 'node-gyp');
+		const nodeGypCmd = fs.existsSync(nodeGypBin) ? nodeGypBin : 'node-gyp';
+		const nodeArch = arch === 'armhf' ? 'arm' : arch;
 
-		// Ensure @vscode/ripgrep/bin exists (new ripgrep uses platform-specific packages)
-		const ripgrepBin = path.join(root, 'node_modules', '@vscode', 'ripgrep', 'bin');
-		if (!fs.existsSync(ripgrepBin)) {
-			const nodeArch = arch === 'armhf' ? 'arm' : arch;
-			const nodePlatform = platform === 'alpine' ? 'linux' : platform;
-			const platformRipgrepBin = path.join(root, 'node_modules', '@vscode', `ripgrep-${nodePlatform}-${nodeArch}`, 'bin');
-			if (fs.existsSync(platformRipgrepBin)) {
-				fs.mkdirSync(ripgrepBin, { recursive: true });
-				for (const file of fs.readdirSync(platformRipgrepBin)) {
-					const src = path.join(platformRipgrepBin, file);
-					const dest = path.join(ripgrepBin, file);
-					fs.copyFileSync(src, dest);
-					fs.chmodSync(dest, 0o755);
+		await new Promise<void>((resolve, reject) => {
+			const proc = cp.spawn(
+				nodeGypCmd,
+				[
+					'rebuild',
+					'--loglevel=silent',
+					`--target=${electronVersion}`,
+					`--arch=${nodeArch}`,
+					'--dist-url=https://electronjs.org/headers',
+					'--runtime=electron',
+				],
+				{ cwd: spdlogDir, stdio: 'pipe', shell: process.platform === 'win32' }
+			);
+			proc.on('close', (code: number) => {
+				if (code === 0) {
+					console.log(`[rebuildElectronNativeModules] spdlog rebuilt for Electron ${electronVersion} (${platform}-${nodeArch})`);
+					resolve();
+				} else {
+					reject(new Error(`[rebuildElectronNativeModules] node-gyp exited with code ${code}`));
 				}
-				console.log(`[rebuildElectronNativeModules] Created @vscode/ripgrep/bin from ${platformRipgrepBin}`);
-			}
-		}
+			});
+			proc.on('error', reject);
+		});
 	};
+}
+
+function hasAuthenticodeSignature(filePath: string): Promise<boolean> {
+	return new Promise((resolve, reject) => {
+		const proc = cp.spawn('signtool.exe', ['verify', '/pa', filePath]);
+		proc.on('error', reject);
+		proc.on('exit', code => resolve(code === 0));
+	});
+}
+
+async function stripAuthenticodeSignature(filePath: string): Promise<void> {
+	// ESRP's `signtool /as` (append) fails with 0x800700C1 on PEs whose existing
+	// Authenticode signature was invalidated by rcedit. Strip cleanly first so
+	// rcedit operates on an unsigned PE.
+	if (!await hasAuthenticodeSignature(filePath)) {
+		return;
+	}
+	await new Promise<void>((resolve, reject) => {
+		const proc = cp.spawn('signtool.exe', ['remove', '/s', filePath]);
+		let out = '';
+		proc.stdout?.on('data', chunk => out += chunk.toString());
+		proc.stderr?.on('data', chunk => out += chunk.toString());
+		proc.on('error', reject);
+		proc.on('exit', code => {
+			if (code === 0) {
+				resolve();
+			} else {
+				process.stderr.write(out);
+				reject(new Error(`signtool remove /s failed for ${filePath} (exit ${code})`));
+			}
+		});
+	});
 }
 
 function patchWin32DependenciesTask(destinationFolderName: string) {
@@ -638,7 +580,10 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 		const deps = (await Promise.all([
 			glob('**/*.node', { cwd, ignore: 'extensions/node_modules/@parcel/watcher/**' }),
 			glob('**/rg.exe', { cwd }),
+			glob('**/tgrep.exe', { cwd }),
 			glob('**/*explorer_command*.dll', { cwd }),
+			// TODO@anthonykim1 Remove once @github/copilot ships OneAuthInterop.dll with complete version information.
+			glob('**/OneAuthInterop.dll', { cwd }),
 		])).flatMap(o => o);
 		const packageJson = JSON.parse(await fs.promises.readFile(path.join(cwd, versionedResourcesFolder, 'resources', 'app', 'package.json'), 'utf8'));
 		const product = JSON.parse(await fs.promises.readFile(path.join(cwd, versionedResourcesFolder, 'resources', 'app', 'product.json'), 'utf8'));
@@ -646,9 +591,11 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 
 		const patchPromises = deps.map<Promise<unknown>>(async dep => {
 			const basename = path.basename(dep);
+			const fullPath = path.join(cwd, dep);
 
 			try {
-				await rcedit(path.join(cwd, dep), {
+				await stripAuthenticodeSignature(fullPath);
+				await rcedit(fullPath, {
 					'file-version': baseVersion,
 					'version-string': {
 						'CompanyName': 'Microsoft Corporation',
@@ -663,14 +610,26 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 				});
 			} catch (err) {
 				// Some vendored native binaries (node-pty's conpty*.node, windows-foreground-love, etc.)
-				// are PE files rcedit cannot parse ("Unable to load file"). The version resource patch
-				// is cosmetic only, so skip that file and keep going instead of failing the whole build.
+				// are PE files rcedit cannot parse ("Unable to load file"), and signtool may be missing
+				// outside Microsoft's pipeline. The version resource patch is cosmetic only, so skip
+				// that file and keep going instead of failing the whole build.
 				console.warn(`[patchWin32Dependencies] Skipping rcedit for ${dep}: ${(err as Error).message}`);
 			}
 		});
 
 		await Promise.all(patchPromises);
 	};
+}
+
+function generateNodeCompileCacheTask(platform: string, destinationFolderName: string) {
+	const outputDirectory = path.join(path.dirname(root), destinationFolderName);
+
+	return () => generateNodeCompileCache(
+		platform,
+		outputDirectory,
+		util.getVersionedResourcesFolder(platform, commit!),
+		product
+	);
 }
 
 const buildRoot = path.dirname(root);
@@ -704,58 +663,49 @@ BUILD_TARGETS.forEach(buildTarget => {
 		if (platform === 'win32') {
 			packageTasks.push(patchWin32DependenciesTask(destinationFolderName));
 		}
+		if (shouldGenerateNodeCompileCache(platform, arch, product)) {
+			packageTasks.push(generateNodeCompileCacheTask(platform, destinationFolderName));
+		}
 
 		const vscodeTaskCI = task.define(`vscode${dashed(platform)}${dashed(arch)}${dashed(minified)}-ci`, task.series(...packageTasks));
-		gulp.task(vscodeTaskCI);
+		task.task(vscodeTaskCI);
 
-		let vscodeTask: task.Task;
-		if (useEsbuildTranspile) {
-			const esbuildBundleTask = task.define(
-				`esbuild-bundle${dashed(platform)}${dashed(arch)}${dashed(minified)}`,
-				() => runEsbuildBundle(
-					sourceFolderName,
-					!!minified,
-					true,
-					'desktop',
-					minified && useCdnSourceMapsForPackagingTasks ? `${sourceMappingURLBase}/core` : undefined
-				)
-			);
-			vscodeTask = task.define(`vscode${dashed(platform)}${dashed(arch)}${dashed(minified)}`, task.series(
-				copyCodiconsTask,
-				cleanExtensionsBuildTask,
-				compileNonNativeExtensionsBuildTask,
-				compileExtensionMediaBuildTask,
-				writeISODate('out-build'),
-				esbuildBundleTask,
-				vscodeTaskCI
-			));
-		} else {
-			vscodeTask = task.define(`vscode${dashed(platform)}${dashed(arch)}${dashed(minified)}`, task.series(
-				minified ? compileBuildWithManglingTask : compileBuildWithoutManglingTask,
-				cleanExtensionsBuildTask,
-				compileNonNativeExtensionsBuildTask,
-				compileExtensionMediaBuildTask,
-				minified ? minifyVSCodeTask : bundleVSCodeTask,
-				vscodeTaskCI
-			));
-		}
-		gulp.task(vscodeTask);
+		const esbuildBundleTask = task.define(
+			`esbuild-bundle${dashed(platform)}${dashed(arch)}${dashed(minified)}`,
+			() => runEsbuildBundle(
+				sourceFolderName,
+				!!minified,
+				true,
+				'desktop',
+				minified && useCdnSourceMapsForPackagingTasks ? `${sourceMappingURLBase}/core` : undefined
+			)
+		);
+		const vscodeTask = task.define(`vscode${dashed(platform)}${dashed(arch)}${dashed(minified)}`, task.series(
+			copyCodiconsTask,
+			cleanExtensionsBuildTask,
+			compileNonNativeExtensionsBuildTask,
+			compileExtensionMediaBuildTask,
+			writeISODate('out-build'),
+			esbuildBundleTask,
+			vscodeTaskCI
+		));
+		task.task(vscodeTask);
 
 		return vscodeTask;
 	});
 
 	if (process.platform === platform && process.arch === arch) {
-		gulp.task(task.define('vscode', task.series(vscode)));
-		gulp.task(task.define('vscode-min', task.series(vscodeMin)));
+		task.task(task.define('vscode', task.series(vscode)));
+		task.task(task.define('vscode-min', task.series(vscodeMin)));
 	}
 });
 
 // #region nls
 
-gulp.task(task.define(
+task.task(task.define(
 	'vscode-translations-export',
 	task.series(
-		gulp.task('core-ci') as task.Task,
+		task.task('core-ci') as task.Task,
 		compileAllExtensionsBuildTask,
 		function () {
 			const pathToMetadata = './out-build/nls.metadata.json';
@@ -771,7 +721,7 @@ gulp.task(task.define(
 	)
 ));
 
-gulp.task('vscode-translations-import', function () {
+task.task('vscode-translations-import', function () {
 	const options = minimist(process.argv.slice(2), {
 		string: 'location',
 		default: {

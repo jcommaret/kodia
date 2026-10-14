@@ -8,11 +8,11 @@ import { useAccessor, useIsDark, useSettingsState } from '../util/services.js';
 import { Brain, Check, ChevronRight, DollarSign, ExternalLink, Lock, X } from 'lucide-react';
 import { displayInfoOfProviderName, ProviderName, providerNames, localProviderNames, ollamaProviderNames, mlxProviderNames, appleProviderNames, otherLocalProviderNames, featureNames, FeatureName, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';
 import { os } from '../../../../common/helpers/systemInfo.js';
-import { KODIA_ISSUES_URL } from '../../../../common/kodiaLinks.js';
 import { OllamaSetupInstructions, MlxSetupInstructions, AppleFoundationModelsSetupInstructions, OneClickSwitchButton, SettingsForProvider, ModelDump } from '../void-settings-tsx/Settings.js';
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
 import { isLinux } from '../../../../../../../base/common/platform.js';
+import { KODIA_ISSUES_URL } from '../../../../common/kodiaLinks.js';
 
 const OVERRIDE_VALUE = false
 

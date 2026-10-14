@@ -31,9 +31,11 @@ export const getErrorMessage: (error: unknown) => string = (error) => {
 
 export type AnthropicImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
 export type OpenAIImagePart = { type: 'image_url'; image_url: { url: string } }
-// PDFs: Anthropic document blocks, OpenAI-compatible file parts (data URL); Gemini converts from the Anthropic block
+// PDFs: Anthropic document blocks, OpenAI-compatible file parts (data URL), Mistral document_url chunks (data URL);
+// Gemini converts from the Anthropic block
 export type AnthropicDocumentBlock = { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string }; title?: string }
 export type OpenAIFilePart = { type: 'file'; file: { filename: string; file_data: string } }
+export type MistralDocumentPart = { type: 'document_url'; document_url: string; document_name?: string }
 
 export type AnthropicLLMChatMessage = {
 	role: 'assistant',
@@ -54,7 +56,7 @@ export type OpenAILLMChatMessage = {
 	content: string;
 } | {
 	role: 'user';
-	content: string | ({ type: 'text'; text: string } | OpenAIImagePart | OpenAIFilePart)[];
+	content: string | ({ type: 'text'; text: string } | OpenAIImagePart | OpenAIFilePart | MistralDocumentPart)[];
 } | {
 	role: 'assistant',
 	content: string | (AnthropicReasoning | { type: 'text'; text: string })[];

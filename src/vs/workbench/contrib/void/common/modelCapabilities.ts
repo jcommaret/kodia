@@ -446,6 +446,8 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 			...opts,
 			supportsSystemMessage: supportsSystemMessage,
 			supportsVision: looksLikeVisionModel(lower),
+			// Mistral reads PDFs only through its own API (document_url chunks); other providers serving its models don't
+			...(obj === (mistralModelOptions as unknown) ? { supportsPDF: false } : {}),
 			cost: { input: 0, output: 0 },
 			downloadable: false,
 			...fallbackKnownValues
@@ -1534,6 +1536,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		cost: { input: 0.68, cache_read: 0.07, output: 2.09 }, // promotional rate; list price is double
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
+		supportsPDF: true, // PDFs go as document_url chunks (convertToLLMMessageService): https://docs.mistral.ai/capabilities/document_ai/document_qna
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' }, // open-weight, weights announced for end of October 2026
 		supportsSystemMessage: 'system-role',
@@ -1545,6 +1548,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		cost: { input: 0.50, cache_read: 0.05, output: 1.50 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
+		supportsPDF: true, // PDFs go as document_url chunks (convertToLLMMessageService): https://docs.mistral.ai/capabilities/document_ai/document_qna
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -1556,6 +1560,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		cost: { input: 1.50, cache_read: 0.15, output: 7.50 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
+		supportsPDF: true, // PDFs go as document_url chunks (convertToLLMMessageService): https://docs.mistral.ai/capabilities/document_ai/document_qna
 		supportsPredictedOutputs: true, // listed on the model card; https://docs.mistral.ai/studio-api/conversations/advanced/predicted-outputs
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
@@ -1568,6 +1573,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 		cost: { input: 0.15, cache_read: 0.015, output: 0.60 },
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
+		supportsPDF: true, // PDFs go as document_url chunks (convertToLLMMessageService): https://docs.mistral.ai/capabilities/document_ai/document_qna
 		specialToolFormat: 'openai-style',
 		downloadable: { sizeGb: 'not-known' },
 		supportsSystemMessage: 'system-role',
@@ -2068,23 +2074,28 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'x-ai/grok-4.7': {
 		...xAIModelOptions['grok-4.7'],
+		supportsPDF: true, // OpenRouter reads files natively for this model (input_modalities: file)
 		downloadable: false,
 	},
 	'x-ai/grok-4.6': {
 		...xAIModelOptions['grok-4.6'],
+		supportsPDF: true, // OpenRouter reads files natively for this model (input_modalities: file)
 		downloadable: false,
 	},
 	'mistralai/mistral-large-4-0': {
 		...mistralModelOptions['mistral-large-4'],
+		supportsPDF: false, // no native file input on OpenRouter (PDFs would go through its paid OCR)
 		contextWindow: 1_048_576, // https://openrouter.ai/mistralai/mistral-large-4-0
 		downloadable: false,
 	},
 	'mistralai/mistral-large-2512': {
 		...mistralModelOptions['mistral-large-latest'],
+		supportsPDF: true, // OpenRouter reads files natively for this model (input_modalities: file)
 		downloadable: false,
 	},
 	// Mistral retired Devstral 2 from its API on 2026-07-31 (Medium 3.5 replaces it), but OpenRouter still serves it.
 	'mistralai/devstral-2512': { // https://openrouter.ai/mistralai/devstral-2512
+		supportsPDF: true, // OpenRouter reads files natively for this model (input_modalities: file)
 		contextWindow: 262_144,
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 0.40, cache_read: 0.04, output: 2.00 },

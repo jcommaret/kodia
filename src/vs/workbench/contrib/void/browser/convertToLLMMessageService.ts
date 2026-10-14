@@ -10,7 +10,7 @@ import { ChatMessage, StagingSelectionItem } from '../common/chatThreadServiceTy
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities, anthropicModelFeatures } from '../common/modelCapabilities.js';
 import { estimateTokens } from '../common/tokenizer.js';
 import { reParsedToolXMLString, chat_systemMessage, chat_filesOverview, chat_workspaceContext } from '../common/prompt/prompts.js';
-import { AnthropicDocumentBlock, AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, OpenAIFilePart, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
+import { AnthropicDocumentBlock, AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, MistralDocumentPart, OpenAIFilePart, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, modelSelectionsEqual, ProviderName } from '../common/voidSettingsTypes.js';
 import { IDirectoryStrService } from '../common/directoryStrService.js';
@@ -54,7 +54,8 @@ const TRIM_TO_LEN = 120
 
 
 // --- images and PDFs: each format puts them before the text, as providers recommend ---
-type ImageFormat = 'anthropic' | 'openai' // Gemini converts from the Anthropic format
+// Gemini converts from the Anthropic format; Mistral takes OpenAI-style images but PDFs as document_url chunks
+type ImageFormat = 'anthropic' | 'openai' | 'mistral'
 
 const anthropicMediaBlock = (media: ChatMedia): AnthropicImageBlock | AnthropicDocumentBlock => media.kind === 'pdf'
 	? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: media.dataBase64 }, title: media.name }
@@ -63,8 +64,13 @@ const openAIMediaPart = (media: ChatMedia): OpenAIImagePart | OpenAIFilePart => 
 	? { type: 'file', file: { filename: media.name, file_data: `data:application/pdf;base64,${media.dataBase64}` } }
 	: { type: 'image_url', image_url: { url: `data:${media.mimeType};base64,${media.dataBase64}` } }
 
-const mediaPartsOf = (media: ChatMedia[] | undefined, format: ImageFormat): (AnthropicImageBlock | AnthropicDocumentBlock | OpenAIImagePart | OpenAIFilePart)[] =>
-	(media ?? []).map(m => format === 'anthropic' ? anthropicMediaBlock(m) : openAIMediaPart(m))
+// https://docs.mistral.ai/capabilities/document_ai/document_qna (base64 PDFs in chat completions)
+const mistralMediaPart = (media: ChatMedia): OpenAIImagePart | MistralDocumentPart => media.kind === 'pdf'
+	? { type: 'document_url', document_url: `data:application/pdf;base64,${media.dataBase64}`, document_name: media.name }
+	: { type: 'image_url', image_url: { url: `data:${media.mimeType};base64,${media.dataBase64}` } }
+
+const mediaPartsOf = (media: ChatMedia[] | undefined, format: ImageFormat): (AnthropicImageBlock | AnthropicDocumentBlock | OpenAIImagePart | OpenAIFilePart | MistralDocumentPart)[] =>
+	(media ?? []).map(m => format === 'anthropic' ? anthropicMediaBlock(m) : format === 'mistral' ? mistralMediaPart(m) : openAIMediaPart(m))
 
 // Rough input tokens of attached media, which the text estimate doesn't see: an image downscaled to ~1568px
 // (chatImages.ts), and per PDF page its text plus a rendered image (Anthropic counts both).
@@ -99,7 +105,7 @@ openai on developer system message - https://cdn.openai.com/spec/model-spec-2024
 */
 
 
-const prepareMessages_openai_tools = (messages: SimpleLLMMessage[]): AnthropicOrOpenAILLMMessage[] => {
+const prepareMessages_openai_tools = (messages: SimpleLLMMessage[], imageFormat: 'openai' | 'mistral'): AnthropicOrOpenAILLMMessage[] => {
 
 	const newMessages: OpenAILLMChatMessage[] = [];
 
@@ -123,7 +129,7 @@ const prepareMessages_openai_tools = (messages: SimpleLLMMessage[]): AnthropicOr
 				// built explicitly (not pushed as-is) so `media` doesn't leak into the payload
 				newMessages.push({
 					role: 'user',
-					content: currMsg.media?.length ? [...currMsg.media.map(openAIMediaPart), { type: 'text', text: currMsg.content }] : currMsg.content,
+					content: currMsg.media?.length ? [...(currMsg.media.map(m => imageFormat === 'mistral' ? mistralMediaPart(m) : openAIMediaPart(m))), { type: 'text', text: currMsg.content }] : currMsg.content,
 				})
 			}
 			continue
@@ -468,7 +474,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 		llmChatMessages = prepareMessages_anthropic_tools(messages as SimpleLLMMessage[], supportsAnthropicReasoning, sendWorkspaceContextAsSystem)
 	}
 	else if (specialToolFormat === 'openai-style') {
-		llmChatMessages = prepareMessages_openai_tools(messages as SimpleLLMMessage[])
+		llmChatMessages = prepareMessages_openai_tools(messages as SimpleLLMMessage[], imageFormat === 'mistral' ? 'mistral' : 'openai')
 	}
 	const llmMessages = llmChatMessages
 
@@ -617,7 +623,7 @@ const prepareMessages = (params: {
 	}
 
 	// with XML tools, the messages still go to the provider's own API, which sets the image format
-	const imageFormat: ImageFormat = params.providerName === 'anthropic' ? 'anthropic' : 'openai'
+	const imageFormat: ImageFormat = params.providerName === 'anthropic' ? 'anthropic' : params.providerName === 'mistral' ? 'mistral' : 'openai'
 	return prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat, imageFormat, sendWorkspaceContextAsSystem: !!params.sendWorkspaceContextAsSystem, tokenRatio: params.tokenRatio ?? 1 })
 }
 

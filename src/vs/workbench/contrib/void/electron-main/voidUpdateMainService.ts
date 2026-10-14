@@ -9,6 +9,7 @@ import { IProductService } from '../../../../platform/product/common/productServ
 import { IUpdateService, StateType } from '../../../../platform/update/common/update.js';
 import { IVoidUpdateService } from '../common/voidUpdateService.js';
 import { VoidCheckUpdateRespose } from '../common/voidUpdateServiceTypes.js';
+import { KODIA_LATEST_RELEASE_API_URL } from '../common/kodiaLinks.js';
 
 
 
@@ -95,15 +96,15 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 
 	private async _manualCheckGHTagIfDisabled(explicit: boolean): Promise<VoidCheckUpdateRespose> {
 		try {
-			const response = await fetch('https://api.github.com/repos/voideditor/binaries/releases/latest');
+			const response = await fetch(KODIA_LATEST_RELEASE_API_URL);
 
 			const data = await response.json();
-			const version = data.tag_name;
+			const latestVersion: string = data.tag_name;
 
-			const myVersion = this._productService.version
-			const latestVersion = version
+			// Release tags are "<VS Code version>-<Kodia version>", e.g. 1.141.0-2.5.0
+			const myVersion = `${this._productService.version}-${this._productService.voidVersion}`
 
-			const isUpToDate = myVersion === latestVersion // only makes sense if response.ok
+			const isUpToDate = !isNewerRelease(latestVersion, myVersion) // only makes sense if response.ok
 
 			let message: string | null
 			let action: 'reinstall' | undefined
@@ -148,4 +149,20 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 			}
 		}
 	}
+}
+
+
+/** Whether release tag `a` is newer than `b`, comparing "<VS Code version>-<Kodia version>" numerically. */
+function isNewerRelease(a: string, b: string): boolean {
+	const parse = (tag: string) => /^(\d+)\.(\d+)\.(\d+)-(\d+)\.(\d+)\.(\d+)$/.exec(tag)?.slice(1).map(Number);
+	const pa = parse(a), pb = parse(b);
+	if (!pa || !pb) {
+		return a !== b;
+	}
+	for (let i = 0; i < pa.length; i++) {
+		if (pa[i] !== pb[i]) {
+			return pa[i] > pb[i];
+		}
+	}
+	return false;
 }

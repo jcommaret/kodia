@@ -12,6 +12,7 @@ import { OllamaSetupInstructions, MlxSetupInstructions, OneClickSwitchButton, Se
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
 import { isLinux } from '../../../../../../../base/common/platform.js';
+import { KODIA_ISSUES_URL } from '../../../../common/kodiaLinks.js';
 
 const OVERRIDE_VALUE = false
 
@@ -596,7 +597,7 @@ const VoidOnboardingContent = () => {
 	// can be md
 	const detailedDescOfWantToUseOption: { [wantToUseOption in WantToUseOption]: string } = {
 		smart: "Most intelligent and best for agent mode.",
-		private: "Private-hosted so your data never leaves your computer or network. [Email us](mailto:founders@voideditor.com) for help setting up at your company.",
+		private: `Private-hosted so your data never leaves your computer or network. [Open an issue](${KODIA_ISSUES_URL}) if you need help setting it up.`,
 		cheap: "Use great deals like Gemini 2.5 Pro, or self-host with Ollama, vLLM, or MLX on Apple Silicon.",
 		all: "",
 	}

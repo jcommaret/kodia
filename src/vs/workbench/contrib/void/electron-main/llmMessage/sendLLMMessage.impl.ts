@@ -22,6 +22,7 @@ import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGramma
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
+import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
 
 const getGoogleApiKey = async () => {
 	const { GoogleAuth } = await import('google-auth-library')
@@ -159,7 +160,7 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 			baseURL: 'https://openrouter.ai/api/v1',
 			apiKey: thisConfig.apiKey,
 			defaultHeaders: {
-				'HTTP-Referer': 'https://voideditor.com', // Optional, for including your app on openrouter.ai rankings.
+				'HTTP-Referer': KODIA_REPO_URL, // Optional, for including your app on openrouter.ai rankings.
 				'X-Title': 'Kodia', // Optional. Shows in rankings on openrouter.ai.
 			},
 			...commonPayloadOpts,

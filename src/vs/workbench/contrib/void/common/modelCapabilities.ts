@@ -2068,10 +2068,12 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'x-ai/grok-4.7': {
 		...xAIModelOptions['grok-4.7'],
+		supportsPDF: true, // OpenRouter reads files natively for this model (input_modalities: file)
 		downloadable: false,
 	},
 	'x-ai/grok-4.6': {
 		...xAIModelOptions['grok-4.6'],
+		supportsPDF: true, // OpenRouter reads files natively for this model (input_modalities: file)
 		downloadable: false,
 	},
 	'mistralai/mistral-large-4-0': {
@@ -2081,10 +2083,12 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'mistralai/mistral-large-2512': {
 		...mistralModelOptions['mistral-large-latest'],
+		supportsPDF: true, // OpenRouter reads files natively for this model (input_modalities: file)
 		downloadable: false,
 	},
 	// Mistral retired Devstral 2 from its API on 2026-07-31 (Medium 3.5 replaces it), but OpenRouter still serves it.
 	'mistralai/devstral-2512': { // https://openrouter.ai/mistralai/devstral-2512
+		supportsPDF: true, // OpenRouter reads files natively for this model (input_modalities: file)
 		contextWindow: 262_144,
 		reservedOutputTokenSpace: 8_192,
 		cost: { input: 0.40, cache_read: 0.04, output: 2.00 },

@@ -457,11 +457,16 @@ const _trimMessagesForToolBudget = (
 // API version) may reject the unknown param; we still read `usage` from them if they send it anyway.
 const providersWithStreamUsageOption: ReadonlySet<ProviderName> = new Set<ProviderName>(['openAI', 'openRouter', 'xAI', 'deepseek'])
 
-// Mistral caches prompt prefixes on its own (billed at 10% of the input price); sending the same
-// `prompt_cache_key` for requests that share a prefix raises the hit rate. Strict APIs reject unknown
+// These providers cache prompt prefixes on their own; sending the same key for requests that share a prefix
+// (a thread's agent loop) routes them to the same cache and raises the hit rate. Strict APIs reject unknown
 // params, so only providers that document it get it.
 // https://docs.mistral.ai/studio-api/conversations/advanced/prompt-caching
-const providersWithPromptCacheKey: ReadonlySet<ProviderName> = new Set<ProviderName>(['mistral'])
+// https://developers.openai.com/api/docs/guides/prompt-caching
+const providersWithPromptCacheKey: ReadonlySet<ProviderName> = new Set<ProviderName>(['mistral', 'openAI'])
+// xAI takes the same routing key as a header on Chat Completions.
+// https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits
+const promptCacheHeadersOf = (providerName: ProviderName, promptCacheKey: string | undefined): Record<string, string> | undefined =>
+	promptCacheKey && providerName === 'xAI' ? { 'x-grok-conv-id': promptCacheKey } : undefined
 
 // OpenAI-compatible `prompt_tokens` includes cached tokens (DeepSeek reports them as `prompt_cache_hit_tokens`).
 const openAICompatibleUsage = (usage: unknown): LLMUsage | undefined => {
@@ -552,8 +557,9 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 
 	let usage: LLMUsage | undefined
 
+	const promptCacheHeaders = promptCacheHeadersOf(providerName, promptCacheKey)
 	openai.chat.completions
-		.create(options)
+		.create(options, promptCacheHeaders ? { headers: promptCacheHeaders } : undefined)
 		.then(async response => {
 			_setAborter(() => response.controller.abort())
 			// when receive text

@@ -23,9 +23,10 @@ import { ICommandService } from '../../../../../../../platform/commands/common/c
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '../../../../common/modelCapabilities.js';
 import { estimateTokens } from '../../../../common/tokenizer.js';
-import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text } from 'lucide-react';
+import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text, Plus, FileText } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { dataURLOfChatImage } from '../util/chatImages.js';
+import { useAttachChatFiles } from '../util/chatAttachments.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName, LintErrorItem, ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js';
 import { CopyButton, EditToolAcceptRejectButtonsHTML, IconShell1, JumpToFileButton, JumpToTerminalButton, StatusIndicator, StatusIndicatorForApplyButton, useApplyStreamState, useEditToolStreamState } from '../markdown/ApplyBlockHoverButtons.js';
 import { IsRunningType } from '../../../chatThreadService.js';
@@ -382,6 +383,39 @@ interface VoidChatAreaProps {
 	// Live token estimate for the current draft (omit to hide the counter)
 	tokenCount?: number;
 	contextWindow?: number;
+
+	// show a + button that attaches files (images, PDFs, text) to the message
+	enableAttachButton?: boolean;
+}
+
+// a + button opening the OS file picker; the files go through the same path as paste and drop
+const AttachFilesButton = () => {
+	const attachChatFiles = useAttachChatFiles()
+	const fileInputRef = useRef<HTMLInputElement | null>(null)
+	return <>
+		<button
+			type='button'
+			className='flex items-center justify-center size-5 rounded-full text-void-fg-3 hover:text-void-fg-1 hover:bg-void-bg-2 transition-colors duration-150'
+			data-tooltip-id='void-tooltip'
+			data-tooltip-content='Attach files: images, PDFs, text or code'
+			data-tooltip-place='top'
+			// lets the click reach the chat area too, which focuses its input: the files then go to that message
+			onClick={() => fileInputRef.current?.click()}
+		>
+			<Plus size={14} />
+		</button>
+		<input
+			ref={fileInputRef}
+			type='file'
+			multiple
+			className='hidden'
+			onChange={(e) => {
+				const files = Array.from(e.target.files ?? [])
+				e.target.value = '' // so picking the same file again fires onChange
+				attachChatFiles(files)
+			}}
+		/>
+	</>
 }
 
 export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
@@ -403,6 +437,7 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 	loadingIcon,
 	tokenCount,
 	contextWindow,
+	enableAttachButton = false,
 }) => {
 	return (
 		<div
@@ -454,6 +489,7 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 						<ReasoningOptionSlider featureName={featureName} />
 
 						<div className='flex items-center flex-wrap gap-x-2 gap-y-1 text-nowrap '>
+							{enableAttachButton && <AttachFilesButton />}
 							{featureName === 'Chat' && <ChatModeDropdown className='text-xs text-void-fg-3 bg-void-bg-1 border border-void-border-2 rounded py-0.5 px-1' />}
 							<ModelDropdown featureName={featureName} className='text-xs text-void-fg-3 bg-void-bg-1 rounded' />
 						</div>
@@ -727,14 +763,14 @@ export const SelectedFiles = (
 				const thisKey = selection.type === 'CodeSelection' ? selection.type + selection.language + selection.range + selection.state.wasAddedAsCurrentFile + selection.uri.fsPath
 					: selection.type === 'File' ? selection.type + selection.language + selection.state.wasAddedAsCurrentFile + selection.uri.fsPath
 						: selection.type === 'Folder' ? selection.type + selection.language + selection.state + selection.uri.fsPath
-							: selection.type === 'Image' ? selection.type + selection.id
+							: selection.type === 'Image' || selection.type === 'PDF' || selection.type === 'TextFile' ? selection.type + selection.id
 								: i
 
 				// images show a thumbnail instead of an icon
 				const selectionIcon = selection.type === 'Image'
 					? <img src={dataURLOfChatImage(selection)} alt='' className='h-4 w-auto max-w-8 object-cover rounded-[2px]' />
 					: (() => {
-						const SelectionIcon = selection.type === 'File' ? File : selection.type === 'Folder' ? Folder : Text
+						const SelectionIcon = selection.type === 'File' || selection.type === 'TextFile' ? File : selection.type === 'PDF' ? FileText : selection.type === 'Folder' ? Folder : Text
 						return <SelectionIcon size={10} />
 					})()
 
@@ -745,7 +781,9 @@ export const SelectedFiles = (
 					{/* tooltip for file path */}
 					<span className="truncate overflow-hidden text-ellipsis"
 						data-tooltip-id='void-tooltip'
-						data-tooltip-content={selection.type === 'Image' ? selection.name : getRelative(selection.uri, accessor)}
+						data-tooltip-content={selection.type === 'Image' || selection.type === 'TextFile' ? selection.name
+							: selection.type === 'PDF' ? `${selection.name} (~${selection.pageCount} page${selection.pageCount === 1 ? '' : 's'})`
+								: getRelative(selection.uri, accessor)}
 						data-tooltip-place='top'
 						data-tooltip-delay-show={3000}
 					>
@@ -796,7 +834,7 @@ export const SelectedFiles = (
 							{selectionIcon}
 
 							{ // file name and range
-								selection.type === 'Image' ? selection.name
+								selection.type === 'Image' || selection.type === 'PDF' || selection.type === 'TextFile' ? selection.name
 									: getBasename(selection.uri.fsPath) + (selection.type === 'CodeSelection' ? ` (${selection.range[0]}-${selection.range[1]})` : '')
 							}
 
@@ -1229,7 +1267,7 @@ const UserMessageComponent = ({ chatMessage, messageIdx, isCheckpointGhost, curr
 		>
 			<VoidInputBox2
 				enableAtToMention
-				enableImageAttachments
+				enableAttachments
 				ref={setTextAreaRef}
 				className='min-h-[81px] max-h-[500px] px-0.5'
 				placeholder="Edit your message..."
@@ -3346,10 +3384,11 @@ export const SidebarChat = () => {
 		onClickAnywhere={() => { textAreaRef.current?.focus() }}
 		tokenCount={tokenEstimate}
 		contextWindow={chatContextWindow}
+		enableAttachButton
 	>
 		<VoidInputBox2
 			enableAtToMention
-			enableImageAttachments
+			enableAttachments
 			className={`min-h-[81px] px-0.5 py-0.5`}
 			placeholder={`@ to mention, ${keybindingString ? `${keybindingString} to add a selection. ` : ''}Enter instructions...`}
 			onChangeText={onChangeText}

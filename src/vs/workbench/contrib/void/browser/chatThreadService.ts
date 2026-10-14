@@ -52,8 +52,8 @@ const findStagingSelectionIndex = (currentSelections: StagingSelectionItem[] | u
 	for (let i = 0; i < currentSelections.length; i += 1) {
 		const s = currentSelections[i]
 
-		// images have no uri, and each paste is its own image
-		if (s.type === 'Image' || newSelection.type === 'Image') continue
+		// attachments (images, PDFs, text files) have no uri, and each one is its own item
+		if (!s.uri || !newSelection.uri) continue
 		if (s.uri.fsPath !== newSelection.uri.fsPath) continue
 
 		if (s.type === 'File' && newSelection.type === 'File') {

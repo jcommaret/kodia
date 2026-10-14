@@ -446,8 +446,9 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 			...opts,
 			supportsSystemMessage: supportsSystemMessage,
 			supportsVision: looksLikeVisionModel(lower),
-			// Mistral reads PDFs only through its own API (document_url chunks); other providers serving its models don't
-			...(obj === (mistralModelOptions as unknown) ? { supportsPDF: false } : {}),
+			// Mistral and xAI read PDFs only through their own APIs (document_url chunks, Files + Responses), which other
+			// providers serving their models don't offer
+			...(obj === (mistralModelOptions as unknown) || obj === (xAIModelOptions as unknown) ? { supportsPDF: false } : {}),
 			cost: { input: 0, output: 0 },
 			downloadable: false,
 			...fallbackKnownValues
@@ -1083,6 +1084,7 @@ const xAIModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true, // uploaded to xAI's Files API and sent through its Responses API (sendLLMMessage.impl.ts)
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: xAI46ReasoningEffortCapabilities,
@@ -1094,6 +1096,7 @@ const xAIModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true, // uploaded to xAI's Files API and sent through its Responses API (sendLLMMessage.impl.ts)
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: xAI46ReasoningEffortCapabilities,
@@ -1105,6 +1108,7 @@ const xAIModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true, // uploaded to xAI's Files API and sent through its Responses API (sendLLMMessage.impl.ts)
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: xAI45ReasoningEffortCapabilities,
@@ -1116,6 +1120,7 @@ const xAIModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true, // uploaded to xAI's Files API and sent through its Responses API (sendLLMMessage.impl.ts)
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		// Coding/agentic model. It reasons, but xAI's reasoning guide does not list it as
@@ -1133,6 +1138,7 @@ const xAIModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true, // uploaded to xAI's Files API and sent through its Responses API (sendLLMMessage.impl.ts)
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: xAIReasoningEffortCapabilities,
@@ -1144,6 +1150,7 @@ const xAIModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true, // uploaded to xAI's Files API and sent through its Responses API (sendLLMMessage.impl.ts)
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { ...xAIReasoningEffortCapabilities, canTurnOffReasoning: false },
@@ -1155,6 +1162,7 @@ const xAIModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true, // uploaded to xAI's Files API and sent through its Responses API (sendLLMMessage.impl.ts)
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
@@ -1166,6 +1174,7 @@ const xAIModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true, // uploaded to xAI's Files API and sent through its Responses API (sendLLMMessage.impl.ts)
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { ...xAIReasoningEffortCapabilities, canTurnOffReasoning: false },

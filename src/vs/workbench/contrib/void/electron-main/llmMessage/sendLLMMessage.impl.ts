@@ -23,6 +23,7 @@ import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
+import { createHash } from 'crypto';
 
 const getGoogleApiKey = async () => {
 	const { GoogleAuth } = await import('google-auth-library')
@@ -463,6 +464,154 @@ const openAICompatibleUsage = (usage: unknown): LLMUsage | undefined => {
 	return { input: u.prompt_tokens - cacheRead, output: u.completion_tokens ?? 0, cacheRead }
 }
 
+// ---------------- xAI: PDFs through the Responses API ----------------
+// xAI reads files only once they're uploaded to its Files API and referenced from /v1/responses (input_file), not
+// from Chat Completions: https://docs.x.ai/developers/model-capabilities/files/chat-with-files
+// So a turn whose history carries a PDF goes through Responses; every other turn stays on Chat Completions.
+
+type ChatMessageParam = OpenAI.Chat.Completions.ChatCompletionMessageParam
+type InlinePdfPart = { type: 'file'; file: { filename?: string; file_data: string } } // built by convertToLLMMessageService
+
+const isInlinePdfPart = (part: unknown): part is InlinePdfPart =>
+	!!part && typeof part === 'object' && (part as { type?: unknown }).type === 'file'
+	&& typeof (part as { file?: { file_data?: unknown } }).file?.file_data === 'string'
+
+const messagesCarryPdf = (messages: ChatMessageParam[]) =>
+	messages.some(m => Array.isArray(m.content) && (m.content as unknown[]).some(isInlinePdfPart))
+
+// A PDF stays in the thread's history, so every later turn sends it again: upload it once per app session and API key.
+const xAIFileIdOfPdf = new Map<string, Promise<string>>()
+const xAIFileIdOf = (openai: OpenAI, toFile: typeof import('openai').toFile, apiKey: string, part: InlinePdfPart): Promise<string> => {
+	const base64 = part.file.file_data.slice(part.file.file_data.indexOf(',') + 1)
+	const key = createHash('sha256').update(apiKey).update('\0').update(base64).digest('hex')
+	let fileId = xAIFileIdOfPdf.get(key)
+	if (!fileId) {
+		fileId = toFile(Buffer.from(base64, 'base64'), part.file.filename || 'document.pdf', { type: 'application/pdf' })
+			.then(file => openai.files.create({ file, purpose: 'assistants' }))
+			.then(uploaded => uploaded.id)
+		fileId.catch(() => xAIFileIdOfPdf.delete(key)) // upload again on the next turn
+		xAIFileIdOfPdf.set(key, fileId)
+	}
+	return fileId
+}
+
+// Chat Completions messages (as convertToLLMMessageService builds them) to Responses input items
+const responsesInputOf = async (messages: ChatMessageParam[], fileIdOf: (part: InlinePdfPart) => Promise<string>): Promise<OpenAI.Responses.ResponseInputItem[]> => {
+	const input: OpenAI.Responses.ResponseInputItem[] = []
+	for (const m of messages) {
+		if (m.role === 'user') {
+			if (typeof m.content === 'string') { input.push({ role: 'user', content: m.content }); continue }
+			const content: OpenAI.Responses.ResponseInputMessageContentList = []
+			for (const part of m.content as unknown[]) {
+				if (isInlinePdfPart(part)) content.push({ type: 'input_file', file_id: await fileIdOf(part) })
+				else if ((part as { type?: unknown }).type === 'image_url') content.push({ type: 'input_image', image_url: (part as OpenAI.Chat.Completions.ChatCompletionContentPartImage).image_url.url, detail: 'auto' })
+				else if ((part as { type?: unknown }).type === 'text') content.push({ type: 'input_text', text: (part as OpenAI.Chat.Completions.ChatCompletionContentPartText).text })
+			}
+			input.push({ role: 'user', content })
+		}
+		else if (m.role === 'assistant') {
+			const text = _messageContentText(m.content)
+			if (text) input.push({ role: 'assistant', content: text })
+			for (const call of m.tool_calls ?? []) {
+				if (call.type === 'function') input.push({ type: 'function_call', call_id: call.id, name: call.function.name, arguments: call.function.arguments })
+			}
+		}
+		else if (m.role === 'tool') {
+			input.push({ type: 'function_call_output', call_id: m.tool_call_id, output: _messageContentText(m.content) })
+		}
+		else if (m.role === 'system' || m.role === 'developer') {
+			input.push({ role: m.role, content: _messageContentText(m.content) })
+		}
+	}
+	return input
+}
+
+const responsesUsageOf = (usage: OpenAI.Responses.ResponseUsage | undefined): LLMUsage | undefined => {
+	if (!usage) return undefined
+	const cacheRead = usage.input_tokens_details?.cached_tokens ?? 0
+	return { input: usage.input_tokens - cacheRead, output: usage.output_tokens, cacheRead }
+}
+
+const _sendXAIResponsesChat = async ({ openai, apiKey, modelName, messages, tools, extraPayload, promptCacheKey, onText, onFinalMessage, onError, _setAborter }: {
+	openai: OpenAI;
+	apiKey: string;
+	modelName: string;
+	messages: ChatMessageParam[];
+	tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined;
+	extraPayload: object; // reasoning_effort (which xAI's Responses API also takes) and the model's additional payload
+	promptCacheKey: string | undefined;
+	onText: OnText;
+	onFinalMessage: OnFinalMessage;
+	onError: OnError;
+	_setAborter: SendChatParams_Internal['_setAborter'];
+}) => {
+	const { default: OpenAI, toFile } = await import('openai')
+	let fullTextSoFar = ''
+	let fullReasoningSoFar = ''
+	const streamedToolCalls: StreamedToolCall[] = [] // indexed by output_index; server-side tool items leave holes
+	let usage: LLMUsage | undefined
+	try {
+		const input = await responsesInputOf(messages, part => xAIFileIdOf(openai, toFile, apiKey, part))
+		const functionTools: OpenAI.Responses.FunctionTool[] = (tools ?? []).flatMap(t => t.type === 'function'
+			? [{ type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters ?? null, strict: false }]
+			: [])
+		const stream = await openai.responses.create({
+			model: modelName,
+			input,
+			stream: true,
+			store: false, // nothing to retrieve later; xAI would otherwise keep it for 30 days
+			...(functionTools.length ? { tools: functionTools } : {}),
+			...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
+			...extraPayload,
+		} as OpenAI.Responses.ResponseCreateParamsStreaming)
+		_setAborter(() => stream.controller.abort())
+
+		for await (const event of stream) {
+			switch (event.type) {
+				case 'response.output_text.delta':
+					fullTextSoFar += event.delta
+					break
+				case 'response.reasoning_text.delta':
+				case 'response.reasoning_summary_text.delta':
+					fullReasoningSoFar += event.delta
+					break
+				case 'response.output_item.added':
+				case 'response.output_item.done': // done carries the complete arguments
+					if (event.item.type === 'function_call') {
+						streamedToolCalls[event.output_index] = { name: event.item.name, id: event.item.call_id, paramsStr: event.item.arguments ?? '' }
+					}
+					break
+				case 'response.function_call_arguments.delta': {
+					const call = streamedToolCalls[event.output_index]
+					if (call) call.paramsStr += event.delta
+					break
+				}
+				case 'response.completed':
+				case 'response.incomplete':
+					usage = responsesUsageOf(event.response.usage) ?? usage
+					break
+				case 'response.failed':
+					throw new Error(event.response.error?.message ?? 'xAI could not complete the response.')
+				case 'error':
+					throw new Error(event.message)
+			}
+			onText({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, toolCall: streamingToolCallOf(streamedToolCalls) })
+		}
+
+		const toolCalls = finalToolCallsOf(streamedToolCalls)
+		if (!fullTextSoFar && !fullReasoningSoFar && toolCalls.length === 0) {
+			onError({ message: 'Kodia: Response from model was empty.', fullError: null })
+		}
+		else {
+			onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage })
+		}
+	}
+	catch (error) {
+		if (error instanceof OpenAI.APIError && error.status === 401) { onError({ message: invalidApiKeyMessage('xAI'), fullError: error }) }
+		else { onError({ message: error + '', fullError: error }) }
+	}
+}
+
 const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, modelName: modelName_, _setAborter, providerName, chatMode, separateSystemMessage, overridesOfModel, mcpTools, promptCacheKey, prediction }: SendChatParams_Internal) => {
 	const { default: OpenAI } = await import('openai')
 	const {
@@ -538,6 +687,12 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 	const streamedToolCalls: StreamedToolCall[] = []
 
 	let usage: LLMUsage | undefined
+
+	// xAI reads PDFs only through its Responses API
+	if (providerName === 'xAI' && messagesCarryPdf(preparedMessages)) {
+		_sendXAIResponsesChat({ openai, apiKey: settingsOfProvider.xAI.apiKey, modelName, messages: preparedMessages, tools: nativeToolsObj.tools, extraPayload: reasoningAndExtraPayload, promptCacheKey, onText, onFinalMessage, onError, _setAborter })
+		return
+	}
 
 	const promptCacheHeaders = promptCacheHeadersOf(providerName, promptCacheKey)
 	openai.chat.completions

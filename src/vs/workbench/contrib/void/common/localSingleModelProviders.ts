@@ -3,7 +3,6 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { APPLE_FOUNDATION_MODELS_CHAT_MODEL_IDS } from './appleFoundationModelsTypes.js';
 import { defaultModelsOfProvider } from './modelCapabilities.js';
 import { ProviderName, VoidStatefulModelInfo } from './voidSettingsTypes.js';
 
@@ -12,16 +11,9 @@ export const singleAutodetectedLocalProviders = ['mlx'] as const satisfies Provi
 
 export type SingleAutodetectedLocalProvider = typeof singleAutodetectedLocalProviders[number]
 
-const canonicalAppleFoundationModelName = (modelName: string) =>
-	modelName === 'foundation-models' || modelName === 'foundation-model' ? 'foundation' : modelName
-
 /** Map legacy / alias API ids to one canonical name per provider (avoids duplicate list entries). */
 export const canonicalModelNameForProvider = (providerName: ProviderName, modelName: string): string => {
 	const lower = modelName.toLowerCase()
-
-	if (providerName === 'appleFoundationModels') {
-		return canonicalAppleFoundationModelName(modelName)
-	}
 
 	if (providerName === 'anthropic') {
 		if (lower === 'claude-sonnet-4-5-20250929') return 'claude-sonnet-4-5'
@@ -102,13 +94,6 @@ export const dedupeProviderModels = (providerName: ProviderName, models: VoidSta
 }
 
 export const normalizeAutodetectedModelNamesForProvider = (providerName: ProviderName, modelNames: string[]): string[] => {
-	if (providerName === 'appleFoundationModels') {
-		// `fm serve` (macOS 27+) can expose both `system` and `pcc` on the same endpoint; list both as separate, selectable models.
-		// afm/fm also list embedding-only ids (e.g. `apple-nl-contextual-en`) in /v1/models — those can't chat-complete, so drop them.
-		const chatCapable = new Set<string>(APPLE_FOUNDATION_MODELS_CHAT_MODEL_IDS)
-		const normalized = modelNames.map(canonicalAppleFoundationModelName).filter(n => chatCapable.has(n))
-		return [...new Set(normalized)]
-	}
 	if (providerName === 'mlx') {
 		const unique = [...new Set(modelNames.map(n => canonicalModelNameForProvider(providerName, n)))]
 		return unique.length > 0 ? [unique[0]] : []

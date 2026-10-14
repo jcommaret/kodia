@@ -6,9 +6,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAccessor, useIsDark, useSettingsState } from '../util/services.js';
 import { Brain, Check, ChevronRight, DollarSign, ExternalLink, Lock, X } from 'lucide-react';
-import { displayInfoOfProviderName, ProviderName, providerNames, localProviderNames, ollamaProviderNames, mlxProviderNames, appleProviderNames, otherLocalProviderNames, featureNames, FeatureName, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';
+import { displayInfoOfProviderName, ProviderName, providerNames, localProviderNames, ollamaProviderNames, mlxProviderNames, otherLocalProviderNames, featureNames, FeatureName, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';
 import { os } from '../../../../common/helpers/systemInfo.js';
-import { OllamaSetupInstructions, MlxSetupInstructions, AppleFoundationModelsSetupInstructions, OneClickSwitchButton, SettingsForProvider, ModelDump } from '../void-settings-tsx/Settings.js';
+import { OllamaSetupInstructions, MlxSetupInstructions, OneClickSwitchButton, SettingsForProvider, ModelDump } from '../void-settings-tsx/Settings.js';
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
 import { isLinux } from '../../../../../../../base/common/platform.js';
@@ -99,19 +99,17 @@ const tabNames = ['Free', 'Paid', 'Local'] as const;
 
 type TabName = typeof tabNames[number] | 'Cloud/Other';
 
-type LocalSubTab = 'ollama' | 'mlx' | 'apple' | 'other';
+type LocalSubTab = 'ollama' | 'mlx' | 'other';
 
 const localSubTabLabels: Record<LocalSubTab, string> = {
 	ollama: 'Ollama',
 	mlx: 'MLX',
-	apple: 'Apple',
 	other: 'Other',
 };
 
 const providerNamesOfLocalSubTab: Record<LocalSubTab, ProviderName[]> = {
 	ollama: [...ollamaProviderNames],
 	mlx: [...mlxProviderNames],
-	apple: [...appleProviderNames],
 	other: [...otherLocalProviderNames],
 };
 
@@ -219,7 +217,7 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 
 			{currentTab === 'Local' && (
 				<div className="flex gap-2 mb-6 w-full max-w-xl flex-wrap">
-					{(os === 'mac' ? (['ollama', 'mlx', 'apple', 'other'] as const) : (['ollama', 'other'] as const)).map(sub => (
+					{(os === 'mac' ? (['ollama', 'mlx', 'other'] as const) : (['ollama', 'other'] as const)).map(sub => (
 						<button
 							key={sub}
 							className={`py-1.5 px-3 rounded-md text-sm ${localSubTab === sub
@@ -261,7 +259,6 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 					</div>
 					{providerName === 'ollama' && <OllamaSetupInstructions />}
 					{providerName === 'mlx' && os === 'mac' && <MlxSetupInstructions />}
-					{providerName === 'appleFoundationModels' && os === 'mac' && <AppleFoundationModelsSetupInstructions />}
 				</div>
 			))}
 
@@ -547,7 +544,7 @@ const VoidOnboardingContent = () => {
 
 	const providerNamesOfWantToUseOption: { [wantToUseOption in WantToUseOption]: ProviderName[] } = {
 		smart: ['anthropic', 'openAI', 'gemini', 'openRouter'],
-		private: ['ollama', 'vLLM', 'openAICompatible', 'lmStudio', 'mlx', 'appleFoundationModels'],
+		private: ['ollama', 'vLLM', 'openAICompatible', 'lmStudio', 'mlx'],
 		cheap: ['gemini', 'deepseek', 'openRouter', 'ollama', 'vLLM', 'mlx'],
 		all: providerNames,
 	}

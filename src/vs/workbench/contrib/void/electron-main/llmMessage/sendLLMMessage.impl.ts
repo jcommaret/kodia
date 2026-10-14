@@ -62,21 +62,6 @@ export type ListParams_Internal<ModelResponse> = ModelListParams<ModelResponse>
 
 const invalidApiKeyMessage = (providerName: ProviderName) => `Invalid ${displayInfoOfProviderName(providerName).title} API key.`
 
-/**
- * `fm serve` lists "pcc" in /v1/models but 503s on it with "PCC inference is not available in this
- * context" when `fm serve` was spawned detached (setsid) from Kodia's own session — see the spawn
- * fix in appleFoundationModelsMainService.ts. If this still surfaces after that fix, it's a genuine
- * Apple-side condition (Apple Intelligence/PCC eligibility, quota, or transient PCC node
- * availability) rather than something Kodia's request shape controls, so explain instead of showing
- * the raw JSON error.
- */
-const applePCCUnavailableMessage = () => `Kodia: Apple's Private Cloud Compute ("pcc" model) rejected this request. If this persists, check Apple Intelligence & Siri in System Settings, or use the "system" (fully on-device) model instead.`
-const isApplePCCUnavailableError = (providerName: ProviderName, error: unknown, APIError: typeof OpenAI.APIError): boolean =>
-	providerName === 'appleFoundationModels'
-	&& error instanceof APIError
-	&& error.status === 503
-	&& /PCC inference is not available/i.test(error.message ?? '')
-
 /** The OpenAI SDK only reads JSON `error.message`; Mistral often returns FastAPI-shaped `detail`/`message`. Without this remap: "422 status code (no body)". */
 const openAICompatibleErrorMessageFromParsedBody = (parsed: unknown, rawText: string, status: number): string => {
 	if (parsed !== undefined && parsed !== null && typeof parsed === 'object') {
@@ -165,10 +150,6 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 		return new OpenAI({ baseURL: `${thisConfig.endpoint}/v1`, apiKey: 'noop', ...commonPayloadOpts })
 	}
 	else if (providerName === 'mlx') {
-		const thisConfig = settingsOfProvider[providerName]
-		return new OpenAI({ baseURL: `${thisConfig.endpoint}/v1`, apiKey: 'noop', ...commonPayloadOpts })
-	}
-	else if (providerName === 'appleFoundationModels') {
 		const thisConfig = settingsOfProvider[providerName]
 		return new OpenAI({ baseURL: `${thisConfig.endpoint}/v1`, apiKey: 'noop', ...commonPayloadOpts })
 	}
@@ -403,8 +384,8 @@ const parseOpenAICompatibleDeltaContent = (content: unknown): { text: string; re
 
 // convertToLLMMessageService (browser side) trims message *content* against contextWindow, but it
 // has no visibility into the tool-call schemas assembled here in the main process. That's invisible
-// slack on any normal-sized context window, but on tiny local models (e.g. Apple's on-device
-// Foundation Model, ~4k tokens total) the tool schemas alone can be a third of the whole budget —
+// slack on any normal-sized context window, but on tiny local models (a 4k-token window) the tool
+// schemas alone can be a third of the whole budget —
 // so a request that looks correctly trimmed still overflows the real session limit. Only kicks in
 // below SMALL_CONTEXT_WINDOW_THRESHOLD so normal cloud providers pay no extra tokenization cost.
 const SMALL_CONTEXT_WINDOW_THRESHOLD = 16_000
@@ -611,7 +592,6 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		// when error/fail - this catches errors of both .create() and .then(for await)
 		.catch(error => {
 			if (error instanceof OpenAI.APIError && error.status === 401) { onError({ message: invalidApiKeyMessage(providerName), fullError: error }); }
-			else if (isApplePCCUnavailableError(providerName, error, OpenAI.APIError)) { onError({ message: applePCCUnavailableMessage(), fullError: error }); }
 			else { onError({ message: error + '', fullError: error }); }
 		})
 }
@@ -1252,11 +1232,6 @@ export const sendLLMMessageToProviderImplementation = {
 	mlx: {
 		sendChat: (params) => _sendOpenAICompatibleChat(params),
 		sendFIM: (params) => _sendOpenAICompatibleFIM(params),
-		list: (params) => _openaiCompatibleList(params),
-	},
-	appleFoundationModels: {
-		sendChat: (params) => _sendOpenAICompatibleChat(params),
-		sendFIM: null,
 		list: (params) => _openaiCompatibleList(params),
 	},
 	liteLLM: {

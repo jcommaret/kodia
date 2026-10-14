@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'; // Added useRef import just in case it was missed, though likely already present
-import { ProviderName, SettingName, displayInfoOfSettingName, providerNames, VoidStatefulModelInfo, customSettingNamesOfProvider, RefreshableProviderName, refreshableProviderNames, displayInfoOfProviderName, nonlocalProviderNames, localProviderNames, ollamaProviderNames, mlxProviderNames, appleProviderNames, otherLocalProviderNames, GlobalSettingName, featureNames, displayInfoOfFeatureName, isProviderNameDisabled, FeatureName, hasDownloadButtonsOnModelsProviderNames, subTextMdOfProviderName } from '../../../../common/voidSettingsTypes.js'
+import { ProviderName, SettingName, displayInfoOfSettingName, providerNames, VoidStatefulModelInfo, customSettingNamesOfProvider, RefreshableProviderName, refreshableProviderNames, displayInfoOfProviderName, nonlocalProviderNames, localProviderNames, ollamaProviderNames, mlxProviderNames, otherLocalProviderNames, GlobalSettingName, featureNames, displayInfoOfFeatureName, isProviderNameDisabled, FeatureName, hasDownloadButtonsOnModelsProviderNames, subTextMdOfProviderName } from '../../../../common/voidSettingsTypes.js'
 import { os } from '../../../../common/helpers/systemInfo.js'
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
 import { VoidButtonBgDarken, VoidCustomDropdownBox, VoidInputBox2, VoidSimpleInputBox, VoidSwitch } from '../util/inputs.js'
@@ -29,7 +29,6 @@ type Tab =
 	| 'models'
 	| 'ollama'
 	| 'mlx'
-	| 'apple'
 	| 'localOther'
 	| 'providers'
 	| 'featureOptions'
@@ -741,7 +740,7 @@ export const SettingsForProvider = ({ providerName, showProviderTitle, showProvi
 			{showProviderSuggestions && needsModel ?
 				providerName === 'ollama' ?
 					<WarningBox className="pl-2 mb-4" text={`Please install an Ollama model. We'll auto-detect it.`} />
-					: (providerName === 'mlx' || providerName === 'appleFoundationModels' || providerName === 'lmStudio' || providerName === 'vLLM') ?
+					: (providerName === 'mlx' || providerName === 'lmStudio' || providerName === 'vLLM') ?
 						<WarningBox className="pl-2 mb-4" text={`Start your local server — Kodia will auto-detect models at the endpoint.`} />
 						: <WarningBox className="pl-2 mb-4" text={`Please add a model for ${providerTitle} (Models section).`} />
 				: null}
@@ -838,31 +837,6 @@ export const AutoSetupMlxToggle = () => {
 	/>
 }
 
-export const AutoSetupAppleFoundationModelsToggle = () => {
-	if (os !== 'mac') {
-		return null
-	}
-
-	const settingName: GlobalSettingName = 'autoSetupAppleFoundationModels'
-	const accessor = useAccessor()
-	const voidSettingsService = accessor.get('IVoidSettingsService')
-	const metricsService = accessor.get('IMetricsService')
-	const voidSettingsState = useSettingsState()
-	const enabled = voidSettingsState.globalSettings[settingName]
-
-	return <ButtonLeftTextRightOption
-		leftButton={<VoidSwitch
-			size='xxs'
-			value={enabled}
-			onChange={(newVal) => {
-				voidSettingsService.setGlobalSetting(settingName, newVal)
-				metricsService.capture('Click', { action: 'Apple FM Auto-Setup Toggle', settingName, enabled: newVal })
-			}}
-		/>}
-		text='On macOS: install maclocal-api (afm) via Homebrew or pip, start the server on port 9999, and enable model foundation.'
-	/>
-}
-
 export const AIInstructionsBox = () => {
 	const accessor = useAccessor()
 	const voidSettingsService = accessor.get('IVoidSettingsService')
@@ -926,18 +900,6 @@ export const MlxSetupInstructions = () => {
 		<div className='pl-6'><ChatMarkdownRender string={`4. **Second model in parallel**: run another server on a different port (e.g. \`mlx_lm.server --model … --port 8081\`), then at the bottom of the model list use **Add Model** → **OpenAI-Compatible** with \`http://127.0.0.1:8081/v1\`, or add the model id manually under MLX if the endpoint exposes multiple ids.`} chatMessageLocation={undefined} /></div>
 	</div>
 }
-
-export const AppleFoundationModelsSetupInstructions = () => {
-	if (os !== 'mac') return null
-	return <div className='prose-p:my-0 prose-ol:list-decimal prose-p:py-0 prose-ol:my-0 prose-ol:py-0 text-void-fg-3 text-sm list-decimal select-text mb-4'>
-		<div><ChatMarkdownRender string={`Apple — [maclocal-api](https://github.com/scouzi1966/maclocal-api) (\`afm\`)`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`1. Requires macOS 26+, Apple Silicon, and Apple Intelligence. Kodia auto-installs \`afm\` (Homebrew: \`brew tap scouzi1966/afm && brew install scouzi1966/afm/afm\`, or pip: \`pip install macafm\`).`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`2. Default server: \`afm -p 9999\` → endpoint \`http://127.0.0.1:9999/v1\`, model id \`foundation\`.`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`3. **LoRA adapter**: \`afm -a ./my-adapter.fmadapter -p 9998\`, then set Kodia’s endpoint to \`http://127.0.0.1:9998\` and refresh.`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`4. **Other local models**: use **MLX** (\`mlx_lm.server\`) or \`afm mlx -m <hf-repo>\` from maclocal-api — this provider is only Apple’s on-device Foundation model.`} chatMessageLocation={undefined} /></div>
-	</div>
-}
-
 
 const RedoOnboardingButton = ({ className }: { className?: string }) => {
 	const accessor = useAccessor()
@@ -1143,7 +1105,6 @@ export const Settings = () => {
 		{ tab: 'ollama', label: 'Ollama' },
 		...(os === 'mac' ? ([
 			{ tab: 'mlx' as const, label: 'MLX' },
-			{ tab: 'apple' as const, label: 'Apple' },
 		]) : []),
 		{ tab: 'localOther', label: 'Local (other)' },
 		{ tab: 'providers', label: 'Main Providers' },
@@ -1307,7 +1268,7 @@ export const Settings = () => {
 									<div className='w-full h-[1px] my-4' />
 									<AutoDetectLocalModelsToggle />
 									<div className='w-full h-[1px] my-4' />
-									<p className='text-void-fg-3 text-sm mb-4'>Per-provider setup and refresh are under <strong>Ollama</strong>, <strong>MLX</strong>, and <strong>Apple</strong> in the sidebar.</p>
+									<p className='text-void-fg-3 text-sm mb-4'>Per-provider setup and refresh are under <strong>Ollama</strong> and <strong>MLX</strong> in the sidebar.</p>
 								</ErrorBoundary>
 							</div>
 
@@ -1335,22 +1296,6 @@ export const Settings = () => {
 											refreshable
 											autoSetup={<AutoSetupMlxToggle />}
 											modelFilter={mlxProviderNames}
-										/>
-									</ErrorBoundary>
-								</div>
-							)}
-
-							{os === 'mac' && (
-								<div className={shouldShowTab('apple') ? `` : 'hidden'}>
-									<ErrorBoundary>
-										<LocalProviderSection
-											title='Apple'
-											description='On-device Foundation model via maclocal-api (`afm`, port 9999).'
-											instructions={<AppleFoundationModelsSetupInstructions />}
-											providerNames={appleProviderNames}
-											refreshable
-											autoSetup={<AutoSetupAppleFoundationModelsToggle />}
-											modelFilter={appleProviderNames}
 										/>
 									</ErrorBoundary>
 								</div>

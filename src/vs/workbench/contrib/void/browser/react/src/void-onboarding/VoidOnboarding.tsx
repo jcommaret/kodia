@@ -8,6 +8,7 @@ import { useAccessor, useIsDark, useSettingsState } from '../util/services.js';
 import { Brain, Check, ChevronRight, DollarSign, ExternalLink, Lock, X } from 'lucide-react';
 import { displayInfoOfProviderName, ProviderName, providerNames, localProviderNames, ollamaProviderNames, mlxProviderNames, appleProviderNames, otherLocalProviderNames, featureNames, FeatureName, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';
 import { os } from '../../../../common/helpers/systemInfo.js';
+import { KODIA_ISSUES_URL } from '../../../../common/kodiaLinks.js';
 import { OllamaSetupInstructions, MlxSetupInstructions, AppleFoundationModelsSetupInstructions, OneClickSwitchButton, SettingsForProvider, ModelDump } from '../void-settings-tsx/Settings.js';
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
@@ -599,7 +600,7 @@ const VoidOnboardingContent = () => {
 	// can be md
 	const detailedDescOfWantToUseOption: { [wantToUseOption in WantToUseOption]: string } = {
 		smart: "Most intelligent and best for agent mode.",
-		private: "Private-hosted so your data never leaves your computer or network. [Email us](mailto:founders@voideditor.com) for help setting up at your company.",
+		private: `Private-hosted so your data never leaves your computer or network. [Open an issue](${KODIA_ISSUES_URL}) if you need help setting it up.`,
 		cheap: "Use great deals like Gemini 2.5 Pro, or self-host with Ollama, vLLM, or MLX on Apple Silicon.",
 		all: "",
 	}

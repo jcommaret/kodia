@@ -39,7 +39,8 @@ export class ServerInstallError extends Error {
 	}
 }
 
-const DEFAULT_DOWNLOAD_URL_TEMPLATE = 'https://github.com/voideditor/binaries/releases/download/${version}/void-reh-${os}-${arch}-${version}.tar.gz';
+// Kodia's releases: tag "<VS Code version>-<Kodia version>", ${release} being product.json's voidVersion.
+const DEFAULT_DOWNLOAD_URL_TEMPLATE = 'https://github.com/jcommaret/kodia/releases/download/${version}-${release}/kodia-reh-${os}-${arch}-${version}-${release}.tar.gz';
 
 export async function installCodeServer(wslManager: WSLManager, distroName: string, serverDownloadUrlTemplate: string | undefined, extensionIds: string[], envVariables: string[], logger: Log): Promise<ServerInstallResult> {
 	const scriptId = crypto.randomBytes(12).toString('hex');

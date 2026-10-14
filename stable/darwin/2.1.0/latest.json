@@ -1,8 +1,8 @@
 {
-  "url": "https://github.com/jcommaret/void/releases/download/1.121.0-2.1.0/Kodia-2.1.0-x64.dmg",
-  "name": "1.121.0-2.1.0",
-  "version": "96b06df01ecded54d9e7f25164840c349c7dc345",
-  "productVersion": "1.121.0.0",
-  "timestamp": "1783859396763",
-  "sha256hash": "b1fc2345d36236af7a86f3559a7ba0e0d6b765d136641ce81e128128a7760242"
+  "url": "https://github.com/jcommaret/void/releases/download/1.141.0-2.1.0/Kodia-2.1.0-x64.dmg",
+  "name": "1.141.0-2.1.0",
+  "version": "66cf7820185bb5ad0fb69c2b1d9e29245bad5123",
+  "productVersion": "1.141.0.0",
+  "timestamp": "1791908043392",
+  "sha256hash": "152729a8baaed1d24525af6db2a8a9f5b24af2693c88a6a593aa9dba2188a8ba"
 }

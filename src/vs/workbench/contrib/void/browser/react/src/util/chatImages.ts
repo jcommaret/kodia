@@ -10,7 +10,7 @@ const MAX_IMAGE_BYTES = 3.75 * 1024 * 1024
 
 export const isChatImageFile = (file: File) => (chatImageMimeTypes as readonly string[]).includes(file.type)
 
-const base64OfBlob = (blob: Blob) => new Promise<string>((resolve, reject) => {
+export const base64OfBlob = (blob: Blob) => new Promise<string>((resolve, reject) => {
 	const reader = new FileReader()
 	reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '') // strip the "data:...;base64," prefix
 	reader.onerror = () => reject(reader.error)

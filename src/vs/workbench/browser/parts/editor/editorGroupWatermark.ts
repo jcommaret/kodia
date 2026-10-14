@@ -103,9 +103,13 @@ export class EditorGroupWatermark extends Disposable {
 	) {
 		super();
 
-		const elements = h('.editor-group-watermark', [
-			h('.letterpress@icon'),
-			h('.shortcuts@shortcuts'),
+		// Kodia: VS Code 1.141 wraps the watermark in .editor-group-watermark-wrapper, and every watermark rule in
+		// editorgroupview.css (centering, logo size, hiding it once an editor opens) now targets that wrapper.
+		const elements = h('.editor-group-watermark-wrapper', [
+			h('.editor-group-watermark', [
+				h('.letterpress@icon'),
+				h('.shortcuts@shortcuts'),
+			]),
 		]);
 
 		append(container, elements.root);

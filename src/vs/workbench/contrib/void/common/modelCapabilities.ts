@@ -183,6 +183,7 @@ export type VoidStaticModelInfo = { // not stateful
 	specialToolFormat?: 'openai-style' | 'anthropic-style' | 'gemini-style', // typically you should use 'openai-style'. null means "can't call tools by default", and asks the LLM to output XML in agent mode
 	supportsFIM: boolean; // whether the model was specifically designed for autocomplete or "FIM" ("fill-in-middle" format)
 	supportsVision?: boolean; // whether the model accepts images in user messages. Defaults to false: images are left out (with a note) rather than risking an API error
+	supportsPDF?: boolean; // whether the model reads PDFs sent as documents (Anthropic document blocks, OpenAI file parts, Gemini inline data). Defaults to false
 	supportsPredictedOutputs?: boolean; // whether the model accepts a `prediction` of its output (OpenAI-compatible), which speeds up rewrites that mostly repeat the original code. Defaults to false
 
 	additionalOpenAIPayload?: { [key: string]: string } // additional payload in the message body for requests that are openai-compatible (ollama, vllm, openai, openrouter, etc)
@@ -228,6 +229,7 @@ export const modelOverrideKeys = [
 	'specialToolFormat',
 	'supportsFIM',
 	'supportsVision',
+	'supportsPDF',
 	'supportsPredictedOutputs',
 	'reasoningCapabilities',
 	'additionalOpenAIPayload'
@@ -328,12 +330,14 @@ const openSourceModelOptions_assumingOAICompat = {
 	// llama 4 https://ai.meta.com/blog/llama-4-multimodal-intelligence/
 	'llama4-scout': {
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: false,
 		contextWindow: 10_000_000, reservedOutputTokenSpace: 4_096,
 	},
 	'llama4-maverick': {
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: false,
 		contextWindow: 10_000_000, reservedOutputTokenSpace: 4_096,
@@ -409,6 +413,20 @@ const openSourceModelOptions_assumingOAICompat = {
 
 
 
+// Whether an unlisted model accepts images, from its name (lowercase). The fallbacks below group models by family, and
+// families mix vision and text-only models (Mistral Large 3 vs a local mistral:7b, gemma3:27b vs gemma3:1b), so the
+// family's flag can't be inherited. Covers the multimodal cloud families and the vision models local servers serve
+// (Ollama, LM Studio, vLLM...): llava, qwen2.5vl, llama3.2-vision, gemma3, llama4, minicpm-v...
+export const looksLikeVisionModel = (lower: string): boolean => {
+	if (/claude|gemini|grok-?[4-9]|gpt-?(4o|4\.1|[5-9])/.test(lower)) return true
+	if (/vision|llava|moondream|minicpm-v|internvl|pixtral|llama-?4|scout|maverick/.test(lower)) return true
+	if (/vl(?=$|[-_.:\d])/.test(lower)) return true // qwen2.5vl, qwen3-vl, kimi-vl
+	if (/glm-?\d+(\.\d+)?v/.test(lower)) return true // glm-4.5v
+	if (/gemma-?[34]/.test(lower)) return !/(^|[-_.:])(270m|1b)($|[-_.:])/.test(lower) // gemma3:1b and 270m are text-only
+	if (/mistral-small-?3\.[12]|mistral-(medium|large)-(3|4|2512|26)|ministral-3/.test(lower)) return true
+	return false
+}
+
 // keep modelName, but use the fallback's defaults
 const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallback'] = (modelName, fallbackKnownValues) => {
 
@@ -427,6 +445,7 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 			modelName,
 			...opts,
 			supportsSystemMessage: supportsSystemMessage,
+			supportsVision: looksLikeVisionModel(lower),
 			cost: { input: 0, output: 0 },
 			downloadable: false,
 			...fallbackKnownValues
@@ -599,6 +618,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -610,6 +630,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -621,6 +642,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -632,6 +654,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -643,6 +666,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -654,6 +678,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -665,6 +690,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -676,6 +702,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -687,6 +714,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
@@ -698,6 +726,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities_noXHigh,
@@ -709,6 +738,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicThinkingCapabilities,
@@ -720,6 +750,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicThinkingCapabilities,
@@ -731,6 +762,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicThinkingCapabilities,
@@ -742,6 +774,7 @@ const anthropicModelOptions = {
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicThinkingCapabilities,
@@ -835,6 +868,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI6ReasoningEffortCapabilities,
@@ -846,6 +880,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		// low / medium (default) / high / xhigh / max — 'none' and 'minimal' are rejected, same set as Astra
@@ -858,6 +893,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI6SolLunaReasoningEffortCapabilities,
@@ -869,6 +905,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI6SolLunaReasoningEffortCapabilities,
@@ -880,6 +917,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
@@ -891,6 +929,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
@@ -902,6 +941,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
@@ -913,6 +953,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
@@ -924,6 +965,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
@@ -935,6 +977,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
@@ -946,6 +989,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
@@ -1173,6 +1217,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1190,6 +1235,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1207,6 +1253,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1224,6 +1271,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: gemini38ReasoningCapabilities,
@@ -1235,6 +1283,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1252,6 +1301,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1269,6 +1319,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1286,6 +1337,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1303,6 +1355,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1320,6 +1373,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
+		supportsPDF: true,
 		supportsSystemMessage: 'separated',
 		specialToolFormat: 'gemini-style',
 		reasoningCapabilities: {
@@ -1395,6 +1449,8 @@ const deepseekSettings: VoidStaticProviderInfo = {
 		const lower = modelName.toLowerCase()
 		let fallbackName: keyof typeof deepseekModelOptions | null = null
 		if (lower.includes('v4-pro') || lower.includes('v4_pro')) fallbackName = 'deepseek-v4-pro'
+		// deepseek-v4-flash-vision-exp: V4-Flash with image input — https://api-docs.deepseek.com/news/news260821
+		else if (lower.includes('vision')) fallbackName = 'deepseek-flash'
 		else if (lower.includes('v4-flash') || lower.includes('v4_flash')) fallbackName = 'deepseek-v4-flash'
 		else if (lower.includes('flash') || lower.includes('v4.1') || lower.includes('r1') || lower.includes('v4') || lower.includes('deepseek')) fallbackName = 'deepseek-flash'
 		if (fallbackName) return { modelName: fallbackName, recognizedModelName: fallbackName, ...deepseekModelOptions[fallbackName] }
@@ -1619,6 +1675,7 @@ const groqModelOptions = { // https://console.groq.com/docs/models, https://groq
 		cost: { input: 0.80, output: 4.00 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true, // the one Groq model with image input (up to 3 per request) — https://console.groq.com/docs/vision
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { supportsReasoning: true, canTurnOffReasoning: true, canIOReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
@@ -2180,7 +2237,8 @@ export const getModelCapabilities = (
 		return { ...result, ...overrides, modelName: result.modelName, isUnrecognizedModel: false };
 	}
 
-	return { modelName, ...defaultModelOptions, ...overrides, isUnrecognizedModel: true };
+	// an unknown family can still be a known kind of vision model (llava, moondream, minicpm-v...)
+	return { modelName, ...defaultModelOptions, supportsVision: looksLikeVisionModel(modelName.toLowerCase()), ...overrides, isUnrecognizedModel: true };
 }
 
 // Dollars for one request. `cost` is per million tokens; cache rates fall back to the input rate

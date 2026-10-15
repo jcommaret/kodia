@@ -145,6 +145,10 @@ src/vs/workbench/services/search/test/node/fixtures/examples/NullPoinderExceptio
 src/vs/workbench/services/search/test/node/fixtures/examples/company.js
 src/vs/workbench/services/search/test/node/fixtures/examples/employee.js
 src/vs/workbench/services/search/test/node/fixtures/examples/small.js
+# Kodia: build configuration of the React UI (tsup, Tailwind)
+src/vs/workbench/contrib/void/browser/react/build.js
+src/vs/workbench/contrib/void/browser/react/tailwind.config.js
+src/vs/workbench/contrib/void/browser/react/tsup.config.js
 test/automation/tools/copy-driver-definition.js
 test/automation/tools/copy-package-version.js
 test/integration/electron/testrunner.js

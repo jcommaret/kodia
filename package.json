@@ -17,6 +17,7 @@
 		"test-browser": "npx playwright install && node test/unit/browser/index.js",
 		"test-browser-no-install": "node test/unit/browser/index.js",
 		"test-node": "mocha test/unit/node/index.js --delay --ui=tdd --exit",
+		"test-void": "npm run transpile-client && npm run test-node -- --runGlob \"vs/workbench/contrib/void/test/**/*.test.js\"",
 		"test-extension": "vscode-test",
 		"test-build-scripts": "cd build && npm run test",
 		"check-cyclic-dependencies": "node build/lib/checkCyclicDependencies.ts out",

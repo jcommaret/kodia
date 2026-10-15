@@ -71,7 +71,7 @@ export const QuickEditChat = ({
 			startBehavior: 'keep-conflicts',
 		} as const
 
-		await editCodeService.callBeforeApplyOrEdit(opts)
+		await editCodeService.callBeforeApplyOrEdit('current') // Quick Edit runs in the active editor
 		const [newApplyingUri, applyDonePromise] = editCodeService.startApplying(opts) ?? []
 		// catch any errors by interrupting the stream
 		applyDonePromise?.catch(e => { if (newApplyingUri) editCodeService.interruptCtrlKStreaming({ diffareaid }) })

@@ -149,7 +149,7 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 
 	// Clear error message after 5 seconds
 	useEffect(() => {
-		let timeoutId: NodeJS.Timeout | null = null;
+		let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
 		if (errorMessage) {
 			timeoutId = setTimeout(() => {

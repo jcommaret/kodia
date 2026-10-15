@@ -1682,7 +1682,7 @@ export const BlockCode = ({ initValue, language, maxHeight, showScrollbars }: Bl
 							// maxColumn: 0,
 						},
 
-						hover: { enabled: false },
+						hover: { enabled: 'off' },
 
 						selectionHighlight: false, // highlights whole words
 						renderLineHighlight: 'none',
@@ -1924,7 +1924,7 @@ const SingleDiffEditor = ({ block, lang }: { block: ExtractedSearchReplaceBlock,
 					alwaysConsumeMouseWheel: false,
 					ignoreHorizontalScrollbarInContentHeight: true,
 				},
-				hover: { enabled: false },
+				hover: { enabled: 'off' },
 				folding: false,
 				selectionHighlight: false,
 				renderLineHighlight: 'none',

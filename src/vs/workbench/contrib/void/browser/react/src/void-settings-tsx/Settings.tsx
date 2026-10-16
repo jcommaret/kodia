@@ -101,7 +101,9 @@ const RefreshModelButton = ({ providerName }: { providerName: RefreshableProvide
 
 const RefreshableModels = ({ providerNamesFilter }: { providerNamesFilter?: readonly ProviderName[] }) => {
 	const settingsState = useSettingsState()
-	const names = providerNamesFilter ?? refreshableProviderNames
+	const names = providerNamesFilter
+		? providerNamesFilter.filter((p): p is RefreshableProviderName => (refreshableProviderNames as readonly string[]).includes(p))
+		: refreshableProviderNames
 
 	const buttons = names.map(providerName => {
 		if (!settingsState.settingsOfProvider[providerName]._didFillInProviderSettings) return null

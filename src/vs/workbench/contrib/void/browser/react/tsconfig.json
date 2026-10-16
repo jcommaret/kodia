@@ -11,6 +11,8 @@
 		"moduleResolution": "NodeNext",
 		"module": "NodeNext",
 		"esModuleInterop": true,
+		// CSS side-effect imports are handled by the bundler (tsup), not by TypeScript
+		"noUncheckedSideEffectImports": false,
 	},
 	"include": [
 		// this is just for type checking, so src/ is the correct dir

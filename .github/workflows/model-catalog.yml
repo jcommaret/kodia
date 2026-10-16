@@ -1,0 +1,33 @@
+# Weekly comparison of Kodia's model catalog with what the providers publish (retired models,
+# context windows, prices). The run fails when something needs a look; its summary lists what.
+name: Model catalog check
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # the script only needs esbuild from the root dependencies
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Compare the catalog with the providers
+        run: node scripts/void/checkModelCatalog.mts
+        env:
+          # optional: enables the Mistral checks (existence, deprecations)
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}

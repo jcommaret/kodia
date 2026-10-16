@@ -1,0 +1,69 @@
+# Checks every pull request (and master) before kodia-builder ever builds it:
+# install from the lockfiles, lint, typecheck and unit-test Kodia.
+name: PR checks
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # the checks don't run Electron or browsers
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install system libraries for native modules
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libkrb5-dev libx11-dev libxkbfile-dev libsecret-1-dev pkg-config
+
+      # npm ci fails when a package-lock.json is out of sync with its package.json
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint Kodia (errors only)
+        run: npx eslint --quiet src/vs/workbench/contrib/void --ignore-pattern '**/react/src2/**' --ignore-pattern '**/react/out/**'
+
+      - name: Build the React UI
+        working-directory: src/vs/workbench/contrib/void/browser/react
+        run: node build.js
+
+      # The React tsconfig also reaches VS Code files it imports, which only typecheck under
+      # src/tsconfig.json (next step), so only errors in the React sources count here.
+      - name: Typecheck the React UI
+        working-directory: src/vs/workbench/contrib/void/browser/react
+        run: |
+          errors=$(npx tsc --noEmit -p tsconfig.json | grep '^src/' || true)
+          if [ -n "$errors" ]; then
+            echo "$errors"
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p src/tsconfig.json
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Typecheck the build scripts
+        run: npm run typecheck --prefix build
+
+      - name: Unit tests
+        run: npm run test-void

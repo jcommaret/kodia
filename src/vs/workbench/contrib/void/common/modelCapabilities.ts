@@ -138,7 +138,7 @@ export const defaultModelsOfProvider = {
 		'google/gemini-3.8-flash',
 		'openai/gpt-6-astra',
 		'x-ai/grok-4.7',
-		'qwen/qwen3-235b-a22b',
+		'qwen/qwen3.8-27b',
 		'deepseek/deepseek-v4.1-flash',
 		'z-ai/glm-5.3',
 	],
@@ -1224,7 +1224,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-2.5-pro': { // https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 65_536,
-		cost: { input: 1.25, output: 10.00 },
+		cost: { input: 1.25, cache_read: 0.125, output: 10.00 }, // prompts <= 200k tokens
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -1242,7 +1242,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-2.5-flash': { // https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 65_536,
-		cost: { input: 0.15, output: 0.60 },
+		cost: { input: 0.30, cache_read: 0.03, output: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -1260,7 +1260,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-2.5-flash-lite': { // https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 8_192,
-		cost: { input: 0.075, output: 0.30 },
+		cost: { input: 0.10, cache_read: 0.01, output: 0.40 },
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -1278,7 +1278,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-3.8-flash': { // https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 65_536,
-		cost: { input: 0.75, cache_read: 0.075, output: 3.75 },
+		cost: { input: 0.75, cache_read: 0.075, output: 3.75 }, // through 2026-12-31; doubles on 2027-01-01
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -1308,7 +1308,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-3.6-flash': { // https://ai.google.dev/gemini-api/docs/models/gemini-3.6-flash
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 65_536,
-		cost: { input: 1.50, output: 7.50 },
+		cost: { input: 0.75, cache_read: 0.075, output: 3.75 }, // through 2026-12-31; doubles on 2027-01-01
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -1326,7 +1326,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-3.5-flash': { // https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 65_536,
-		cost: { input: 0.15, output: 0.60 },
+		cost: { input: 1.50, cache_read: 0.15, output: 9.00 }, // no longer on Google's pricing page; OpenRouter's price
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -1344,7 +1344,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-3.5-flash-lite': { // https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 8_192,
-		cost: { input: 0.30, output: 2.50 },
+		cost: { input: 0.30, cache_read: 0.03, output: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -1362,7 +1362,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-3.1-flash-lite': { // https://ai.google.dev/gemini-api/docs/models — pricing provisional (mirrors 2.5-flash-lite)
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 8_192,
-		cost: { input: 0.075, output: 0.30 },
+		cost: { input: 0.25, cache_read: 0.025, output: 1.50 },
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -1380,7 +1380,7 @@ const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	'gemini-3.1-pro-preview': { // preview — https://ai.google.dev/gemini-api/docs/models
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 65_536,
-		cost: { input: 2.00, output: 12.00 },
+		cost: { input: 2.00, cache_read: 0.20, output: 12.00 }, // prompts <= 200k tokens
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -2035,6 +2035,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'google/gemini-3.8-flash': {
 		...geminiModelOptions['gemini-3.8-flash'],
+		cost: { input: 0.825, cache_read: 0.0825, output: 4.125 }, // OpenRouter's price, 10% over Google's
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		downloadable: false,
@@ -2116,6 +2117,8 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'z-ai/glm-5.3': {
 		...mistralModelOptions['zai-glm-5-3'],
+		contextWindow: 1_048_576, // https://openrouter.ai/z-ai/glm-5.3
+		cost: { input: 0.11, cache_read: 0.109, output: 6.00 }, // OpenRouter's price; it moves with the serving providers
 		downloadable: false,
 	},
 	'z-ai/glm-5.2': {
@@ -2124,20 +2127,19 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'deepseek/deepseek-v4.1-flash': {
 		...deepseekModelOptions['deepseek-flash'],
+		contextWindow: 1_048_576, // https://openrouter.ai/deepseek/deepseek-v4.1-flash
+		cost: { input: 0.0112, cache_read: 0.0054, output: 0.72 }, // OpenRouter's price; it moves with the serving providers
 		downloadable: false,
 	},
 	'deepseek/deepseek-v4-pro': {
 		...deepseekModelOptions['deepseek-v4-pro'],
 		downloadable: false,
 	},
-	'qwen/qwen3-235b-a22b': {
-		contextWindow: 40_960,
-		reservedOutputTokenSpace: null,
-		cost: { input: .10, output: .10 },
+	'qwen/qwen3.8-27b': { // https://openrouter.ai/qwen/qwen3.8-27b
+		...groqModelOptions['qwen/qwen3.8-27b'],
+		contextWindow: 1_000_000,
+		cost: { input: 0.24, output: 2.20 },
 		downloadable: false,
-		supportsFIM: false,
-		supportsSystemMessage: 'system-role',
-		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: false },
 	},
 	'deepseek/deepseek-r1': {
 		...openSourceModelOptions_assumingOAICompat.deepseekR1,

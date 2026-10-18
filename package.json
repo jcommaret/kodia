@@ -13,6 +13,7 @@
 		"buildreact": "cd ./src/vs/workbench/contrib/void/browser/react/ && node build.js && cd ../../../../../../../",
 		"watchreact": "cd ./src/vs/workbench/contrib/void/browser/react/ && node build.js --watch && cd ../../../../../../../",
 		"watchreactd": "deemon npm run watchreact",
+		"kill-watchreactd": "deemon --kill npm run watchreact",
 		"test": "node -e \"console.error('Run a test script from the scripts folder, for example: ./scripts/test.sh --run <file>.'); process.exit(1)\"",
 		"test-browser": "npx playwright install && node test/unit/browser/index.js",
 		"test-browser-no-install": "node test/unit/browser/index.js",

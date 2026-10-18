@@ -174,7 +174,7 @@
 				}
 			}
 		},
-		{   // Void added this
+		{   // Kodia: builds the React UI (sidebar, settings, onboarding…) and rebuilds it on change
 			"type": "npm",
 			"script": "watchreactd",
 			"label": "React - Build",
@@ -197,8 +197,8 @@
 					"message": 3
 				},
 				"background": {
-					"beginsPattern": "Starting compilation",
-					"endsPattern": "Finished compilation"
+					"beginsPattern": "Build start",
+					"endsPattern": "Build success|Build failed"
 				}
 			}
 		},
@@ -236,6 +236,7 @@
 			"dependsOn": [
 				"Core - Transpile",
 				"Core - Typecheck",
+				"React - Build",
 				"Ext - Build"
 			],
 			"group": {
@@ -270,6 +271,18 @@
 		},
 		{
 			"type": "npm",
+			"script": "kill-watchreactd",
+			"label": "Kill React - Build",
+			"group": "build",
+			"presentation": {
+				"reveal": "never",
+				"group": "buildKillers",
+				"close": true
+			},
+			"problemMatcher": []
+		},
+		{
+			"type": "npm",
 			"script": "kill-watch-extensionsd",
 			"label": "Kill Ext - Build",
 			"group": "build",
@@ -285,6 +298,7 @@
 			"dependsOn": [
 				"Kill Core - Transpile",
 				"Kill Core - Typecheck",
+				"Kill React - Build",
 				"Kill Ext - Build"
 			],
 			"group": "build",

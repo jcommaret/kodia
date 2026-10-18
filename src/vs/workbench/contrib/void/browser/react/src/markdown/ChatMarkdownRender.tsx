@@ -3,7 +3,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import React, { JSX, useMemo, useState } from 'react'
+import React, { JSX, useState } from 'react'
 import { marked, MarkedToken, Token } from 'marked'
 
 import { convertToVscodeLang, detectLanguage } from '../../../../common/helpers/languageHelpers.js'
@@ -35,58 +35,6 @@ function isValidUri(s: string): boolean {
 // renders contiguous string of latex eg $e^{i\pi}$
 const LatexRender = ({ latex }: { latex: string }) => {
 	return <span className="katex-error text-red-500">{latex}</span>
-	// try {
-	// 	let formula = latex;
-	// 	let displayMode = false;
-
-	// 	// Extract the formula from delimiters
-	// 	if (latex.startsWith('$') && latex.endsWith('$')) {
-	// 		// Check if it's display math $$...$$
-	// 		if (latex.startsWith('$$') && latex.endsWith('$$')) {
-	// 			formula = latex.slice(2, -2);
-	// 			displayMode = true;
-	// 		} else {
-	// 			formula = latex.slice(1, -1);
-	// 		}
-	// 	} else if (latex.startsWith('\\(') && latex.endsWith('\\)')) {
-	// 		formula = latex.slice(2, -2);
-	// 	} else if (latex.startsWith('\\[') && latex.endsWith('\\]')) {
-	// 		formula = latex.slice(2, -2);
-	// 		displayMode = true;
-	// 	}
-
-	// 	// Render LaTeX
-	// 	const html = katex.renderToString(formula, {
-	// 		displayMode: displayMode,
-	// 		throwOnError: false,
-	// 		output: 'html'
-	// 	});
-
-	// 	// Sanitize the HTML output with DOMPurify
-	// 	const sanitizedHtml = dompurify.sanitize(html, {
-	// 		RETURN_TRUSTED_TYPE: true,
-	// 		USE_PROFILES: { html: true, svg: true, mathMl: true }
-	// 	});
-
-	// 	// Add proper styling based on mode
-	// 	const className = displayMode
-	// 		? 'katex-block my-2 text-center'
-	// 		: 'katex-inline';
-
-	// 	// Use the ref approach to avoid dangerouslySetInnerHTML
-	// 	const mathRef = React.useRef<HTMLSpanElement>(null);
-
-	// 	React.useEffect(() => {
-	// 		if (mathRef.current) {
-	// 			mathRef.current.innerHTML = sanitizedHtml as unknown as string;
-	// 		}
-	// 	}, [sanitizedHtml]);
-
-	// 	return <span ref={mathRef} className={className}></span>;
-	// } catch (error) {
-	// 	console.error('KaTeX rendering error:', error);
-	// 	return <span className="katex-error text-red-500">{latex}</span>;
-	// }
 }
 
 const Codespan = ({ text, className, onClick, tooltip }: { text: string, className?: string, onClick?: () => void, tooltip?: string }) => {
@@ -373,40 +321,6 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 				</table>
 			</div>
 		)
-		// return (
-		// 	<div>
-		// 		<table className={'min-w-full border border-void-bg-2'}>
-		// 			<thead>
-		// 				<tr className='bg-void-bg-1'>
-		// 					{t.header.map((cell: any, index: number) => (
-		// 						<th
-		// 							key={index}
-		// 							className='px-4 py-2 border border-void-bg-2 font-semibold'
-		// 							style={{ textAlign: t.align[index] || 'left' }}
-		// 						>
-		// 							{cell.raw}
-		// 						</th>
-		// 					))}
-		// 				</tr>
-		// 			</thead>
-		// 			<tbody>
-		// 				{t.rows.map((row: any[], rowIndex: number) => (
-		// 					<tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-void-bg-1'}>
-		// 						{row.map((cell: any, cellIndex: number) => (
-		// 							<td
-		// 								key={cellIndex}
-		// 								className={'px-4 py-2 border border-void-bg-2'}
-		// 								style={{ textAlign: t.align[cellIndex] || 'left' }}
-		// 							>
-		// 								{cell.raw}
-		// 							</td>
-		// 						))}
-		// 					</tr>
-		// 				))}
-		// 			</tbody>
-		// 		</table>
-		// 	</div>
-		// )
 	}
 
 	if (t.type === 'hr') {

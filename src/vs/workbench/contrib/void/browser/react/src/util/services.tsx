@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { MCPUserState, RefreshableProviderName, SettingsOfProvider } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js'
+import { RefreshableProviderName } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js'
 import { DisposableStore, IDisposable } from '../../../../../../../base/common/lifecycle.js'
 import { VoidSettingsState } from '../../../../../../../workbench/contrib/void/common/voidSettingsService.js'
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js'
@@ -105,7 +105,6 @@ export const _registerServices = (accessor: ServicesAccessor) => {
 	}
 
 	const { settingsStateService, chatThreadsStateService, refreshModelService, themeService, editCodeService, voidCommandBarService, modelService, mcpService } = stateServices
-
 
 
 
@@ -276,19 +275,7 @@ export const useChatThreadsState = () => {
 		return () => { chatThreadsStateListeners.delete(ss) }
 	}, [ss])
 	return s
-	// allow user to set state natively in react
-	// const ss: React.Dispatch<React.SetStateAction<ThreadsState>> = (action)=>{
-	// 	_ss(action)
-	// 	if (typeof action === 'function') {
-	// 		const newState = action(chatThreadsState)
-	// 		chatThreadsState = newState
-	// 	} else {
-	// 		chatThreadsState = action
-	// 	}
-	// }
-	// return [s, ss] as const
 }
-
 
 
 
@@ -389,7 +376,6 @@ export const useActiveURI = () => {
 	}, [])
 	return { uri: s }
 }
-
 
 
 

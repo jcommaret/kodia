@@ -49,16 +49,6 @@ export const roundRangeToLines = (range: IRange | null | undefined, options: { e
 	return newRange
 }
 
-// const getContentInRange = (model: ITextModel, range: IRange | null) => {
-// 	if (!range)
-// 		return null
-// 	const content = model.getValueInRange(range)
-// 	const trimmedContent = content
-// 		.replace(/^\s*\n/g, '') // trim pure whitespace lines from start
-// 		.replace(/\n\s*$/g, '') // trim pure whitespace lines from end
-// 	return trimmedContent
-// }
-
 
 
 const VOID_OPEN_SIDEBAR_ACTION_ID = 'void.sidebar.open'
@@ -252,30 +242,3 @@ registerAction2(class extends Action2 {
 })
 
 
-
-
-// export class TabSwitchListener extends Disposable {
-
-// 	constructor(
-// 		onSwitchTab: () => void,
-// 		@ICodeEditorService private readonly _editorService: ICodeEditorService,
-// 	) {
-// 		super()
-
-// 		// when editor switches tabs (models)
-// 		const addTabSwitchListeners = (editor: ICodeEditor) => {
-// 			this._register(editor.onDidChangeModel(e => {
-// 				if (e.newModelUrl?.scheme !== 'file') return
-// 				onSwitchTab()
-// 			}))
-// 		}
-
-// 		const initializeEditor = (editor: ICodeEditor) => {
-// 			addTabSwitchListeners(editor)
-// 		}
-
-// 		// initialize current editors + any new editors
-// 		for (let editor of this._editorService.listCodeEditors()) initializeEditor(editor)
-// 		this._register(this._editorService.onCodeEditorAdd(editor => { initializeEditor(editor) }))
-// 	}
-// }

@@ -18,10 +18,6 @@ import './quickEditActions.js'
 // register Autocomplete
 import './autocompleteService.js'
 
-// register Context services
-// import './contextGatheringService.js'
-// import './contextUserChangesService.js'
-
 // settings pane
 import './voidSettingsPane.js'
 

@@ -3,7 +3,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import React, { ButtonHTMLAttributes, FormEvent, FormHTMLAttributes, Fragment, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { ButtonHTMLAttributes, Fragment, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 
 import { useAccessor, useChatThreadsState, useChatThreadsStreamState, useSettingsState, useActiveURI, useCommandBarState, useFullChatThreadsStreamState } from '../util/services.js';
@@ -11,27 +11,25 @@ import { ScrollType } from '../../../../../../../editor/common/editorCommon.js';
 
 import { ChatMarkdownRender, ChatMessageLocation, getApplyBoxId } from '../markdown/ChatMarkdownRender.js';
 import { URI } from '../../../../../../../base/common/uri.js';
-import { IDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { ErrorDisplay } from './ErrorDisplay.js';
 import { BlockCode, TextAreaFns, VoidCustomDropdownBox, VoidInputBox2, VoidSlider, VoidSwitch, VoidDiffEditor } from '../util/inputs.js';
-import { ModelDropdown, } from '../void-settings-tsx/ModelDropdown.js';
+import { ModelDropdown } from '../void-settings-tsx/ModelDropdown.js';
 import { PastThreadsList } from './SidebarThreadSelector.js';
 import { VOID_CTRL_L_ACTION_ID } from '../../../actionIDs.js';
 import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
-import { ChatMode, displayInfoOfProviderName, FeatureName, isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
+import { ChatMode, FeatureName, isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '../../../../common/modelCapabilities.js';
 import { estimateTokens } from '../../../../common/tokenizer.js';
-import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text, Plus, FileText } from 'lucide-react';
+import { AlertTriangle, File, Ban, Check, ChevronRight, FileIcon, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { dataURLOfChatImage } from '../util/chatImages.js';
 import { useAttachChatFiles } from '../util/chatAttachments.js';
-import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName, LintErrorItem, ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js';
-import { CopyButton, EditToolAcceptRejectButtonsHTML, IconShell1, JumpToFileButton, JumpToTerminalButton, StatusIndicator, StatusIndicatorForApplyButton, useApplyStreamState, useEditToolStreamState } from '../markdown/ApplyBlockHoverButtons.js';
+import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName, LintErrorItem } from '../../../../common/toolsServiceTypes.js';
+import { CopyButton, EditToolAcceptRejectButtonsHTML, IconShell1, JumpToFileButton, JumpToTerminalButton, StatusIndicator, StatusIndicatorForApplyButton, useEditToolStreamState } from '../markdown/ApplyBlockHoverButtons.js';
 import { IsRunningType } from '../../../chatThreadService.js';
-import { acceptAllBg, acceptBorder, buttonFontSize, buttonTextColor, rejectAllBg, rejectBg, rejectBorder } from '../../../../common/helpers/colors.js';
-import { builtinToolNames, isABuiltinToolName, MAX_FILE_CHARS_PAGE, MAX_TERMINAL_INACTIVE_TIME } from '../../../../common/prompt/prompts.js';
+import { builtinToolNames, isABuiltinToolName, MAX_FILE_CHARS_PAGE } from '../../../../common/prompt/prompts.js';
 import { RawToolCallObj } from '../../../../common/sendLLMMessageTypes.js';
 import ErrorBoundary from './ErrorBoundary.js';
 import { ToolApprovalTypeSwitch } from '../void-settings-tsx/Settings.js';
@@ -294,8 +292,6 @@ const ChatModeDropdown = ({ className }: { className: string }) => {
 
 
 
-
-
 const formatTokenCount = (n: number): string => {
 	if (n < 1000) return `${n}`
 	if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
@@ -526,7 +522,6 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 
 
 
-
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement>
 const DEFAULT_BUTTON_SIZE = 22;
 export const ButtonSubmit = ({ className, disabled, ...props }: ButtonProps & Required<Pick<ButtonProps, 'disabled'>>) => {
@@ -698,7 +693,6 @@ export const SelectedFiles = (
 	const accessor = useAccessor()
 	const commandService = accessor.get('ICommandService')
 	const modelReferenceService = accessor.get('IVoidModelService')
-
 
 
 
@@ -1091,48 +1085,6 @@ const EditTool = ({ toolMessage, threadId, messageIdx, content }: Parameters<Res
 	return <ToolHeaderWrapper {...componentParams} />
 }
 
-const SimplifiedToolHeader = ({
-	title,
-	children,
-}: {
-	title: string;
-	children?: React.ReactNode;
-}) => {
-	const [isOpen, setIsOpen] = useState(false);
-	const isDropdown = children !== undefined;
-	return (
-		<div>
-			<div className="w-full">
-				{/* header */}
-				<div
-					className={`select-none flex items-center min-h-[24px] ${isDropdown ? 'cursor-pointer' : ''}`}
-					onClick={() => {
-						if (isDropdown) { setIsOpen(v => !v); }
-					}}
-				>
-					{isDropdown && (
-						<ChevronRight
-							className={`text-void-fg-3 mr-0.5 h-4 w-4 flex-shrink-0 transition-transform duration-100 ease-[cubic-bezier(0.4,0,0.2,1)] ${isOpen ? 'rotate-90' : ''}`}
-						/>
-					)}
-					<div className="flex items-center w-full overflow-hidden">
-						<span className="text-void-fg-3">{title}</span>
-					</div>
-				</div>
-				{/* children */}
-				{<div
-					className={`overflow-hidden transition-all duration-200 ease-in-out ${isOpen ? 'opacity-100' : 'max-h-0 opacity-0'} text-void-fg-4`}
-				>
-					{children}
-				</div>}
-			</div>
-		</div>
-	);
-};
-
-
-
-
 const UserMessageComponent = ({ chatMessage, messageIdx, isCheckpointGhost, currCheckpointIdx, _scrollToBottom }: { chatMessage: ChatMessage & { role: 'user' }, messageIdx: number, currCheckpointIdx: number | undefined, isCheckpointGhost: boolean, _scrollToBottom: (() => void) | null }) => {
 
 	const accessor = useAccessor()
@@ -1506,7 +1458,6 @@ const ReasoningWrapper = ({ isDoneReasoning, isStreaming, children }: { isDoneRe
 		</ToolChildrenWrapper>
 	</ToolHeaderWrapper>
 }
-
 
 
 
@@ -2890,15 +2841,6 @@ const CommandBarInChat = ({ messages }: { messages: ChatMessage[] }) => {
 	const commandBarState = useCommandBarState()
 	const chatThreadsStreamState = useChatThreadsStreamState(chatThreadsState.currentThreadId)
 
-	// (
-	// 	<IconShell1
-	// 		Icon={CopyIcon}
-	// 		onClick={copyChatToClipboard}
-	// 		data-tooltip-id='void-tooltip'
-	// 		data-tooltip-place='top'
-	// 		data-tooltip-content='Copy chat JSON'
-	// 	/>
-	// )
 
 	const [fileDetailsOpenedState, setFileDetailsOpenedState] = useState<'auto-opened' | 'auto-closed' | 'user-opened' | 'user-closed'>('auto-closed');
 	const isFileDetailsOpened = fileDetailsOpenedState === 'auto-opened' || fileDetailsOpenedState === 'user-opened';
@@ -2948,7 +2890,6 @@ const CommandBarInChat = ({ messages }: { messages: ChatMessage[] }) => {
 
 	const numFilesChangedStr = numFilesChanged === 0 ? 'No files with changes'
 		: `${sortedCommandBarURIs.length} file${numFilesChanged === 1 ? '' : 's'} with changes`
-
 
 
 
@@ -3023,7 +2964,6 @@ const CommandBarInChat = ({ messages }: { messages: ChatMessage[] }) => {
 				{/* <FileIcon size={14} className="text-void-fg-3" /> */}
 				<span className="text-void-fg-3">{basename}</span>
 			</div>
-
 
 
 
@@ -3271,7 +3211,6 @@ export const SidebarChat = () => {
 
 
 
-
 	const previousMessagesHTML = useMemo(() => {
 		// const lastMessageIdx = previousMessages.findLastIndex(v => v.role !== 'checkpoint')
 		// tool request shows up as Editing... if in progress
@@ -3460,19 +3399,6 @@ export const SidebarChat = () => {
 	</div>
 
 
-	// const threadPageContent = <div>
-	// 	{/* Thread content */}
-	// 	<div className='flex flex-col overflow-hidden'>
-	// 		<div className={`overflow-hidden ${previousMessages.length === 0 ? 'h-0 max-h-0 pb-2' : ''}`}>
-	// 			<ErrorBoundary>
-	// 				{messagesHTML}
-	// 			</ErrorBoundary>
-	// 		</div>
-	// 		<ErrorBoundary>
-	// 			{inputForm}
-	// 		</ErrorBoundary>
-	// 	</div>
-	// </div>
 	const threadPageContent = <div
 		ref={sidebarRef}
 		className='w-full h-full flex flex-col overflow-hidden'

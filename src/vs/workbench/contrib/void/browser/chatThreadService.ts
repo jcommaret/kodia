@@ -229,9 +229,6 @@ const newThreadObject = () => {
 
 
 
-
-
-
 export interface IChatThreadService {
 	readonly _serviceBrand: undefined;
 
@@ -312,9 +309,6 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 	readonly streamState: ThreadStreamState = {}
 	state: ThreadsState // allThreads is persisted, currentThread is not
 
-	// used in checkpointing
-	// private readonly _userModifiedFilesToCheckInCheckpoints = new LRUCache<string, null>(50)
-
 
 
 	constructor(
@@ -348,20 +342,6 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		this.openNewThread()
 
 
-		// keep track of user-modified files
-		// const disposablesOfModelId: { [modelId: string]: IDisposable[] } = {}
-		// this._register(
-		// 	this._modelService.onModelAdded(e => {
-		// 		if (!(e.id in disposablesOfModelId)) disposablesOfModelId[e.id] = []
-		// 		disposablesOfModelId[e.id].push(
-		// 			e.onDidChangeContent(() => { this._userModifiedFilesToCheckInCheckpoints.set(e.uri.fsPath, null) })
-		// 		)
-		// 	})
-		// )
-		// this._register(this._modelService.onModelRemoved(e => {
-		// 	if (!(e.id in disposablesOfModelId)) return
-		// 	disposablesOfModelId[e.id].forEach(d => d.dispose())
-		// }))
 
 	}
 
@@ -725,9 +705,6 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 
 
-
-
-
 		// 3. call the tool
 		// this._setStreamState(threadId, { isRunning: 'tool' }, 'merge')
 		const runningTool = { role: 'tool', type: 'running_now', name: toolName, params: toolParams, content: '(value not received yet...)', result: null, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName } as const
@@ -796,7 +773,6 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: toolResult, name: toolName, content: toolResultStr, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
 		return {}
 	};
-
 
 
 
@@ -1055,13 +1031,6 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			voidFileSnapshotOfURI[fsPath] = voidFileSnapshot
 		}
 
-		// // add a change for all user-edited files (that aren't in the history)
-		// for (const fsPath of this._userModifiedFilesToCheckInCheckpoints.keys()) {
-		// 	if (fsPath in lastIdxOfURI) continue // if already visisted, don't visit again
-		// 	const { model } = this._voidModelService.getModelFromFsPath(fsPath)
-		// 	if (!model) continue
-		// 	currStrOfFsPath[fsPath] = model.getValue(EndOfLinePreference.LF)
-		// }
 
 		return { voidFileSnapshotOfURI }
 	}
@@ -1584,44 +1553,6 @@ We only need to do it for files that were edited since `from`, ie files between 
 								displayText: _codespanStr,
 							};
 
-							// const defModelRef = await this._textModelService.createModelReference(definition.uri);
-							// const defModel = defModelRef.object.textEditorModel;
-
-							// try {
-							// 	const symbolProviders = this._languageFeaturesService.documentSymbolProvider.ordered(defModel);
-
-							// 	for (const symbolProvider of symbolProviders) {
-							// 		const symbols = await symbolProvider.provideDocumentSymbols(
-							// 			defModel,
-							// 			CancellationToken.None
-							// 		);
-
-							// 		if (symbols) {
-							// 			const symbol = symbols.find(s => {
-							// 				const symbolRange = s.range;
-							// 				return symbolRange.startLineNumber <= definition.range.startLineNumber &&
-							// 					symbolRange.endLineNumber >= definition.range.endLineNumber &&
-							// 					(symbolRange.startLineNumber !== definition.range.startLineNumber || symbolRange.startColumn <= definition.range.startColumn) &&
-							// 					(symbolRange.endLineNumber !== definition.range.endLineNumber || symbolRange.endColumn >= definition.range.endColumn);
-							// 			});
-
-							// 			// if we got to a class/function get the full range and return
-							// 			if (symbol?.kind === SymbolKind.Function || symbol?.kind === SymbolKind.Method || symbol?.kind === SymbolKind.Class) {
-							// 				return {
-							// 					uri: definition.uri,
-							// 					selection: {
-							// 						startLineNumber: definition.range.startLineNumber,
-							// 						startColumn: definition.range.startColumn,
-							// 						endLineNumber: definition.range.endLineNumber,
-							// 						endColumn: definition.range.endColumn,
-							// 					}
-							// 				};
-							// 			}
-							// 		}
-							// 	}
-							// } finally {
-							// 	defModelRef.dispose();
-							// }
 						}
 					}
 				}
@@ -1906,33 +1837,6 @@ We only need to do it for files that were edited since `from`, ie files between 
 		}, doNotRefreshMountInfo)
 
 	}
-
-
-	// closeCurrentStagingSelectionsInThread = () => {
-	// 	const currThread = this.getCurrentThreadState()
-
-	// 	// close all stagingSelections
-	// 	const closedStagingSelections = currThread.stagingSelections.map(s => ({ ...s, state: { ...s.state, isOpened: false } }))
-
-	// 	const newThread = currThread
-	// 	newThread.stagingSelections = closedStagingSelections
-
-	// 	this.setCurrentThreadState(newThread)
-
-	// }
-
-	// closeCurrentStagingSelectionsInMessage: IChatThreadService['closeCurrentStagingSelectionsInMessage'] = ({ messageIdx }) => {
-	// 	const currMessage = this.getCurrentMessageState(messageIdx)
-
-	// 	// close all stagingSelections
-	// 	const closedStagingSelections = currMessage.stagingSelections.map(s => ({ ...s, state: { ...s.state, isOpened: false } }))
-
-	// 	const newMessage = currMessage
-	// 	newMessage.stagingSelections = closedStagingSelections
-
-	// 	this.setCurrentMessageState(messageIdx, newMessage)
-
-	// }
 
 
 

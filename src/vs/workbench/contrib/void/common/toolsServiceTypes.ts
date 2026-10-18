@@ -107,7 +107,6 @@ export type ToolResult<T extends BuiltinToolName | (string & {})> = T extends Bu
 export type BuiltinToolName = keyof BuiltinToolResultType
 
 type BuiltinToolParamNameOfTool<T extends BuiltinToolName> = keyof (typeof builtinTools)[T]['params']
-export type BuiltinToolParamName = { [T in BuiltinToolName]: BuiltinToolParamNameOfTool<T> }[BuiltinToolName]
 
 
 export type ToolName = BuiltinToolName | (string & {})

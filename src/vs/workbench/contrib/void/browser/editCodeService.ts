@@ -275,25 +275,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 			.replace(/Backspace/g, '⌫');
 	}
 
-	// private _notifyError = (e: Parameters<OnError>[0]) => {
-	// 	const details = errorDetails(e.fullError)
-	// 	this._notificationService.notify({
-	// 		severity: Severity.Warning,
-	// 		message: `Kodia Error: ${e.message}`,
-	// 		actions: {
-	// 			secondary: [{
-	// 				id: 'void.onerror.opensettings',
-	// 				enabled: true,
-	// 				label: `Open Kodia's settings`,
-	// 				tooltip: '',
-	// 				class: undefined,
-	// 				run: () => { this._commandService.executeCommand(VOID_OPEN_SETTINGS_ACTION_ID) }
-	// 			}]
-	// 		},
-	// 		source: details ? `(Hold ${isMacintosh ? 'Option' : 'Alt'} to hover) - ${details}\n\nIf this persists, feel free to [report](https://github.com/jcommaret/kodia/issues/new) it.` : undefined
-	// 	})
-	// }
-
 
 
 	// highlight the region
@@ -614,7 +595,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 
 
-
 	private _getActiveEditorURI(): URI | null {
 		const editor = this._codeEditorService.getActiveCodeEditor()
 		if (!editor) return null
@@ -657,9 +637,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 		this._refreshStylesAndDiffsInURI(uri)
 	}
-
-
-
 
 
 
@@ -872,7 +849,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 
 
-
 	// changes the start/line locations of all DiffAreas on the page (adjust their start/end based on the change) based on the change that was recently made
 	private _realignAllDiffAreasLines(uri: URI, text: string, recentChange: { startLineNumber: number; endLineNumber: number }) {
 
@@ -967,7 +943,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 
 
-
 	// @throttle(100)
 	private _writeStreamedDiffZoneLLMText(uri: URI, originalCode: string, llmTextSoFar: string, deltaText: string, latestMutable: StreamLocationMutable) {
 
@@ -1046,7 +1021,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 
 
-
 	// called first, then call startApplying
 	public addCtrlKZone({ startLine, endLine, editor }: AddCtrlKOpts) {
 
@@ -1103,7 +1077,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		this._refreshStylesAndDiffsInURI(uri)
 		onFinishEdit()
 	}
-
 
 
 
@@ -1251,11 +1224,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 
 
-
-
-
-
-
 	private _startStreamingDiffZone({
 		uri,
 		startBehavior,
@@ -1333,7 +1301,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 		return { diffZone, onFinishEdit }
 	}
-
 
 
 
@@ -1631,7 +1598,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 
 
-
 		const replacements: { origStart: number; origEnd: number; block: ExtractedSearchReplaceBlock }[] = []
 		for (const b of blocks) {
 			const res = findTextInCode(b.orig, modelStr, true, { returnType: 'lines' })
@@ -1826,13 +1792,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 								}
 							}
 
-							// // starting line is at least the number of lines in the generated code minus 1
-							// const numLinesInOrig = numLinesOfStr(block.orig)
-							// const newLine = Math.max(numLinesInOrig - 1, 1, diffZone._streamState.line ?? 1)
-							// if (newLine !== diffZone._streamState.line) {
-							// 	diffZone._streamState.line = newLine
-							// 	this._refreshStylesAndDiffsInURI(uri)
-							// }
 
 
 							// must be done writing original to move on to writing streamed content
@@ -1897,11 +1856,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 							const [startLine, endLine] = convertOriginalRangeToFinalRange(originalBounds)
 
-							// console.log('---------adding-------')
-							// console.log('CURRENT TEXT!!!', { current: model?.getValue(EndOfLinePreference.LF) })
-							// console.log('block', deepClone(block))
-							// console.log('origBounds', originalBounds)
-							// console.log('start end', startLine, endLine)
 
 							// otherwise if no error, add the position as a diffarea
 							const adding: Omit<TrackingZone<SearchReplaceDiffAreaMetadata>, 'diffareaid'> = {
@@ -2070,16 +2024,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	}
 
 
-	// public removeDiffZone(diffZone: DiffZone, behavior: 'reject' | 'accept') {
-	// 	const uri = diffZone._URI
-	// 	const { onFinishEdit } = this._addToHistory(uri)
-
-	// 	if (behavior === 'reject') this._revertAndDeleteDiffZone(diffZone)
-	// 	else if (behavior === 'accept') this._deleteDiffZone(diffZone)
-
-	// 	this._refreshStylesAndDiffsInURI(uri)
-	// 	onFinishEdit()
-	// }
 
 	private _revertDiffZone(diffZone: DiffZone) {
 		const uri = diffZone._URI
@@ -2284,7 +2228,6 @@ registerSingleton(IEditCodeService, EditCodeService, InstantiationType.Eager);
 
 
 
-
 class AcceptRejectInlineWidget extends Widget implements IOverlayWidget {
 
 	public getId(): string {
@@ -2464,8 +2407,5 @@ class AcceptRejectInlineWidget extends Widget implements IOverlayWidget {
 	}
 
 }
-
-
-
 
 

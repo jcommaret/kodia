@@ -3,9 +3,8 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import React, { forwardRef, ForwardRefExoticComponent, MutableRefObject, RefAttributes, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { IInputBoxStyles, InputBox } from '../../../../../../../base/browser/ui/inputbox/inputBox.js';
-import { defaultCheckboxStyles, defaultInputBoxStyles, defaultSelectBoxStyles } from '../../../../../../../platform/theme/browser/defaultStyles.js';
+import React, { forwardRef, ForwardRefExoticComponent, RefAttributes, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { defaultCheckboxStyles, defaultSelectBoxStyles } from '../../../../../../../platform/theme/browser/defaultStyles.js';
 import { SelectBox } from '../../../../../../../base/browser/ui/selectBox/selectBox.js';
 import { IDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { Checkbox } from '../../../../../../../base/browser/ui/toggle/toggle.js';
@@ -15,16 +14,14 @@ import { useAccessor } from './services.js';
 import { ITextModel } from '../../../../../../../editor/common/model.js';
 import { asCssVariable } from '../../../../../../../platform/theme/common/colorUtils.js';
 import { inputBackground, inputForeground } from '../../../../../../../platform/theme/common/colorRegistry.js';
-import { useFloating, autoUpdate, offset, flip, shift, size, autoPlacement } from '@floating-ui/react';
+import { useFloating, autoUpdate, offset, flip, shift, size } from '@floating-ui/react';
 import { URI } from '../../../../../../../base/common/uri.js';
-import { getBasename, getFolderName } from '../sidebar-tsx/SidebarChat.js';
-import { ChevronRight, File, Folder, FolderClosed, LucideProps } from 'lucide-react';
+import { getBasename } from '../sidebar-tsx/SidebarChat.js';
+import { ChevronRight, File, Folder, LucideProps } from 'lucide-react';
 import { StagingSelectionItem } from '../../../../common/chatThreadServiceTypes.js';
 import { useAttachChatFiles } from './chatAttachments.js';
 import { DiffEditorWidget } from '../../../../../../../editor/browser/widget/diffEditor/diffEditorWidget.js';
 import { extractSearchReplaceBlocks, ExtractedSearchReplaceBlock } from '../../../../common/helpers/extractCodeFromResult.js';
-import { IAccessibilitySignalService } from '../../../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
-import { IEditorProgressService } from '../../../../../../../platform/progress/common/progress.js';
 import { detectLanguage } from '../../../../common/helpers/languageHelpers.js';
 
 
@@ -755,7 +752,6 @@ export const VoidInputBox2 = forwardRef<HTMLTextAreaElement, InputBox2Props>(fun
 
 
 
-
 	return <>
 		<textarea
 			autoFocus={false}
@@ -969,68 +965,6 @@ export const VoidSimpleInputBox = ({ value, onChangeValue, placeholder, classNam
 };
 
 
-export const VoidInputBox = ({ onChangeText, onCreateInstance, inputBoxRef, placeholder, isPasswordField, multiline }: {
-	onChangeText: (value: string) => void;
-	styles?: Partial<IInputBoxStyles>,
-	onCreateInstance?: (instance: InputBox) => void | IDisposable[];
-	inputBoxRef?: { current: InputBox | null };
-	placeholder: string;
-	isPasswordField?: boolean;
-	multiline: boolean;
-}) => {
-
-	const accessor = useAccessor()
-
-	const contextViewProvider = accessor.get('IContextViewService')
-	return <WidgetComponent
-		className='
-			bg-void-bg-1
-			@@void-force-child-placeholder-void-fg-1
-		'
-		ctor={InputBox}
-		propsFn={useCallback((container) => [
-			container,
-			contextViewProvider,
-			{
-				inputBoxStyles: {
-					...defaultInputBoxStyles,
-					inputForeground: "var(--vscode-foreground)",
-					// inputBackground: 'transparent',
-					// inputBorder: 'none',
-				},
-				placeholder,
-				tooltip: '',
-				type: isPasswordField ? 'password' : undefined,
-				flexibleHeight: multiline,
-				flexibleMaxHeight: 500,
-				flexibleWidth: false,
-			}
-		] as const, [contextViewProvider, placeholder, multiline])}
-		dispose={useCallback((instance: InputBox) => {
-			instance.dispose()
-			instance.element.remove()
-		}, [])}
-		onCreateInstance={useCallback((instance: InputBox) => {
-			const disposables: IDisposable[] = []
-			disposables.push(
-				instance.onDidChange((newText) => onChangeText(newText))
-			)
-			if (onCreateInstance) {
-				const ds = onCreateInstance(instance) ?? []
-				disposables.push(...ds)
-			}
-			if (inputBoxRef)
-				inputBoxRef.current = instance;
-
-			return disposables
-		}, [onChangeText, onCreateInstance, inputBoxRef])}
-	/>
-};
-
-
-
-
-
 export const VoidSlider = ({
 	value,
 	onChange,
@@ -1239,8 +1173,6 @@ export const VoidSwitch = ({
 		</label>
 	);
 };
-
-
 
 
 
@@ -1750,128 +1682,6 @@ export const VoidButtonBgDarken = ({ children, disabled, onClick, className }: {
 	>{children}</button>
 }
 
-// export const VoidScrollableElt = ({ options, children }: { options: ScrollableElementCreationOptions, children: React.ReactNode }) => {
-// 	const instanceRef = useRef<DomScrollableElement | null>(null);
-// 	const [childrenPortal, setChildrenPortal] = useState<React.ReactNode | null>(null)
-
-// 	return <>
-// 		<WidgetComponent
-// 			ctor={DomScrollableElement}
-// 			propsFn={useCallback((container) => {
-// 				return [container, options] as const;
-// 			}, [options])}
-// 			onCreateInstance={useCallback((instance: DomScrollableElement) => {
-// 				instanceRef.current = instance;
-// 				setChildrenPortal(createPortal(children, instance.getDomNode()))
-// 				return []
-// 			}, [setChildrenPortal, children])}
-// 			dispose={useCallback((instance: DomScrollableElement) => {
-// 				console.log('calling dispose!!!!')
-// 				// instance.dispose();
-// 				// instance.getDomNode().remove()
-// 			}, [])}
-// 		>{children}</WidgetComponent>
-
-// 		{childrenPortal}
-
-// 	</>
-// }
-
-// export const VoidSelectBox = <T,>({ onChangeSelection, initVal, selectBoxRef, options }: {
-// 	initVal: T;
-// 	selectBoxRef: React.MutableRefObject<SelectBox | null>;
-// 	options: readonly { text: string, value: T }[];
-// 	onChangeSelection: (value: T) => void;
-// }) => {
-
-
-// 	return <WidgetComponent
-// 		ctor={DropdownMenu}
-// 		propsFn={useCallback((container) => {
-// 			return [
-// 				container, {
-// 					contextMenuProvider,
-// 					actions: options.map(({ text, value }, i) => ({
-// 						id: i + '',
-// 						label: text,
-// 						tooltip: text,
-// 						class: undefined,
-// 						enabled: true,
-// 						run: () => {
-// 							onChangeSelection(value);
-// 						},
-// 					}))
-
-// 				}] as const;
-// 		}, [options, initVal, contextViewProvider])}
-
-// 		dispose={useCallback((instance: DropdownMenu) => {
-// 			instance.dispose();
-// 			// instance.element.remove()
-// 		}, [])}
-
-// 		onCreateInstance={useCallback((instance: DropdownMenu) => {
-// 			return []
-// 		}, [])}
-
-// 	/>;
-// };
-
-
-
-
-// export const VoidCheckBox = ({ onChangeChecked, initVal, label, checkboxRef, }: {
-// 	onChangeChecked: (checked: boolean) => void;
-// 	initVal: boolean;
-// 	checkboxRef: React.MutableRefObject<ObjectSettingCheckboxWidget | null>;
-// 	label: string;
-// }) => {
-// 	const containerRef = useRef<HTMLDivElement>(null);
-
-
-// 	useEffect(() => {
-// 		if (!containerRef.current) return;
-
-// 		// Create and mount the Checkbox using VSCode's implementation
-
-// 		checkboxRef.current = new ObjectSettingCheckboxWidget(
-// 			containerRef.current,
-// 			themeService,
-// 			contextViewService,
-// 			hoverService,
-// 		);
-
-
-// 		checkboxRef.current.setValue([{
-// 			key: { type: 'string', data: label },
-// 			value: { type: 'boolean', data: initVal },
-// 			removable: false,
-// 			resetable: true,
-// 		}])
-
-// 		checkboxRef.current.onDidChangeList((list) => {
-// 			onChangeChecked(!!list);
-// 		})
-
-
-// 		// cleanup
-// 		return () => {
-// 			if (checkboxRef.current) {
-// 				checkboxRef.current.dispose();
-// 				if (containerRef.current) {
-// 					while (containerRef.current.firstChild) {
-// 						containerRef.current.removeChild(containerRef.current.firstChild);
-// 					}
-// 				}
-// 				checkboxRef.current = null;
-// 			}
-// 		};
-// 	}, [checkboxRef, label, initVal, onChangeChecked]);
-
-// 	return <div ref={containerRef} className="w-full" />;
-// };
-
-
 
 
 const SingleDiffEditor = ({ block, lang }: { block: ExtractedSearchReplaceBlock, lang: string | undefined }) => {
@@ -1975,8 +1785,6 @@ const SingleDiffEditor = ({ block, lang }: { block: ExtractedSearchReplaceBlock,
 		<div className="w-full bg-void-bg-3 @@bg-editor-style-override" ref={divRef} />
 	);
 };
-
-
 
 
 

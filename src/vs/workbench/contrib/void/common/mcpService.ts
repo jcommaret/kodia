@@ -330,31 +330,6 @@ class MCPService extends Disposable implements IMCPService {
 		return { result };
 	}
 
-	// public getMCPToolFns(): MCPToolResultType {
-	// 	const tools = this.getMCPTools();
-	// 	const toolFns: MCPToolResultType = {};
-
-	// 	tools.forEach((tool) => {
-	// 		const name = tool.name;
-	// 		// Define the tool call function
-	// 		const toolFn = async (params: {
-	// 			serverName: string,
-	// 			toolName: string,
-	// 			args: any
-	// 		}) => {
-	// 			const { serverName, toolName, args } = params;
-	// 			const response = await this.callMCPTool({
-	// 				serverName,
-	// 				toolName,
-	// 				params: args,
-	// 			});
-	// 			return { result: response }
-	// 		};
-	// 		toolFns[name] = toolFn;
-	// 	});
-
-	// 	return toolFns
-	// }
 }
 
 registerSingleton(IMCPService, MCPService, InstantiationType.Eager);

@@ -493,7 +493,6 @@ export const defaultGlobalSettings: GlobalSettings = {
 }
 
 export type GlobalSettingName = keyof GlobalSettings
-export const globalSettingNames = Object.keys(defaultGlobalSettings) as GlobalSettingName[]
 
 
 

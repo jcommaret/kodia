@@ -33,19 +33,13 @@ Bugs and ideas go in [Issues](https://github.com/jcommaret/kodia/issues).
    ```
    The first `npm install` takes a while. It also installs the git hooks.
 
-2. Build the React UI (the sidebar, settings and other React views):
-   ```bash
-   npm run buildreact
-   ```
-   If you're working on the React code, run `npm run watchreact` in a separate terminal instead; it rebuilds on every change.
+2. Compile, and keep compiling as you edit. Either:
+   - press <kbd>Cmd+Shift+B</kbd> (<kbd>Ctrl+Shift+B</kbd> on Windows and Linux) in VS Code or Kodia, opened on this folder. This starts the watchers for the workbench, the extensions and the React UI (the sidebar, settings and other React views). **Kill VS Code - Build** in **Run Task** stops them.
+   - or, in a terminal, build the React UI with `npm run buildreact`, then run `npm run watch`. When you work on the React code, also keep `npm run watchreact` running in another terminal; it rebuilds the UI on every change.
 
-3. Compile the rest and keep it compiling as you edit. Either:
-   - press <kbd>Cmd+Shift+B</kbd> (<kbd>Ctrl+Shift+B</kbd> on Windows and Linux) in VS Code or Kodia, opened on this folder;
-   - or run `npm run watch` in a terminal.
+   The first build takes a few minutes. The workbench is ready when the watchers report `Finished compilation`.
 
-   The first build takes a few minutes. It's ready when the watchers report `Finished compilation`.
-
-4. Start Kodia:
+3. Start Kodia:
    - macOS and Linux: `./scripts/code.sh`
    - Windows: `./scripts/code.bat`
 
@@ -53,7 +47,7 @@ Bugs and ideas go in [Issues](https://github.com/jcommaret/kodia/issues).
    - `--user-data-dir ./.tmp/user-data --extensions-dir ./.tmp/extensions` uses a throwaway profile, reset by deleting `.tmp`.
    - `--agents` opens the Agents window.
 
-5. After a change, reload the window with <kbd>Cmd+R</kbd> (<kbd>Ctrl+R</kbd>), or run **Reload Window** from the command palette.
+4. After a change, reload the window with <kbd>Cmd+R</kbd> (<kbd>Ctrl+R</kbd>), or run **Reload Window** from the command palette.
 
 ### Common problems
 

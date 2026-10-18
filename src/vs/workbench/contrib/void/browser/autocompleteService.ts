@@ -18,7 +18,6 @@ import { isWindows } from '../../../../base/common/platform.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { FeatureName } from '../common/voidSettingsTypes.js';
 import { IConvertToLLMMessageService } from './convertToLLMMessageService.js';
-// import { IContextGatheringService } from './contextGatheringService.js';
 
 
 
@@ -332,21 +331,6 @@ const postprocessAutocompletion = ({ autocompletionMatchup, autocompletion, pref
 		}
 	}
 
-	// // if a generated line matches with a suffix line, stop
-	// if (suffixLines.length > 1) {
-	// 	console.log('4')
-	// 	const lines = []
-	// 	for (const generatedLine of generatedLines) {
-	// 		if (suffixLines.slice(0, 10).some(suffixLine =>
-	// 			generatedLine.trim() !== '' && suffixLine.trim() !== ''
-	// 			&& generatedLine.trim().startsWith(suffixLine.trim())
-	// 		)) break;
-	// 		lines.push(generatedLine)
-	// 	}
-	// 	endIdx = lines.join('\n').length // this is hacky, remove or refactor in future
-	// }
-
-	// console.log('pFinal', startIdx, endIdx)
 	let completionStr = generatedMiddle.slice(startIdx, endIdx)
 
 	// filter out unbalanced parentheses
@@ -397,26 +381,6 @@ const toInlineCompletions = ({ autocompletionMatchup, autocompletion, prefixAndS
 
 }
 
-
-
-
-
-// returns whether this autocompletion is in the cache
-// const doesPrefixMatchAutocompletion = ({ prefix, autocompletion }: { prefix: string, autocompletion: Autocompletion }): boolean => {
-
-// 	const originalPrefix = autocompletion.prefix
-// 	const generatedMiddle = autocompletion.result
-// 	const originalPrefixTrimmed = trimPrefix(originalPrefix)
-// 	const currentPrefixTrimmed = trimPrefix(prefix)
-
-// 	if (currentPrefixTrimmed.length < originalPrefixTrimmed.length) {
-// 		return false
-// 	}
-
-// 	const isMatch = (originalPrefixTrimmed + generatedMiddle).startsWith(currentPrefixTrimmed)
-// 	return isMatch
-
-// }
 
 
 type PrefixAndSuffixInfo = { prefix: string, suffix: string, prefixLines: string[], suffixLines: string[], prefixToTheLeftOfCursor: string, suffixToTheRightOfCursor: string }
@@ -750,11 +714,6 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 		}
 
 
-		// gather relevant context from the code around the user's selection and definitions
-		// const relevantSnippetsList = await this._contextGatheringService.readCachedSnippets(model, position, 3);
-		// const relevantSnippetsList = this._contextGatheringService.getCachedSnippets();
-		// const relevantSnippets = relevantSnippetsList.map((text) => `${text}`).join('\n-------------------------------\n')
-		// console.log('@@---------------------\n' + relevantSnippets)
 		const relevantContext = ''
 
 		const { shouldGenerate, predictionType, llmPrefix, llmSuffix, stopTokens } = getCompletionOptions(prefixAndSuffix, relevantContext, justAcceptedAutocompletion)
@@ -809,26 +768,6 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 				overridesOfModel,
 				logging: { loggingName: 'Autocomplete' },
 				onText: () => { }, // unused in FIMMessage
-				// onText: async ({ fullText, newText }) => {
-
-				// 	newAutocompletion.insertText = fullText
-
-				// 	// count newlines in newText
-				// 	const numNewlines = newText.match(/\n|\r\n/g)?.length || 0
-				// 	newAutocompletion._newlineCount += numNewlines
-
-				// 	// if too many newlines, resolve up to last newline
-				// 	if (newAutocompletion._newlineCount > 10) {
-				// 		const lastNewlinePos = fullText.lastIndexOf('\n')
-				// 		newAutocompletion.insertText = fullText.substring(0, lastNewlinePos)
-				// 		resolve(newAutocompletion.insertText)
-				// 		return
-				// 	}
-
-				// 	// if (!getAutocompletionMatchup({ prefix: this._lastPrefix, autocompletion: newAutocompletion })) {
-				// 	// 	reject('LLM response did not match user\'s text.')
-				// 	// }
-				// },
 				onFinalMessage: ({ fullText }) => {
 
 					// console.log('____res: ', JSON.stringify(newAutocompletion.insertText))
@@ -891,7 +830,6 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 		@ILLMMessageService private readonly _llmMessageService: ILLMMessageService,
 		@IVoidSettingsService private readonly _settingsService: IVoidSettingsService,
 		@IConvertToLLMMessageService private readonly _convertToLLMMessageService: IConvertToLLMMessageService
-		// @IContextGatheringService private readonly _contextGatheringService: IContextGatheringService,
 	) {
 		super()
 

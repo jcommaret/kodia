@@ -4,14 +4,14 @@
  *--------------------------------------------------------------------------------------*/
 
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
-import { useAccessor, useChatThreadsState, useChatThreadsStreamState, useCommandBarState, useCommandBarURIListener, useSettingsState } from '../util/services.js'
-import { usePromise, useRefState } from '../util/helpers.js'
+import { useAccessor, useChatThreadsStreamState, useCommandBarURIListener, useSettingsState } from '../util/services.js'
+import { useRefState } from '../util/helpers.js'
 import { isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js'
 import { URI } from '../../../../../../../base/common/uri.js'
-import { FileSymlink, LucideIcon, RotateCw, Terminal } from 'lucide-react'
-import { Check, X, Square, Copy, Play, } from 'lucide-react'
+import { FileSymlink, LucideIcon, Terminal } from 'lucide-react'
+import { Check, X, Square, Copy, Play } from 'lucide-react'
 import { getBasename, ListableToolItem, voidOpenFileFn, ToolChildrenWrapper } from '../sidebar-tsx/SidebarChat.js'
-import { PlacesType, VariantType } from 'react-tooltip'
+import { PlacesType } from 'react-tooltip'
 
 enum CopyButtonText {
 	Idle = 'Copy',
@@ -50,23 +50,6 @@ export const IconShell1 = ({ onClick, Icon, disabled, className, ...props }: Ico
 }
 
 
-// export const IconShell2 = ({ onClick, title, Icon, disabled, className }: IconButtonProps) => (
-// 	<button
-// 		title={title}
-// 		disabled={disabled}
-// 		onClick={onClick}
-// 		className={`
-//             size-[24px]
-//             flex items-center justify-center
-//             text-sm
-//             hover:opacity-80
-//             disabled:opacity-50 disabled:cursor-not-allowed
-//             ${className}
-//         `}
-// 	>
-// 		<Icon size={16} />
-// 	</button>
-// )
 
 const COPY_FEEDBACK_TIMEOUT = 1500 // amount of time to say 'Copied!'
 
@@ -97,7 +80,6 @@ export const CopyButton = ({ codeStr, toolTipName }: { codeStr: string | (() => 
 		{...tooltipPropsForApplyBlock({ tooltipName: toolTipName })}
 	/>
 }
-
 
 
 
@@ -421,8 +403,6 @@ const ApplyButtonsForEdit = ({
 
 
 
-
-
 export const ApplyButtonsHTML = (params: {
 	codeStr: string,
 	applyBoxId: string,
@@ -439,8 +419,6 @@ export const ApplyButtonsHTML = (params: {
 		return <ApplyButtonsForEdit {...params} />
 	}
 }
-
-
 
 
 

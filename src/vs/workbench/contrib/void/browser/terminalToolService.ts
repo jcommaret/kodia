@@ -43,15 +43,6 @@ export const ITerminalToolService = createDecorator<ITerminalToolService>('Termi
 
 
 
-// function isCommandComplete(output: string) {
-// 	// https://code.visualstudio.com/docs/terminal/shell-integration#_vs-code-custom-sequences-osc-633-st
-// 	const completionMatch = output.match(/\]633;D(?:;(\d+))?/)
-// 	if (!completionMatch) { return false }
-// 	if (completionMatch[1] !== undefined) return { exitCode: parseInt(completionMatch[1]) }
-// 	return { exitCode: 0 }
-// }
-
-
 export const persistentTerminalNameOfId = (id: string) => {
 	if (id === '1') return 'Kodia Agent'
 	return `Kodia Agent (${id})`
@@ -143,20 +134,6 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 
 		const terminal = await this.terminalService.createTerminal(options)
 
-		// // when a new terminal is created, there is an initial command that gets run which is empty, wait for it to end before returning
-		// const disposables: IDisposable[] = []
-		// const waitForMount = new Promise<void>(res => {
-		// 	let data = ''
-		// 	const d = terminal.onData(newData => {
-		// 		data += newData
-		// 		if (isCommandComplete(data)) { res() }
-		// 	})
-		// 	disposables.push(d)
-		// })
-		// const waitForTimeout = new Promise<void>(res => { setTimeout(() => { res() }, 5000) })
-
-		// await Promise.any([waitForMount, waitForTimeout,])
-		// disposables.forEach(d => d.dispose())
 
 		return terminal
 
@@ -205,7 +182,6 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 		this.terminalService.setActiveInstance(terminal)
 		await this.terminalService.focusActiveInstance()
 	}
-
 
 
 

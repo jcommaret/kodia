@@ -4,14 +4,13 @@
  *--------------------------------------------------------------------------------------*/
 
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'; // Added useRef import just in case it was missed, though likely already present
-import { ProviderName, SettingName, displayInfoOfSettingName, providerNames, VoidStatefulModelInfo, customSettingNamesOfProvider, RefreshableProviderName, refreshableProviderNames, displayInfoOfProviderName, nonlocalProviderNames, localProviderNames, ollamaProviderNames, mlxProviderNames, otherLocalProviderNames, GlobalSettingName, featureNames, displayInfoOfFeatureName, isProviderNameDisabled, FeatureName, hasDownloadButtonsOnModelsProviderNames, subTextMdOfProviderName } from '../../../../common/voidSettingsTypes.js'
+import { ProviderName, SettingName, displayInfoOfSettingName, providerNames, VoidStatefulModelInfo, customSettingNamesOfProvider, RefreshableProviderName, refreshableProviderNames, displayInfoOfProviderName, nonlocalProviderNames, ollamaProviderNames, mlxProviderNames, otherLocalProviderNames, GlobalSettingName, displayInfoOfFeatureName, isProviderNameDisabled, subTextMdOfProviderName } from '../../../../common/voidSettingsTypes.js'
 import { os } from '../../../../common/helpers/systemInfo.js'
 import { KODIA_REPO_URL } from '../../../../common/kodiaLinks.js'
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
 import { VoidButtonBgDarken, VoidCustomDropdownBox, VoidInputBox2, VoidSimpleInputBox, VoidSwitch } from '../util/inputs.js'
 import { useAccessor, useIsDark, useIsOptedOut, useRefreshModelListener, useRefreshModelState, useSettingsState } from '../util/services.js'
 import { X, RefreshCw, Loader2, Check, Asterisk, Plus } from 'lucide-react'
-import { URI } from '../../../../../../../base/common/uri.js'
 import { ModelDropdown } from './ModelDropdown.js'
 import { ChatMarkdownRender } from '../markdown/ChatMarkdownRender.js'
 import { WarningBox } from './WarningBox.js'
@@ -19,7 +18,7 @@ import { IconLoading } from '../sidebar-tsx/SidebarChat.js'
 import { ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js'
 import Severity from '../../../../../../../base/common/severity.js'
 import { getModelCapabilities, modelOverrideKeys, ModelOverrides } from '../../../../common/modelCapabilities.js';
-import { TransferEditorType, TransferFilesInfo } from '../../../extensionTransferTypes.js';
+import { TransferEditorType } from '../../../extensionTransferTypes.js';
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { useMCPServiceState } from '../util/services.js';
 import { OPT_OUT_KEY } from '../../../../common/storageKeys.js';
@@ -376,7 +375,6 @@ const SimpleModelSettingsDialog = ({
 
 
 
-
 export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderName[] }) => {
 	const accessor = useAccessor()
 	const settingsStateService = accessor.get('IVoidSettingsService')
@@ -651,50 +649,6 @@ const ProviderSetting = ({ providerName, settingName, subTextMd }: { providerNam
 	</ErrorBoundary>
 }
 
-// const OldSettingsForProvider = ({ providerName, showProviderTitle }: { providerName: ProviderName, showProviderTitle: boolean }) => {
-// 	const voidSettingsState = useSettingsState()
-
-// 	const needsModel = isProviderNameDisabled(providerName, voidSettingsState) === 'addModel'
-
-// 	// const accessor = useAccessor()
-// 	// const voidSettingsService = accessor.get('IVoidSettingsService')
-
-// 	// const { enabled } = voidSettingsState.settingsOfProvider[providerName]
-// 	const settingNames = customSettingNamesOfProvider(providerName)
-
-// 	const { title: providerTitle } = displayInfoOfProviderName(providerName)
-
-// 	return <div className='my-4'>
-
-// 		<div className='flex items-center w-full gap-4'>
-// 			{showProviderTitle && <h3 className='text-xl truncate'>{providerTitle}</h3>}
-
-// 			{/* enable provider switch */}
-// 			{/* <VoidSwitch
-// 				value={!!enabled}
-// 				onChange={
-// 					useCallback(() => {
-// 						const enabledRef = voidSettingsService.state.settingsOfProvider[providerName].enabled
-// 						voidSettingsService.setSettingOfProvider(providerName, 'enabled', !enabledRef)
-// 					}, [voidSettingsService, providerName])}
-// 				size='sm+'
-// 			/> */}
-// 		</div>
-
-// 		<div className='px-0'>
-// 			{/* settings besides models (e.g. api key) */}
-// 			{settingNames.map((settingName, i) => {
-// 				return <ProviderSetting key={settingName} providerName={providerName} settingName={settingName} />
-// 			})}
-
-// 			{needsModel ?
-// 				providerName === 'ollama' ?
-// 					<WarningBox text={`Please install an Ollama model. We'll auto-detect it.`} />
-// 					: <WarningBox text={`Please add a model for ${providerTitle} (Models section).`} />
-// 				: null}
-// 		</div>
-// 	</div >
-// }
 
 
 export const SettingsForProvider = ({ providerName, showProviderTitle, showProviderSuggestions }: { providerName: ProviderName, showProviderTitle: boolean, showProviderSuggestions: boolean }) => {
@@ -915,10 +869,6 @@ const RedoOnboardingButton = ({ className }: { className?: string }) => {
 	</div>
 
 }
-
-
-
-
 
 
 
@@ -1412,7 +1362,6 @@ export const Settings = () => {
 
 
 
-
 										{/* Tools Section */}
 										<div>
 											<h4 className={`text-base`}>Tools</h4>
@@ -1733,8 +1682,6 @@ Use Model Context Protocol to provide Agent mode with more tools.
 									</ErrorBoundary>
 								</ErrorBoundary>
 							</div>
-
-
 
 
 

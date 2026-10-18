@@ -3,11 +3,10 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { useMemo, useState } from 'react';
-import { CopyButton, IconShell1 } from '../markdown/ApplyBlockHoverButtons.js';
-import { useAccessor, useChatThreadsState, useChatThreadsStreamState, useFullChatThreadsStreamState, useSettingsState } from '../util/services.js';
-import { IconX } from './SidebarChat.js';
-import { Check, Copy, Icon, LoaderCircle, MessageCircleQuestion, Trash2, UserCheck, X } from 'lucide-react';
+import { useState } from 'react';
+import { IconShell1 } from '../markdown/ApplyBlockHoverButtons.js';
+import { useAccessor, useChatThreadsState, useFullChatThreadsStreamState } from '../util/services.js';
+import { Check, Copy, Icon, LoaderCircle, MessageCircleQuestion, Trash2, X } from 'lucide-react';
 import { IsRunningType, ThreadType } from '../../../chatThreadService.js';
 
 
@@ -84,8 +83,6 @@ export const PastThreadsList = ({ className = '' }: { className?: string }) => {
 		</div>
 	);
 };
-
-
 
 
 
@@ -182,30 +179,6 @@ const PastThreadElement = ({ pastThread, idx, hoveredIdx, setHoveredIdx, isRunni
 	const accessor = useAccessor()
 	const chatThreadsService = accessor.get('IChatThreadService')
 
-	// const settingsState = useSettingsState()
-	// const convertService = accessor.get('IConvertToLLMMessageService')
-	// const chatMode = settingsState.globalSettings.chatMode
-	// const modelSelection = settingsState.modelSelectionOfFeature?.Chat ?? null
-	// const copyChatButton = <CopyButton
-	// 	codeStr={async () => {
-	// 		const { messages } = await convertService.prepareLLMChatMessages({
-	// 			chatMessages: currentThread.messages,
-	// 			chatMode,
-	// 			modelSelection,
-	// 		})
-	// 		return JSON.stringify(messages, null, 2)
-	// 	}}
-	// 	toolTipName={modelSelection === null ? 'Copy As Messages Payload' : `Copy As ${displayInfoOfProviderName(modelSelection.providerName).title} Payload`}
-	// />
-
-
-	// const currentThread = chatThreadsService.getCurrentThread()
-	// const copyChatButton2 = <CopyButton
-	// 	codeStr={async () => {
-	// 		return JSON.stringify(currentThread.messages, null, 2)
-	// 	}}
-	// 	toolTipName={`Copy As Kodia Chat`}
-	// />
 
 	let firstMsg = null;
 	const firstUserMsgIdx = pastThread.messages.findIndex((msg) => msg.role === 'user');

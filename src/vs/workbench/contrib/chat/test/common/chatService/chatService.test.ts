@@ -1509,6 +1509,28 @@ suite('ChatService', () => {
 		});
 	});
 
+	// Kodia ships without the Copilot extension, so there is no default agent.
+	test('sendRequest addressed to a session agent does not need a default agent', async () => {
+		const sessionAgentId = 'sessionAgent';
+		const invokedAgentIds: string[] = [];
+		testDisposables.add(chatAgentService.registerAgent(sessionAgentId, getAgentData(sessionAgentId)));
+		testDisposables.add(chatAgentService.registerAgentImplementation(sessionAgentId, {
+			async invoke(request) {
+				invokedAgentIds.push(request.agentId);
+				return {};
+			},
+		}));
+		instantiationService.stub(IChatAgentService, 'getDefaultAgent', () => undefined);
+
+		const testService = createChatService();
+		const modelRef = testDisposables.add(startSessionModel(testService));
+		const response = await testService.sendRequest(modelRef.object.sessionResource, 'hello', { agentIdSilent: sessionAgentId });
+		ChatSendResult.assertSent(response);
+		await response.data.responseCompletePromise;
+
+		assert.deepStrictEqual(invokedAgentIds, [sessionAgentId]);
+	});
+
 	test('cancelCurrentRequestForSession waits for response completion', async () => {
 		const requestStarted = new DeferredPromise<void>();
 		const completeRequest = new DeferredPromise<void>();
@@ -1992,6 +2014,9 @@ suite('ChatService', () => {
 
 				if (reject) {
 					instantiationService.stub(IChatAgentService, 'getDefaultAgent', () => undefined);
+					// Kodia: a request addressed to the session's own agent is sent without a default
+					// agent, so the session agent must be missing too for the resend to be rejected.
+					instantiationService.stub(IChatAgentService, 'getAgent', () => undefined);
 				}
 				await service.sendPendingRequestImmediately(sessionResource, pending.request.id);
 				if (reject) {

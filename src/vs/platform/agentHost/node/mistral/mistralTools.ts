@@ -108,6 +108,50 @@ export function isMutatingTool(name: string): boolean {
 	return name === 'write_file' || name === 'run_bash';
 }
 
+function toolRoot(workingDirectory: URI | undefined): string {
+	return workingDirectory?.fsPath ?? process.cwd();
+}
+
+function resolveToolPath(p: unknown, root: string): string {
+	const s = typeof p === 'string' ? p : '';
+	return path.isAbsolute(s) ? s : path.join(root, s);
+}
+
+/** What the host shows, and checks against its approval rules, before a tool call runs. */
+export interface IMistralToolCallDescription {
+	readonly invocationMessage: string;
+	/** The bare command for `run_bash`, so terminal approval rules apply to it; the JSON arguments otherwise. */
+	readonly toolInput: string;
+	/** Absolute path a file tool acts on. */
+	readonly path?: string;
+}
+
+export function describeMistralToolCall(name: string, argsJson: string, workingDirectory: URI | undefined): IMistralToolCallDescription {
+	let args: Record<string, unknown> = {};
+	try {
+		args = argsJson ? JSON.parse(argsJson) : {};
+	} catch {
+		// Described as-is; executeMistralTool reports the invalid arguments.
+	}
+	const root = toolRoot(workingDirectory);
+	switch (name) {
+		case 'run_bash': {
+			const command = typeof args.command === 'string' ? args.command : '';
+			return { invocationMessage: command || toolDisplayName(name), toolInput: command || argsJson };
+		}
+		case 'read_file':
+		case 'write_file':
+		case 'list_dir': {
+			const target = resolveToolPath(args.path ?? (name === 'list_dir' ? '.' : ''), root);
+			const shown = path.relative(root, target) || '.';
+			const verb = name === 'read_file' ? 'Read' : name === 'write_file' ? 'Write' : 'List';
+			return { invocationMessage: `${verb} ${shown}`, toolInput: argsJson, path: target };
+		}
+		default:
+			return { invocationMessage: toolDisplayName(name), toolInput: argsJson };
+	}
+}
+
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 120_000;
 
@@ -120,11 +164,8 @@ export async function executeMistralTool(name: string, argsJson: string, ctx: IM
 		return { success: false, output: `Invalid JSON arguments for tool "${name}".` };
 	}
 
-	const root = ctx.workingDirectory?.fsPath ?? process.cwd();
-	const resolve = (p: unknown): string => {
-		const s = typeof p === 'string' ? p : '';
-		return path.isAbsolute(s) ? s : path.join(root, s);
-	};
+	const root = toolRoot(ctx.workingDirectory);
+	const resolve = (p: unknown): string => resolveToolPath(p, root);
 
 	try {
 		switch (name) {

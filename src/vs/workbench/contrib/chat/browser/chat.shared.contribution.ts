@@ -3274,8 +3274,11 @@ AccessibleViewRegistry.register(new AgentChatAccessibilityHelp());
 AccessibleViewRegistry.register(new ChatFindAccessibilityHelp());
 AccessibleViewRegistry.register(new ChatPetAchievementsAccessibilityHelp());
 
-if (!isVoidEditor) {
+// Kodia: the Agents window's input holds a reference to its model through this provider and
+// disposes the model when the reference cannot be resolved, which leaves the input unusable.
 registerEditorFeature(ChatInputBoxContentProvider);
+
+if (!isVoidEditor) {
 Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(ChatEditorInput.TypeID, ChatEditorInputSerializer);
 Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(ChatDebugEditorInput.ID, ChatDebugEditorInputSerializer);
 

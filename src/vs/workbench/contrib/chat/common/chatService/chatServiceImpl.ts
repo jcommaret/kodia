@@ -1423,14 +1423,16 @@ export class ChatService extends Disposable implements IChatService {
 
 		const location = options?.location ?? model.initialLocation;
 		const attempt = options?.attempt ?? 0;
-		const defaultAgent = this.chatAgentService.getDefaultAgent(location, options?.modeInfo?.kind);
+		// Kodia: a request addressed to a session's own agent (the Agents window) doesn't need a default
+		// agent, which Kodia lacks because it ships without the Copilot extension.
+		const silentAgent = options?.agentIdSilent ? this.chatAgentService.getAgent(options.agentIdSilent) : undefined;
+		const defaultAgent = silentAgent ?? this.chatAgentService.getDefaultAgent(location, options?.modeInfo?.kind);
 		if (!defaultAgent) {
 			this.logService.warn('sendRequest', `No default agent for location ${location}`);
 			return { kind: 'rejected', reason: 'No default agent available' };
 		}
 
 		const parsedRequest = this.parseChatRequest(sessionResource, request, location, options);
-		const silentAgent = options?.agentIdSilent ? this.chatAgentService.getAgent(options.agentIdSilent) : undefined;
 		const agent = silentAgent ?? parsedRequest.parts.find((r): r is ChatRequestAgentPart => r instanceof ChatRequestAgentPart)?.agent ?? defaultAgent;
 		const agentSlashCommandPart = parsedRequest.parts.find((r): r is ChatRequestAgentSubcommandPart => r instanceof ChatRequestAgentSubcommandPart);
 
@@ -2173,7 +2175,10 @@ export class ChatService extends Disposable implements IChatService {
 		};
 
 		const location = sendOptions.location ?? sendOptions.locationData?.type ?? model.initialLocation;
-		const defaultAgent = this.chatAgentService.getDefaultAgent(location, sendOptions.modeInfo?.kind);
+		// Kodia: a request addressed to a session's own agent (the Agents window) doesn't need a default
+		// agent, which Kodia lacks because it ships without the Copilot extension.
+		const silentAgent = sendOptions.agentIdSilent ? this.chatAgentService.getAgent(sendOptions.agentIdSilent) : undefined;
+		const defaultAgent = silentAgent ?? this.chatAgentService.getDefaultAgent(location, sendOptions.modeInfo?.kind);
 		if (!defaultAgent) {
 			this.logService.warn('processNextPendingRequest', `No default agent for location ${location}`);
 			for (const deferred of deferreds) {
@@ -2206,7 +2211,6 @@ export class ChatService extends Disposable implements IChatService {
 			return;
 		}
 
-		const silentAgent = sendOptions.agentIdSilent ? this.chatAgentService.getAgent(sendOptions.agentIdSilent) : undefined;
 		const agent = silentAgent ?? parsedRequest.parts.find((r): r is ChatRequestAgentPart => r instanceof ChatRequestAgentPart)?.agent ?? defaultAgent;
 		const agentSlashCommandPart = parsedRequest.parts.find((r): r is ChatRequestAgentSubcommandPart => r instanceof ChatRequestAgentSubcommandPart);
 

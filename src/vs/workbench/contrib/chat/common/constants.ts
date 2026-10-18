@@ -636,11 +636,6 @@ export const OPEN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openAgentsWindow'
 /** Cumulative number of sessions started from the Agents Window, persisted in application storage. */
 export const AGENTS_WINDOW_TOTAL_SESSIONS_STORAGE_KEY = 'agentSessions.telemetry.totalSessions';
 export const OPEN_AGENTS_WINDOW_PRECONDITION = ContextKeyExpr.and(
-	// Kodia: the Agents Window UI entry points (title bar button, command
-	// palette entries, Cmd/Ctrl+Shift+A keybinding) are intentionally hidden.
-	// The agent host backend stays enabled; only the visible affordances are
-	// removed. Remove `ContextKeyExpr.false()` to restore the original gating.
-	ContextKeyExpr.false(),
 	ChatEntitlementContextKeys.Setup.hidden.negate(),
 	ChatEntitlementContextKeys.Setup.disabledInWorkspace.negate(),
 	IsSessionsWindowContext.negate(),

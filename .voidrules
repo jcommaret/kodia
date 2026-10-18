@@ -1,16 +1,11 @@
-This is a fork of the VSCode repo called Void.
+This is Kodia, an AI code editor forked from VS Code (by way of Void).
 
-Most code we care about lives in src/vs/workbench/contrib/void.
+Kodia's own code lives in src/vs/workbench/contrib/void (the React UI is in its browser/react folder) and in src/vs/platform/agentHost/node/mistral. Everything else is VS Code. KODIA_CODEBASE_GUIDE.md explains how the code fits together.
 
-You may often need to explore the full repo to find relevant parts of code.
-Look for services and built-in functions that you might need to use to solve the problem.
+Changing VS Code files outside those folders makes every upstream merge harder: keep such changes minimal, add a "Kodia:" comment explaining why, and say so before making them.
 
-In typescript, do NOT cast to types if not neccessary. NEVER lazily cast to 'any'. Find the correct type to apply and use it.
+In TypeScript, don't cast unless it's necessary, and never cast to 'any': find the right type. Follow the surrounding file's style, including its use of semicolons, and keep changes as small as the task allows.
 
-Do not add or remove semicolons to any of my files. Just go with convention and make the least number of changes.
+Name a map from A to B "bOfA", e.g. toolNameOfToolId.
 
-Never modify files outside src/vs/workbench/contrib/void without consulting with the user first.
-
-All types that map from a value A to B should be called bOfA. For example, if you create a hashmap that goes from toolId to toolName, it should be called toolNameOfToolId, etc.
-
-Do not run anything to validate your changes; tell the user what to do instead.
+Check changes with the commands in HOW_TO_CONTRIBUTE.md ("Before opening a pull request"): ESLint, the React build and typecheck, the workbench typecheck, and npm run test-void. Commit messages follow Conventional Commits.

@@ -6,7 +6,8 @@
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IEnvironmentMainService } from '../../../../platform/environment/electron-main/environmentMainService.js';
 import { IProductService } from '../../../../platform/product/common/productService.js';
-import { IUpdateService, StateType } from '../../../../platform/update/common/update.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { DisablementReason, IUpdateService, StateType } from '../../../../platform/update/common/update.js';
 import { IVoidUpdateService } from '../common/voidUpdateService.js';
 import { VoidCheckUpdateRespose } from '../common/voidUpdateServiceTypes.js';
 import { KODIA_LATEST_RELEASE_API_URL } from '../common/kodiaLinks.js';
@@ -16,12 +17,26 @@ import { KODIA_LATEST_RELEASE_API_URL } from '../common/kodiaLinks.js';
 export class VoidMainUpdateService extends Disposable implements IVoidUpdateService {
 	_serviceBrand: undefined;
 
+	// the release the automatic check last announced, so it isn't announced again every 3 hours
+	private _autoAnnouncedRelease: string | undefined
+
 	constructor(
 		@IProductService private readonly _productService: IProductService,
 		@IEnvironmentMainService private readonly _envMainService: IEnvironmentMainService,
 		@IUpdateService private readonly _updateService: IUpdateService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
 	) {
 		super()
+	}
+
+	// Whether the user (or a policy, or --disable-updates) turned off automatic update checks. Release builds
+	// have no update URL, so VS Code's updater is disabled for that reason and never reads update.mode itself.
+	private _automaticChecksTurnedOff(): boolean {
+		const updateMode = this._configurationService.getValue<string>('update.mode')
+		if (updateMode === 'none' || updateMode === 'manual') return true
+		const { state } = this._updateService
+		return state.type === StateType.Disabled
+			&& (state.reason === DisablementReason.ManuallyDisabled || state.reason === DisablementReason.Policy || state.reason === DisablementReason.DisabledByEnvironment)
 	}
 
 
@@ -33,10 +48,8 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 			return { message: null } as const
 		}
 
-		// if disabled and not explicitly checking, return early
-		if (this._updateService.state.type === StateType.Disabled) {
-			if (!explicit)
-				return { message: null } as const
+		if (!explicit && this._automaticChecksTurnedOff()) {
+			return { message: null } as const
 		}
 
 		this._updateService.checkForUpdates(false) // implicity check, then handle result ourselves
@@ -125,9 +138,10 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 					action = 'reinstall'
 				}
 			}
-			// not explicit
+			// not explicit: once per release
 			else {
-				if (response.ok && !isUpToDate) {
+				if (response.ok && !isUpToDate && latestVersion !== this._autoAnnouncedRelease) {
+					this._autoAnnouncedRelease = latestVersion
 					message = 'A new version of Kodia is available! Please reinstall (auto-updates are disabled on this OS) - it only takes a second!'
 					action = 'reinstall'
 				}

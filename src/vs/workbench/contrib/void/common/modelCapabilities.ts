@@ -2126,7 +2126,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	'deepseek/deepseek-v4.1-flash': {
 		...deepseekModelOptions['deepseek-flash'],
 		contextWindow: 1_048_576, // https://openrouter.ai/deepseek/deepseek-v4.1-flash
-		cost: { input: 0.0376, cache_read: 0.0016, output: 0.08 }, // OpenRouter's price; it moves with the serving providers
+		cost: { input: 0.0344, cache_read: 0.0016, output: 0.08 }, // OpenRouter's price; it moves with the serving providers
 		downloadable: false,
 	},
 	'deepseek/deepseek-v4-pro': {

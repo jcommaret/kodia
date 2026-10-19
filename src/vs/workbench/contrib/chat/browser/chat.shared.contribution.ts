@@ -3359,7 +3359,6 @@ registerChatCodeCompareBlockActions();
 registerChatFileTreeActions();
 registerChatPromptNavigationActions();
 registerChatTitleActions();
-registerChatExecuteActions();
 registerChatFindActions();
 registerAction2(ChatVoiceInputModeAction);
 registerAction2(ChatVoiceInputModeToggleListenAction);
@@ -3381,6 +3380,11 @@ registerChatPluginActions();
 registerAction2(ConfigureToolSets);
 registerEditorFeature(ChatPasteProvidersFeature);
 }
+
+// Kodia: the Agents window's chat input needs Send, Stop and its pickers once a session is open
+// (the new-session composer has its own send button). Their palette commands require chat to be
+// enabled, which Kodia turns off, so they stay out of the command palette.
+registerChatExecuteActions();
 
 agentPluginDiscoveryRegistry.register(new SyncDescriptor(ConfiguredAgentPluginDiscovery), AgentPluginDiscoveryPriority.Configured);
 agentPluginDiscoveryRegistry.register(new SyncDescriptor(MarketplaceAgentPluginDiscovery), AgentPluginDiscoveryPriority.Marketplace);

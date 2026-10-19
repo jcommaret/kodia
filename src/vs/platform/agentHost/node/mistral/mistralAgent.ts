@@ -3,6 +3,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------------*/
 
+import { equals } from '../../../../base/common/arrays.js';
 import { SequencerByKey } from '../../../../base/common/async.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableMap } from '../../../../base/common/lifecycle.js';
@@ -14,10 +15,12 @@ import { localize } from '../../../../nls.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClient, IAgent, IAgentChatConfigCompletionsParams, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, IAgentChats, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSpawnChatEvent } from '../../common/agent.js';
 import { resolveAgentChatContext } from '../../common/agent.js';
-import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
+import { AgentHostShownModelsConfigKey, createSchema, platformRootSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
+import { getShownModelIds } from '../../common/agentShownModels.js';
 import { AgentHostMistralApiKeyEnvVar, AgentHostMistralResource } from '../../common/agentService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
+import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { ActionType, type ChatAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirmationState, ToolDefinition } from '../../common/state/protocol/state.js';
@@ -168,6 +171,16 @@ export class MistralAgent extends Disposable implements IAgent {
 	 */
 	private _apiKey: string | undefined;
 
+	/** The live Mistral catalog for {@link _apiKey}, once fetched. */
+	private _catalog: readonly IMistralModel[] | undefined;
+
+	/**
+	 * Kodia: the Mistral models shown in Kodia's model dropdown, forwarded through
+	 * {@link AgentHostShownModelsConfigKey}. `undefined` until Kodia has forwarded
+	 * them.
+	 */
+	private _shownModelIds: readonly string[] | undefined;
+
 	readonly chats: IAgentChats = {
 		createChat: (chat, _context, options) => this._createChat(chat, options),
 		disposeChat: async chat => this._chats.deleteAndDispose(chat.toString()),
@@ -193,12 +206,21 @@ export class MistralAgent extends Disposable implements IAgent {
 		@ILogService private readonly _logService: ILogService,
 		@IMistralApiService private readonly _apiService: IMistralApiService,
 		@ISessionDataService private readonly _sessionDataService: ISessionDataService,
+		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
 	) {
 		super();
 		this._apiKey = process.env[AgentHostMistralApiKeyEnvVar] || undefined;
-		// Seed synchronously when there is a key, then replace with the real,
+		this._shownModelIds = this._readShownModelIds();
+		this._register(this._configurationService.onDidRootConfigChange(() => {
+			const shownModelIds = this._readShownModelIds();
+			if (!equals(shownModelIds, this._shownModelIds)) {
+				this._shownModelIds = shownModelIds;
+				this._publishModels();
+			}
+		}));
+		// Publish synchronously when there is a key, then refine with the real,
 		// capability-filtered catalog from the Mistral API.
-		this._resetModels();
+		this._publishModels();
 		void this._refreshModels();
 	}
 
@@ -225,7 +247,8 @@ export class MistralAgent extends Disposable implements IAgent {
 		const changed = token !== this._apiKey;
 		this._apiKey = token || undefined;
 		if (changed) {
-			this._resetModels();
+			this._catalog = undefined;
+			this._publishModels();
 			this._onDidChangeApiKey.fire();
 			await this._refreshModels();
 		}
@@ -236,13 +259,46 @@ export class MistralAgent extends Disposable implements IAgent {
 		return this._refreshModels();
 	}
 
+	private _readShownModelIds(): readonly string[] | undefined {
+		return getShownModelIds(this._configurationService.getRootValue(platformRootSchema, AgentHostShownModelsConfigKey), this.id);
+	}
+
 	/**
 	 * Kodia: models are only advertised while there is an API key, so the Agents
-	 * window never offers a Mistral model it cannot use. With a key, the seed list
-	 * stands in until the live catalog replaces it.
+	 * window never offers a Mistral model it cannot use.
 	 */
-	private _resetModels(): void {
-		this._models.set(this._apiKey ? this._buildSeedModels() : [], undefined);
+	private _publishModels(): void {
+		this._models.set(this._apiKey ? this._buildModels() : [], undefined);
+	}
+
+	/**
+	 * Kodia: once Kodia has forwarded the models shown in its dropdown, exactly
+	 * those are offered, in the same order, under the ids Kodia uses (the host
+	 * filters every agent's models by them). The live catalog only fills in their
+	 * metadata (a dropdown entry is usually an alias such as `mistral-large-latest`)
+	 * and drops the ones known to lack function calling, which agent chats require.
+	 *
+	 * Before that, the seed list stands in until the live catalog replaces it.
+	 */
+	private _buildModels(): readonly IAgentModelInfo[] {
+		if (!this._shownModelIds) {
+			const usable = this._catalog?.filter(m => m.supportsFunctionCalling);
+			return usable ? usable.map(this._toAgentModelInfo, this) : this._buildSeedModels();
+		}
+		return this._shownModelIds.flatMap(id => {
+			const card = this._catalog?.find(m => m.id === id || m.aliases?.includes(id));
+			if (card && !card.supportsFunctionCalling) {
+				return [];
+			}
+			const seed = MISTRAL_SEED_MODELS.find(m => m.id === id);
+			return [{
+				provider: this.id,
+				id,
+				name: seed?.name ?? id,
+				maxContextWindow: card?.maxContextWindow ?? seed?.maxContextWindow,
+				supportsVision: card?.supportsVision ?? false,
+			}];
+		});
 	}
 
 	private _buildSeedModels(): readonly IAgentModelInfo[] {
@@ -256,11 +312,10 @@ export class MistralAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * Replace the seed catalog with the user's real, tool-capable Mistral
-	 * models. Agent chats require function calling, so models that don't
-	 * advertise it are filtered out. Without a key there is nothing to fetch.
-	 * On any other failure (network, empty result) the existing models are left
-	 * untouched so the picker keeps working with the seed list.
+	 * Fetch the user's real Mistral catalog and republish the models from it.
+	 * Without a key there is nothing to fetch. On any other failure (network,
+	 * no tool-capable model) the previous catalog is kept so the picker keeps
+	 * working with the seed list.
 	 */
 	private async _refreshModels(): Promise<void> {
 		const apiKey = this._apiKey;
@@ -268,12 +323,12 @@ export class MistralAgent extends Disposable implements IAgent {
 			return;
 		}
 		try {
-			const all = await this._apiService.models(apiKey);
-			const usable = all.filter(m => m.supportsFunctionCalling);
-			if (usable.length === 0) {
+			const catalog = await this._apiService.models(apiKey);
+			if (apiKey !== this._apiKey || !catalog.some(m => m.supportsFunctionCalling)) {
 				return;
 			}
-			this._models.set(usable.map(this._toAgentModelInfo, this), undefined);
+			this._catalog = catalog;
+			this._publishModels();
 		} catch (err) {
 			this._logService.warn(`[Mistral] Failed to refresh models; keeping seed list. ${err}`);
 		}

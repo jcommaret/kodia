@@ -7,9 +7,13 @@ import { structuralEquals } from '../../../../../../base/common/equals.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { AgentHostConfigKey } from '../../../../../../platform/agentHost/common/agentHostCustomizationConfig.js';
+import { AgentHostShownModelsConfigKey } from '../../../../../../platform/agentHost/common/agentHostSchema.js';
 import { CopilotCliConfigKey } from '../../../../../../platform/agentHost/common/copilotCliConfig.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import { ROOT_STATE_URI } from '../../../../../../platform/agentHost/common/state/sessionState.js';
+
+/** Kodia: root-config keys a forwarder can own, including the models shown in Kodia's dropdown. */
+type ForwardedRootConfigKey = AgentHostConfigKey | CopilotCliConfigKey | typeof AgentHostShownModelsConfigKey;
 
 /**
  * A single root-config key managed by an {@link AgentHostRootConfigForwarder}:
@@ -18,7 +22,7 @@ import { ROOT_STATE_URI } from '../../../../../../platform/agentHost/common/stat
  */
 export interface IForwardedRootConfigKey {
 	/** The root-config key this descriptor owns. */
-	readonly key: AgentHostConfigKey | CopilotCliConfigKey;
+	readonly key: ForwardedRootConfigKey;
 
 	/** Compute the desired value; return `undefined` to skip the push. May be async. */
 	computeValue(): unknown | Promise<unknown>;
@@ -66,7 +70,7 @@ export class AgentHostRootConfigForwarder extends Disposable {
 	 * Managed keys whose schema the host has already advertised, so a key is
 	 * re-pushed only when its schema *first* appears (see {@link _onRootStateChanged}).
 	 */
-	private readonly _schemaSeen = new Set<AgentHostConfigKey | CopilotCliConfigKey>();
+	private readonly _schemaSeen = new Set<ForwardedRootConfigKey>();
 
 	constructor(
 		private readonly _keys: readonly IForwardedRootConfigKey[],
@@ -133,7 +137,7 @@ export class AgentHostRootConfigForwarder extends Disposable {
 		}
 	}
 
-	private _schemaHasKey(key: AgentHostConfigKey | CopilotCliConfigKey): boolean {
+	private _schemaHasKey(key: ForwardedRootConfigKey): boolean {
 		const rootState = this._agentHostService.rootState.value;
 		if (!rootState || rootState instanceof Error) {
 			return false;

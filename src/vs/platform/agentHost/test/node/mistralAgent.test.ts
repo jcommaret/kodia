@@ -123,12 +123,9 @@ suite('MistralAgent', () => {
 
 	// ---- Models + auth ----
 
-	test('seeds a non-empty, tool-capable model list before any API call', () => {
-		const agent = createAgent(new FakeMistralApiService(async () => []));
-		const seeded = agent.models.get();
-		assert.ok(seeded.length > 0, 'expected a non-empty seed list');
-		assert.ok(seeded.every(m => m.provider === 'mistral'));
-		assert.ok(seeded.some(m => m.id === 'devstral-latest'));
+	test('advertises no models without an API key', () => {
+		const agent = createAgent(new FakeMistralApiService(async () => [model('devstral-2512', true)]));
+		assert.deepStrictEqual(agent.models.get(), []);
 	});
 
 	test('authenticate replaces seed with the real catalog, filtered to function calling', async () => {
@@ -147,21 +144,24 @@ suite('MistralAgent', () => {
 		assert.strictEqual(large.maxContextWindow, 256_000);
 	});
 
-	test('keeps the seed list when the catalog has no tool-capable models or fails', async () => {
+	test('keeps a tool-capable seed list when the catalog has no tool-capable models or fails', async () => {
 		const empty = createAgent(new FakeMistralApiService(async () => [model('mistral-embed', false)]));
-		const seeded = empty.models.get();
 		await empty.authenticate('', 'sk-test');
-		assert.deepStrictEqual(empty.models.get(), seeded);
+		const seeded = empty.models.get();
+		assert.ok(seeded.length > 0, 'expected a non-empty seed list');
+		assert.ok(seeded.every(m => m.provider === 'mistral'));
+		assert.ok(seeded.some(m => m.id === 'devstral-latest'));
 
 		const failing = createAgent(new FakeMistralApiService(async () => { throw new Error('network'); }));
 		assert.strictEqual(await failing.authenticate('', 'sk-test'), true, 'authenticate should still succeed despite a model-fetch failure');
 		assert.deepStrictEqual(failing.models.get(), seeded);
 	});
 
-	test('authenticate with an empty token clears the key and reports unauthenticated', async () => {
+	test('authenticate with an empty token clears the key, reports unauthenticated and drops the models', async () => {
 		const agent = createAgent(new FakeMistralApiService(async () => [model('devstral-2512', true)]));
 		await agent.authenticate('', 'sk-test');
 		assert.strictEqual(await agent.authenticate('', ''), false);
+		assert.deepStrictEqual(agent.models.get(), []);
 	});
 
 	// ---- Chat lifecycle ----

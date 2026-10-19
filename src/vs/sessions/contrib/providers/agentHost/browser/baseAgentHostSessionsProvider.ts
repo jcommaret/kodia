@@ -4358,7 +4358,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 				chatSessionType: this.resourceSchemeForProvider(agent.provider),
 				label: this._formatSessionTypeLabel(agent.displayName?.trim() || agent.provider),
 				icon: this.iconForAgentProvider(agent.provider) ?? this.icon,
-			}));
+			}))
+			// Kodia: agents that can run (they have models) come first, so the default session type,
+			// the first one, is never an agent still waiting for credentials while another one works.
+			.sort((a, b) => Number(a.authRequirement !== SessionTypeAuthRequirement.None) - Number(b.authRequirement !== SessionTypeAuthRequirement.None));
 
 		const prev = this._sessionTypes;
 		if (prev.length === next.length && prev.every((t, i) => t.id === next[i].id

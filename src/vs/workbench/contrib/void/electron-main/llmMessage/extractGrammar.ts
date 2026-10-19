@@ -117,17 +117,9 @@ export const extractReasoningWrapper = (
 	}
 
 
+	// newOnText already split the text from the reasoning and dropped the tags, so the final message keeps that split
 	const getOnFinalMessageParams = () => {
-		const fullText_ = fullTextSoFar
-		const tag1Idx = fullText_.indexOf(thinkTags[0])
-		const tag2Idx = fullText_.indexOf(thinkTags[1])
-		if (tag1Idx === -1) return { fullText: fullText_, fullReasoning: externalReasoningSoFar } // never started reasoning
-		if (tag2Idx === -1) return { fullText: '', fullReasoning: externalReasoningSoFar + fullText_ } // never stopped reasoning
-
-		const fullReasoning = externalReasoningSoFar + fullText_.substring(tag1Idx + thinkTags[0].length, tag2Idx)
-		const fullText = fullText_.substring(0, tag1Idx) + fullText_.substring(tag2Idx + thinkTags[1].length, Infinity)
-
-		return { fullText, fullReasoning }
+		return { fullText: fullTextSoFar, fullReasoning: externalReasoningSoFar + fullReasoningSoFar }
 	}
 
 	const newOnFinalMessage: OnFinalMessage = (params) => {

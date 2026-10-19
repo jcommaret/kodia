@@ -220,7 +220,7 @@ suite('Agents Window titlebar copy experiment', () => {
 
 	for (const sessionCount of [0, 2]) {
 		for (const value of [undefined, true, false]) {
-			test(`hover expansion defaults to enabled and applies to all users (${sessionCount} sessions, ${value})`, async () => {
+			test(`hover expansion defaults to disabled and applies to all users (${sessionCount} sessions, ${value})`, async () => {
 				const h = createHarness(sessionCount);
 				const before = h.container.classList.contains('expand-on-hover');
 				await h.resolveExpansion(value);
@@ -235,8 +235,8 @@ suite('Agents Window titlebar copy experiment', () => {
 					triggers: h.snapshot().triggers,
 					ariaLabel: h.snapshot().ariaLabel,
 				}, {
-					before: true,
-					expandOnHover: value ?? true,
+					before: false,
+					expandOnHover: value ?? false,
 					beforeHover: [],
 					triggers: [expansionTreatmentName],
 					ariaLabel: 'Open in Agents Window (shortcut)',
@@ -253,7 +253,7 @@ suite('Agents Window titlebar copy experiment', () => {
 				expandOnHover: h.container.classList.contains('expand-on-hover'),
 				warnings: h.warnings,
 			}, {
-				expandOnHover: true,
+				expandOnHover: false,
 				warnings: [`[OpenWorkspaceInAgentsTitleBarWidget] Ignoring invalid ${expansionTreatmentName} treatment`],
 			});
 		});
@@ -330,7 +330,7 @@ suite('Agents Window titlebar copy experiment', () => {
 		});
 	});
 
-	test('initial expansion lookup failure logs and preserves enabled default without triggering after hover ends', async () => {
+	test('initial expansion lookup failure logs and preserves disabled default without triggering after hover ends', async () => {
 		const h = createHarness(2);
 		h.container.dispatchEvent(new MouseEvent('mouseenter'));
 		h.container.dispatchEvent(new MouseEvent('mouseleave'));
@@ -341,7 +341,7 @@ suite('Agents Window titlebar copy experiment', () => {
 			warnings: h.warnings,
 			triggers: h.snapshot().triggers,
 		}, {
-			expandOnHover: true,
+			expandOnHover: false,
 			warnings: ['[OpenWorkspaceInAgentsTitleBarWidget] Failed to resolve treatments'],
 			triggers: [],
 		});

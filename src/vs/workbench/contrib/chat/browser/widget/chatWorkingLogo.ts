@@ -5,7 +5,9 @@
 
 import { $, addDisposableListener, append, getWindow } from '../../../../../base/browser/dom.js';
 import { findLast } from '../../../../../base/common/arraysFind.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, IDisposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
@@ -274,6 +276,9 @@ export class ChatWorkingProgressLogo extends ChatWorkingLogo {
 		super(getConfiguredProgressAnimation(configurationService, logService), quality, {
 			isMotionReduced: () => accessibilityService.isMotionReduced(),
 		});
+		// Kodia: a neutral spinner stands in for the VS Code mark, which CSS hides.
+		this.domNode.classList.add('chat-working-logo-kodia');
+		append(this.domNode, $(`span.chat-working-logo-icon${ThemeIcon.asCSSSelector(Codicon.loading)}`));
 		this._register(configurationService.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration(ChatConfiguration.PersistentProgress)) {
 				this.setAnimation(getConfiguredProgressAnimation(configurationService, logService));

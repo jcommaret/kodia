@@ -72,3 +72,28 @@
 		display: none;
 	}
 }
+
+/* Kodia: a neutral spinner stands in for the VS Code mark in the working progress indicator. */
+.chat-working-logo.chat-working-logo-kodia > .chat-working-logo-face,
+.chat-working-logo.chat-working-logo-kodia > .chat-working-logo-draw-container {
+	display: none;
+}
+
+.chat-working-logo > .chat-working-logo-icon {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: var(--vscode-codiconFontSize);
+}
+
+.chat-working-logo.chat-working-logo-compact > .chat-working-logo-icon {
+	font-size: var(--vscode-codiconFontSize-compact);
+}
+
+/* Only spins while the response is working, and never with reduced motion. */
+.chat-working-logo:not(.chat-working-logo-active) > .chat-working-logo-icon,
+.monaco-reduce-motion .chat-working-logo > .chat-working-logo-icon {
+	animation: none;
+}

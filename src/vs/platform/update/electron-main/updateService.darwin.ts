@@ -16,11 +16,15 @@ import { IProductService } from '../../product/common/productService.js';
 import { asJson, IRequestService } from '../../request/common/request.js';
 import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
-import { AvailableForDownload, IUpdate, State, StateType, UpdateType } from '../common/update.js';
+import { isNewerUpdate } from '../common/kodiaUpdate.js';
+import { AvailableForDownload, IUpdate, Overwriting, State, StateType, UpdateType } from '../common/update.js';
 import { IMeteredConnectionService } from '../../meteredConnection/common/meteredConnection.js';
 import { AbstractUpdateService, createUpdateURL, getUpdateRequestHeaders, IUpdateURLOptions, UpdateErrorClassification } from './abstractUpdateService.js';
 
 export class DarwinUpdateService extends AbstractUpdateService implements IRelaunchHandler {
+
+	/** Kodia: the feed's update Electron's autoUpdater was started for, which its events do not fully describe. */
+	private feedUpdate: IUpdate | undefined;
 
 	@memoize private get onRawError(): Event<string> { return Event.fromNodeEventEmitter(electron.autoUpdater, 'error', (_, message) => message); }
 	@memoize private get onRawCheckingForUpdate(): Event<void> { return Event.fromNodeEventEmitter<void>(electron.autoUpdater, 'checking-for-update'); }
@@ -94,7 +98,7 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 	}
 
 	protected buildUpdateFeedUrl(quality: string, commit: string, options?: IUpdateURLOptions): string | undefined {
-		const assetID = this.productService.darwinUniversalAssetId ?? (process.arch === 'x64' ? 'darwin' : 'darwin-arm64');
+		const assetID = this.productService.darwinUniversalAssetId ?? (process.arch === 'x64' ? 'darwin-x64' : 'darwin-arm64'); // Kodia: darwin-x64, not darwin
 		const url = createUpdateURL(this.productService.updateUrl!, assetID, quality, commit, options);
 		const headers = getUpdateRequestHeaders(this.productService.version);
 		try {
@@ -113,6 +117,10 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 			return;
 		}
 
+		// Kodia: read before the state changes, to compare the feed with the update being overwritten
+		const baseline = this.getBaselineUpdate(pendingCommit);
+		const overwriting = this.state.type === StateType.Overwriting ? this.state : undefined;
+
 		this.setState(State.CheckingForUpdates(explicit));
 
 		const internalOrg = this.getInternalOrg();
@@ -125,42 +133,61 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 		}
 
 		// When connection is metered and this is not an explicit check, avoid electron call as to not to trigger auto-download.
-		if (!explicit && this.meteredConnectionService.isConnectionMetered) {
+		const download = explicit || !this.meteredConnectionService.isConnectionMetered;
+		if (!download) {
 			this.logService.info('update#doCheckForUpdates - checking for update without auto-download because connection is metered');
-			this.checkForUpdateNoDownload(url);
-			return;
 		}
 
-		this.logService.trace('update#doCheckForUpdates - using Electron autoUpdater', { url, explicit, background });
-		electron.autoUpdater.checkForUpdates();
+		// Kodia: Electron's autoUpdater downloads whatever the feed describes, so it only runs once the feed is newer
+		this.checkFeed(url, explicit, baseline, download, overwriting);
 	}
 
 	/**
-	 * Manually check the update feed URL without triggering Electron's auto-download.
-	 * Used when connection is metered or in the embedded app.
-	 * @param canInstall When false, signals that the update cannot be installed from this app.
+	 * Kodia: checks the update feed, then starts Electron's auto-download if `download` and the feed's release is
+	 * newer than `baseline`, else reports it available for download. Electron's autoUpdater does no such comparison.
 	 */
-	private async checkForUpdateNoDownload(url: string, canInstall?: boolean): Promise<void> {
+	private async checkFeed(url: string, explicit: boolean, baseline: IUpdate, download: boolean, overwriting: Overwriting | undefined): Promise<void> {
 		const headers = getUpdateRequestHeaders(this.productService.version);
-		this.logService.trace('update#checkForUpdateNoDownload - checking update server', { url, headers });
+		this.logService.trace('update#checkFeed - checking update feed', { url, headers });
 
 		try {
 			const context = await this.requestService.request({ url, headers, callSite: 'updateService.darwin.checkForUpdates' }, CancellationToken.None);
 			const statusCode = context.res.statusCode;
-			this.logService.trace('update#checkForUpdateNoDownload - response', { statusCode });
+			this.logService.trace('update#checkFeed - response', { statusCode });
 
 			const update = await asJson<IUpdate>(context);
-			if (!update || !update.url || !update.version || !update.productVersion) {
-				this.logService.trace('update#checkForUpdateNoDownload - no update available');
-				const notAvailable = this.state.type === StateType.CheckingForUpdates && this.state.explicit;
-				this.setState(State.Idle(UpdateType.Archive, undefined, notAvailable || undefined));
+
+			// If updates were disabled mid-check, ignore the result so we don't leave the Disabled state.
+			if (this.state.type !== StateType.CheckingForUpdates) {
+				return;
+			}
+
+			if (!isNewerUpdate(update, baseline)) {
+				this.logService.trace('update#checkFeed - no update available');
+				if (overwriting) {
+					// Nothing newer than the pending update after all: restore the Ready state with it
+					this._overwrite = false;
+					this.setState(State.Ready(overwriting.update, overwriting.explicit, false));
+				} else {
+					this.setState(State.Idle(UpdateType.Archive, undefined, explicit || undefined));
+				}
+			} else if (download) {
+				this.logService.trace('update#checkFeed - update available, using Electron autoUpdater', { version: update.version, name: update.name });
+				this.feedUpdate = update;
+				electron.autoUpdater.checkForUpdates();
 			} else {
-				this.logService.trace('update#checkForUpdateNoDownload - update available', { version: update.version, productVersion: update.productVersion });
-				this.setState(State.AvailableForDownload(update, canInstall));
+				this.logService.trace('update#checkFeed - update available', { version: update.version, name: update.name });
+				this.setState(State.AvailableForDownload(update));
 			}
 		} catch (err) {
-			this.logService.error('update#checkForUpdateNoDownload - failed to check for update', err);
-			this.setState(State.Idle(UpdateType.Archive));
+			if (this.state.type !== StateType.CheckingForUpdates) {
+				return;
+			}
+
+			this.logService.error('update#checkFeed - failed to check for update', err);
+			// only show message when explicitly checking for updates
+			const message: string | undefined = explicit ? (err.message || err) : undefined;
+			this.setState(State.Idle(UpdateType.Archive, message));
 		}
 	}
 
@@ -178,6 +205,10 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 		if (this.state.type !== StateType.Downloading) {
 			return;
 		}
+
+		// Kodia: Electron reports the feed's name as the product version and no commit, the feed's update has both
+		update = this.feedUpdate ?? update;
+		this.feedUpdate = undefined;
 
 		this.setState(State.Downloaded(update, this.state.explicit, this._overwrite));
 		this.logService.info(`Update downloaded: ${JSON.stringify(update)}`);
@@ -200,6 +231,7 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 		// Rebuild feed URL and trigger download via Electron's auto-updater
 		this.buildUpdateFeedUrl(this.quality!, state.update.version, { internalOrg: this.getInternalOrg() });
 		this.setState(State.CheckingForUpdates(true));
+		this.feedUpdate = state.update; // Kodia: see onUpdateDownloaded
 		electron.autoUpdater.checkForUpdates();
 	}
 

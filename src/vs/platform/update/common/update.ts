@@ -13,6 +13,7 @@ export interface IUpdate {
 	timestamp?: number;
 	url?: string;
 	sha256hash?: string;
+	name?: string; // Kodia: release name like 1.141.0-2.5.5, see kodiaUpdate.ts
 }
 
 /**

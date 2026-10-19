@@ -33,6 +33,7 @@ import { IProductService } from '../../product/common/productService.js';
 import { asJson, IRequestService } from '../../request/common/request.js';
 import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
+import { isNewerUpdate } from '../common/kodiaUpdate.js';
 import { AvailableForDownload, DisablementReason, IUpdate, State, StateType, UpdateType } from '../common/update.js';
 import { AbstractUpdateService, createUpdateURL, getUpdateRequestHeaders, IUpdateURLOptions, UpdateErrorClassification } from './abstractUpdateService.js';
 import { getRelaunchArguments } from './updateRelaunchArguments.js';
@@ -63,7 +64,8 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 	private readonly setupMutexName: string;
 
 	private get cachePathSync(): string {
-		return path.join(tmpdir(), `vscode-${this.productService.quality}-${this.productService.target}-${process.arch}`);
+		// Kodia: not vscode-…, which VS Code itself uses and empties of other versions' setups
+		return path.join(tmpdir(), `${this.productService.applicationName}-${this.productService.quality}-${this.productService.target}-${process.arch}`);
 	}
 
 	@memoize
@@ -225,6 +227,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 		const internalOrg = this.getInternalOrg();
 		const background = !explicit && !internalOrg;
 		const url = this.buildUpdateFeedUrl(this.quality, pendingCommit ?? this.productService.commit!, { background, internalOrg });
+		const baseline = this.getBaselineUpdate(pendingCommit); // Kodia: see isNewerUpdate below
 
 		// Only set CheckingForUpdates if we're not already in Overwriting state
 		if (this.state.type !== StateType.Overwriting) {
@@ -246,7 +249,8 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 					return Promise.resolve(null);
 				}
 
-				if (!update || !update.url || !update.version || !update.productVersion) {
+				// Kodia: the feed always describes the latest release, see kodiaUpdate.ts
+				if (!isNewerUpdate(update, baseline)) {
 					// If we were checking for an overwrite update and found nothing newer,
 					// restore the Ready state with the pending update
 					if (this.state.type === StateType.Overwriting) {
@@ -368,7 +372,10 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 	}
 
 	protected override async doDownloadUpdate(state: AvailableForDownload): Promise<void> {
-		if (state.update.url) {
+		// Kodia: the releases page like on Linux, MSI installs also read the archive feed and its url is the zip
+		if (this.productService.downloadUrl) {
+			this.nativeHostMainService.openExternal(undefined, this.productService.downloadUrl);
+		} else if (state.update.url) {
 			this.nativeHostMainService.openExternal(undefined, state.update.url);
 		}
 		this.setState(State.Idle(this.getUpdateType()));

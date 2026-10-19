@@ -9,7 +9,7 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { ChatMessage, StagingSelectionItem } from '../common/chatThreadServiceTypes.js';
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities, anthropicModelFeatures } from '../common/modelCapabilities.js';
 import { estimateTokens } from '../common/tokenizer.js';
-import { reParsedToolXMLString, chat_systemMessage, chat_filesOverview, chat_workspaceContext } from '../common/prompt/prompts.js';
+import { reParsedToolXMLString, chat_systemMessage, chat_filesOverview, chat_workspaceContext, joinProjectRules, PROJECT_RULES_FILE_NAMES, summarizedThreadMessage } from '../common/prompt/prompts.js';
 import { AnthropicDocumentBlock, AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, MistralDocumentPart, OpenAIFilePart, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, modelSelectionsEqual, ProviderName } from '../common/voidSettingsTypes.js';
@@ -356,7 +356,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	// A COMPLETE HACK: last message is system message for context purposes
 
 	const sysMsgParts: string[] = []
-	if (aiInstructions) sysMsgParts.push(`GUIDELINES AND MEMORY (from the user's settings, .voidrules file, and project memory):\n${aiInstructions}`)
+	if (aiInstructions) sysMsgParts.push(`GUIDELINES AND MEMORY (from the user's settings, the project's rules files, and project memory):\n${aiInstructions}`)
 	if (systemMessage) sysMsgParts.push(systemMessage)
 	const combinedSystemMessage = sysMsgParts.join('\n\n')
 
@@ -663,18 +663,20 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		super()
 	}
 
-	// Read .voidrules files from workspace folders
-	private _getVoidRulesFileContents(): string {
+	// Read the rules files (.voidrules, AGENTS.md, ...) from the root of each workspace folder
+	private _getProjectRulesFileContents(fileNames: readonly string[] = PROJECT_RULES_FILE_NAMES): string {
 		try {
 			const workspaceFolders = this.workspaceContextService.getWorkspace().folders;
-			let voidRules = '';
+			const files: { path: string, content: string }[] = []
 			for (const folder of workspaceFolders) {
-				const uri = URI.joinPath(folder.uri, '.voidrules')
-				const { model } = this.voidModelService.getModel(uri)
-				if (!model) continue
-				voidRules += model.getValue(EndOfLinePreference.LF) + '\n\n';
+				for (const fileName of fileNames) {
+					const { model } = this.voidModelService.getModel(URI.joinPath(folder.uri, fileName))
+					if (!model) continue
+					const path = workspaceFolders.length > 1 ? `${folder.name}/${fileName}` : fileName
+					files.push({ path, content: model.getValue(EndOfLinePreference.LF) })
+				}
 			}
-			return voidRules.trim();
+			return joinProjectRules(files);
 		}
 		catch (e) {
 			return ''
@@ -686,23 +688,23 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		return this.projectMemoryService.getMemory()
 	}
 
-	// The user's own instructions: from settings and .voidrules files
+	// The user's own instructions: from settings and the project's rules files
 	private _getGuidelines(): string {
 		const globalAIInstructions = this.voidSettingsService.state.globalSettings.aiInstructions;
-		const voidRulesFileContent = this._getVoidRulesFileContents();
-		return [globalAIInstructions, voidRulesFileContent].filter(s => !!s).join('\n\n')
+		const rulesFileContent = this._getProjectRulesFileContents();
+		return [globalAIInstructions, rulesFileContent].filter(s => !!s).join('\n\n')
 	}
 
-	// Get combined AI instructions from settings, .voidrules files, and saved project memory
-	private _getCombinedAIInstructions(): string {
+	// Get combined AI instructions from settings, the project's rules files, and saved project memory
+	private _getCombinedAIInstructions(rulesFileNames?: readonly string[]): string {
 		const globalAIInstructions = this.voidSettingsService.state.globalSettings.aiInstructions;
-		const voidRulesFileContent = this._getVoidRulesFileContents();
+		const rulesFileContent = this._getProjectRulesFileContents(rulesFileNames);
 		const projectMemory = this._getProjectMemory();
 
 		const ans: string[] = []
 		if (globalAIInstructions) ans.push(globalAIInstructions)
 		if (projectMemory) ans.push(`PROJECT MEMORY (notes saved automatically in previous sessions via write_project_memory):\n${projectMemory}`)
-		if (voidRulesFileContent) ans.push(voidRulesFileContent)
+		if (rulesFileContent) ans.push(rulesFileContent)
 		return ans.join('\n\n')
 	}
 
@@ -721,7 +723,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		}
 
 		const guidelines = this._getGuidelines()
-		if (guidelines) sections.push(`GUIDELINES (from the user's settings and .voidrules file):\n${guidelines}`)
+		if (guidelines) sections.push(`GUIDELINES (from the user's settings and the project's rules files):\n${guidelines}`)
 
 		await this.projectMemoryService.whenReady
 		const projectMemory = this._getProjectMemory()
@@ -772,12 +774,23 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		// tool results before this index were cleared to fit the context window (ContextClearedEntry)
 		const lastClearing = findLast(chatMessages, m => m.role === 'context_cleared')
 		const clearedBeforeIdx = lastClearing?.role === 'context_cleared' ? lastClearing.keepFromIdx : 0
+		// messages before this index go as a summary (ContextSummaryEntry)
+		const lastSummaryEntry = findLast(chatMessages, m => m.role === 'context_summary')
+		const lastSummary = lastSummaryEntry?.role === 'context_summary' ? lastSummaryEntry : null
 
-		for (let idx = 0; idx < chatMessages.length; idx += 1) {
+		for (let idx = lastSummary?.keepFromIdx ?? 0; idx < chatMessages.length; idx += 1) {
 			const m = chatMessages[idx]
+			// the summary leads: in the kept user message, or before the kept assistant message, along with the request it works on
+			const summaryPrefix = lastSummary && idx === lastSummary.keepFromIdx ? lastSummary.summary : null
+			if (summaryPrefix !== null && m.role !== 'user') {
+				const latestRequest = findLast(chatMessages.slice(0, idx), m => m.role === 'user')
+				simpleLLMMessages.push({ role: 'user', content: summarizedThreadMessage(summaryPrefix, latestRequest?.role === 'user' ? latestRequest.content : undefined) })
+			}
+
 			if (m.role === 'checkpoint') continue
 			if (m.role === 'interrupted_streaming_tool') continue
 			if (m.role === 'context_cleared') continue
+			if (m.role === 'context_summary') continue
 			if (m.role === 'assistant') {
 				// thinking signatures are only valid for the model that produced them — after a model
 				// switch, resending them gets a 400, so keep just the text. (No modelSelection = stored
@@ -810,9 +823,10 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 					...(supportsVision ? images.map((i): ChatMedia => ({ kind: 'image', mimeType: i.mimeType, dataBase64: i.dataBase64 })) : []),
 					...(supportsPDF ? pdfs.map((p): ChatMedia => ({ kind: 'pdf', name: p.name, dataBase64: p.dataBase64, pageCount: p.pageCount })) : []),
 				]
+				const content = notes.length === 0 ? m.content : `${m.content}\n\n${notes.join('\n')}`
 				simpleLLMMessages.push({
 					role: m.role,
-					content: notes.length === 0 ? m.content : `${m.content}\n\n${notes.join('\n')}`,
+					content: summaryPrefix === null ? content : `${summarizedThreadMessage(summaryPrefix, undefined)}\n\n${content}`,
 					media: media.length > 0 ? media : undefined,
 				})
 			}
@@ -913,8 +927,9 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 	// --- FIM ---
 
 	prepareFIMMessage: IConvertToLLMMessageService['prepareFIMMessage'] = ({ messages }) => {
-		// Get combined AI instructions with the provided aiInstructions as the base
-		const combinedInstructions = this._getCombinedAIInstructions();
+		// Get combined AI instructions with the provided aiInstructions as the base. Only Kodia's own rules file:
+		// autocomplete sends them with every keystroke, and other agents' files (AGENTS.md, ...) are often long
+		const combinedInstructions = this._getCombinedAIInstructions(['.voidrules']);
 
 		let prefix = `\
 ${!combinedInstructions ? '' : `\

@@ -13,14 +13,16 @@ You bring the models: Kodia talks directly to the providers you configure, or to
 - **Chat sidebar** with three modes: **Normal** (questions), **Gather** (reads and searches your code) and **Agent** (edits files and runs commands, asking for approval).
 - **Apply and Ctrl+K**: apply suggested code, or edit a selection in place. Changes show as diffs you accept or reject.
 - **Checkpoints**: undo everything a turn changed.
-- **Autocomplete** with fill-in-the-middle models (Codestral and others).
+- **Autocomplete** with fill-in-the-middle models (Codestral and others), with context from your other open files.
 - **Agents window**: long-running agent sessions, with Kodia's Mistral agent.
 - **Providers**:
   - cloud: Anthropic, OpenAI, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter;
   - cloud platforms: Google Vertex, Azure, AWS Bedrock, LiteLLM;
   - any OpenAI-compatible API.
 - **Local models**: Ollama, LM Studio and vLLM, plus MLX on Apple Silicon.
-- **Tools**: MCP servers, a terminal, and file search and editing. Kodia also keeps a project memory in `.kodia/memory.md`.
+- **Tools**: MCP servers, a terminal, file search and editing, and web pages (`fetch_url`, with your approval). Kodia also keeps a project memory in `.kodia/memory.md`.
+- **Long threads**: when a thread outgrows the model's context window, the model summarizes the older messages, so the agent keeps what was decided.
+- **Project rules**: Kodia follows `.voidrules`, and also `AGENTS.md`, `CLAUDE.md`, `.cursorrules` and `.windsurfrules`, so a project set up for another agent works as is.
 - **Attachments**: images and PDFs, for the models that support them.
 - **Commit messages** generated from your changes in Source Control.
 - **Import** your settings and extensions from VS Code, Cursor or Windsurf.

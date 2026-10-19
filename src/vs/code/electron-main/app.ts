@@ -221,6 +221,8 @@ import { MlxMainService } from '../../workbench/contrib/void/electron-main/mlxMa
 import { IMlxMainService } from '../../workbench/contrib/void/common/mlxTypes.js';
 import { IVoidSCMService } from '../../workbench/contrib/void/common/voidSCMTypes.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
+import { IKodiaWebFetchService } from '../../workbench/contrib/void/common/webFetchTypes.js';
+import { KodiaWebFetchMainService } from '../../workbench/contrib/void/electron-main/webFetchMainService.js';
 /**
  * The main VS Code application. There will only ever be one instance,
  * even if the user starts many instances (e.g. from the command line).
@@ -1360,6 +1362,7 @@ export class CodeApplication extends Disposable {
 		services.set(IVoidUpdateService, new SyncDescriptor(VoidMainUpdateService, undefined, false));
 		services.set(IVoidSCMService, new SyncDescriptor(VoidSCMService, undefined, false));
 		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
+		services.set(IKodiaWebFetchService, new SyncDescriptor(KodiaWebFetchMainService, undefined, false));
 
 		// Default Extensions Profile Init
 		services.set(IExtensionsProfileScannerService, new SyncDescriptor(ExtensionsProfileScannerService, undefined, true));
@@ -1551,6 +1554,10 @@ export class CodeApplication extends Disposable {
 
 		const mlxChannel = ProxyChannel.fromService(accessor.get(IMlxMainService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-mlx', mlxChannel);
+
+		// Kodia: the fetch_url tool
+		const webFetchChannel = ProxyChannel.fromService(accessor.get(IKodiaWebFetchService), disposables);
+		mainProcessElectronServer.registerChannel('void-channel-webFetch', webFetchChannel);
 
 		// Kodia added this
 		const mcpChannel = new MCPChannel();

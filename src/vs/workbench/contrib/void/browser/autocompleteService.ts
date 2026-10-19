@@ -18,6 +18,14 @@ import { isWindows } from '../../../../base/common/platform.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { FeatureName } from '../common/voidSettingsTypes.js';
 import { IConvertToLLMMessageService } from './convertToLLMMessageService.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { EditorsOrder } from '../../../common/editor.js';
+import { IModelService } from '../../../../editor/common/services/model.js';
+import { ILanguageConfigurationService } from '../../../../editor/common/languages/languageConfigurationRegistry.js';
+import { ILabelService } from '../../../../platform/label/common/label.js';
+import { basename } from '../../../../base/common/resources.js';
+import { Schemas } from '../../../../base/common/network.js';
+import { NeighborFile, similarSnippets, snippetsAsComments } from '../common/helpers/autocompleteContext.js';
 
 
 
@@ -166,6 +174,13 @@ const DEBOUNCE_TIME = 500
 const TIMEOUT_TIME = 60000
 const MAX_CACHE_SIZE = 20
 const MAX_PENDING_REQUESTS = 2
+
+// context from other open files
+const MAX_NEIGHBOR_FILES = 6
+const MAX_NEIGHBOR_FILE_CHARS = 300_000
+const MAX_CONTEXT_SNIPPETS = 3
+const MAX_CONTEXT_CHARS = 2_000
+const looksSecret = (fileName: string) => /^\.env|\.(pem|key|p12|pfx)$|secret|credential/i.test(fileName)
 
 // postprocesses the result
 const processStartAndEndSpaces = (result: string) => {
@@ -511,9 +526,6 @@ const getCompletionOptions = (prefixAndSuffix: PrefixAndSuffixInfo, relevantCont
 	const isLinePrefixEmpty = removeAllWhitespace(prefixToTheLeftOfCursor).length === 0
 	const isLineSuffixEmpty = removeAllWhitespace(suffixToTheRightOfCursor).length === 0
 
-	// TODO add context to prefix
-	// llmPrefix = '\n\n/* Relevant context:\n' + relevantContext + '\n*/\n' + llmPrefix
-
 	// if we just accepted an autocompletion, predict a multiline completion starting on the next line
 	if (justAcceptedAutocompletion && isLineSuffixEmpty) {
 		const prefixWithNewline = prefix + _ln
@@ -566,6 +578,8 @@ const getCompletionOptions = (prefixAndSuffix: PrefixAndSuffixInfo, relevantCont
 		}
 	}
 
+	// snippets from other open files go before the prefix
+	completionOptions.llmPrefix = relevantContext + completionOptions.llmPrefix
 	return completionOptions
 
 }
@@ -714,7 +728,7 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 		}
 
 
-		const relevantContext = ''
+		const relevantContext = this._getRelevantContext(model, prefixAndSuffix.prefix)
 
 		const { shouldGenerate, predictionType, llmPrefix, llmSuffix, stopTokens } = getCompletionOptions(prefixAndSuffix, relevantContext, justAcceptedAutocompletion)
 
@@ -825,11 +839,40 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 
 	}
 
+	// the parts of the other open files most like the code before the cursor, as comments in this file's language
+	private _getRelevantContext(model: ITextModel, prefix: string): string {
+		const lineComment = this._languageConfigurationService.getLanguageConfiguration(model.getLanguageId()).comments?.lineCommentToken
+		if (!lineComment) return ''
+
+		const files: NeighborFile[] = []
+		const seen = new Set<string>([model.uri.toString()])
+		for (const { editor } of this._editorService.getEditors(EditorsOrder.MOST_RECENTLY_ACTIVE)) {
+			if (files.length >= MAX_NEIGHBOR_FILES) break
+			const uri = editor.resource
+			if (!uri || seen.has(uri.toString())) continue
+			seen.add(uri.toString())
+			if (uri.scheme !== Schemas.file && uri.scheme !== Schemas.vscodeRemote && uri.scheme !== Schemas.untitled) continue
+			if (looksSecret(basename(uri))) continue
+			const neighbor = this._modelService.getModel(uri)
+			if (!neighbor || neighbor.getValueLength() > MAX_NEIGHBOR_FILE_CHARS) continue
+			files.push({ path: this._labelService.getUriLabel(uri, { relative: true }), text: neighbor.getValue(EndOfLinePreference.LF) })
+		}
+		if (files.length === 0) return ''
+
+		const code = prefix.split(/\r?\n/).slice(-15).join('\n')
+		const snippets = similarSnippets({ code, files, maxSnippets: MAX_CONTEXT_SNIPPETS, maxChars: MAX_CONTEXT_CHARS })
+		return snippetsAsComments(snippets, lineComment, _ln)
+	}
+
 	constructor(
 		@ILanguageFeaturesService private _langFeatureService: ILanguageFeaturesService,
 		@ILLMMessageService private readonly _llmMessageService: ILLMMessageService,
 		@IVoidSettingsService private readonly _settingsService: IVoidSettingsService,
-		@IConvertToLLMMessageService private readonly _convertToLLMMessageService: IConvertToLLMMessageService
+		@IConvertToLLMMessageService private readonly _convertToLLMMessageService: IConvertToLLMMessageService,
+		@IEditorService private readonly _editorService: IEditorService,
+		@IModelService private readonly _modelService: IModelService,
+		@ILanguageConfigurationService private readonly _languageConfigurationService: ILanguageConfigurationService,
+		@ILabelService private readonly _labelService: ILabelService,
 	) {
 		super()
 

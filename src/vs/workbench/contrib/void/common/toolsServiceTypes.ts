@@ -23,7 +23,7 @@ export type ShallowDirectoryItem = {
 }
 
 
-export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: 'edits' | 'terminal' | 'MCP tools' }> = {
+export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: 'edits' | 'terminal' | 'web pages' | 'MCP tools' }> = {
 	'create_file_or_folder': 'edits',
 	'delete_file_or_folder': 'edits',
 	'rewrite_file': 'edits',
@@ -33,6 +33,8 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'run_persistent_command': 'terminal',
 	'open_persistent_terminal': 'terminal',
 	'kill_persistent_terminal': 'terminal',
+	// a fetched URL can carry data out of the workspace, so the user sees it first
+	'fetch_url': 'web pages',
 }
 
 
@@ -60,6 +62,7 @@ export type BuiltinToolCallParams = {
 	'search_symbols': { query: string },
 	'read_lint_errors': { uri: URI },
 	'read_project_memory': {},
+	'fetch_url': { url: string, pageNumber: number },
 	// ---
 	'rewrite_file': { uri: URI, newContent: string },
 	'write_project_memory': { section: string, content: string },
@@ -87,6 +90,8 @@ export type BuiltinToolResultType = {
 	'search_symbols': { symbols: WorkspaceSymbolEntry[], totalCount: number, hasLanguageServer: boolean },
 	'read_lint_errors': { lintErrors: LintErrorItem[] | null },
 	'read_project_memory': { content: string },
+	// url: where redirects ended
+	'fetch_url': { url: string, title: string | null, content: string, totalLen: number, hasNextPage: boolean },
 	// ---
 	'rewrite_file': Promise<{ lintErrors: LintErrorItem[] | null }>,
 	'edit_file': Promise<{ lintErrors: LintErrorItem[] | null }>,

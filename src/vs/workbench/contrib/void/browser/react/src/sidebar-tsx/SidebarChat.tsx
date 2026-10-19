@@ -1492,6 +1492,7 @@ const titleOfBuiltinToolName = {
 	'find_references': { done: 'Found references', proposed: 'Find references', running: loadingTitleWrapper('Finding references') },
 	'search_symbols': { done: 'Searched symbols', proposed: 'Search symbols', running: loadingTitleWrapper('Searching symbols') },
 	'read_project_memory': { done: 'Read project memory', proposed: 'Read project memory', running: loadingTitleWrapper('Reading project memory') },
+	'fetch_url': { done: 'Fetched', proposed: 'Fetch', running: loadingTitleWrapper('Fetching') },
 	'write_project_memory': { done: 'Saved project memory', proposed: 'Save project memory', running: loadingTitleWrapper('Saving project memory') },
 } as const satisfies Record<BuiltinToolName, { done: any, proposed: any, running: any }>
 
@@ -1655,6 +1656,12 @@ const toolNameToDesc = (toolName: BuiltinToolName, _toolParams: BuiltinToolCallP
 		},
 		'read_project_memory': () => {
 			return { desc1: '' }
+		},
+		'fetch_url': () => {
+			const toolParams = _toolParams as BuiltinToolCallParams['fetch_url']
+			let host = toolParams.url
+			try { host = new URL(toolParams.url).host } catch { }
+			return { desc1: host, desc1Info: toolParams.url }
 		},
 		'write_project_memory': () => {
 			const toolParams = _toolParams as BuiltinToolCallParams['write_project_memory']
@@ -2655,6 +2662,42 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 		},
 	},
 
+	'fetch_url': {
+		resultWrapper: ({ toolMessage }) => {
+			const accessor = useAccessor()
+			const { desc1, desc1Info } = toolNameToDesc(toolMessage.name, toolMessage.params, accessor)
+			const title = getTitle(toolMessage)
+			const icon = null
+
+			if (toolMessage.type === 'running_now') return null // do not show running
+			// a pending request stays visible, so the user sees the URL before approving it
+
+			const isError = false
+			const isRejected = toolMessage.type === 'rejected'
+			const componentParams: ToolHeaderParams = { title, desc1, desc1Info, isError, icon, isRejected, }
+
+			if (toolMessage.type === 'success') {
+				const { result } = toolMessage
+				componentParams.info = result.title ?? undefined
+				componentParams.children = <ToolChildrenWrapper>
+					<CodeChildren className='bg-void-bg-3'>
+						<pre className='font-mono whitespace-pre-wrap'>{result.content || 'The page has no text.'}</pre>
+					</CodeChildren>
+				</ToolChildrenWrapper>
+			}
+			else if (toolMessage.type === 'tool_error') {
+				const { result } = toolMessage
+				componentParams.bottomChildren = <BottomChildren title='Error'>
+					<CodeChildren>
+						{result}
+					</CodeChildren>
+				</BottomChildren>
+			}
+
+			return <ToolHeaderWrapper {...componentParams} />
+		},
+	},
+
 	'write_project_memory': {
 		resultWrapper: ({ toolMessage }) => {
 			const accessor = useAccessor()
@@ -2828,6 +2871,31 @@ const _ChatBubble = ({ threadId, chatMessage, currCheckpointIdx, isCommitted, me
 		</div>
 	}
 
+	else if (role === 'context_summary') {
+		return <ContextSummaryNote summary={chatMessage.summary} isCheckpointGhost={isCheckpointGhost} />
+	}
+
+}
+
+// where the model's view of the thread now starts with a summary (ContextSummaryEntry); click to read it
+const ContextSummaryNote = ({ summary, isCheckpointGhost }: { summary: string, isCheckpointGhost: boolean }) => {
+	const [isOpen, setIsOpen] = useState(false)
+	return <div className={`my-1 ${isCheckpointGhost ? 'opacity-50' : ''}`}>
+		<div
+			className='text-void-fg-4 text-xs text-center select-none cursor-pointer hover:brightness-125'
+			onClick={() => setIsOpen(o => !o)}
+			data-tooltip-id='void-tooltip'
+			data-tooltip-content='The thread outgrew the model’s context window. The model now gets a summary of the earlier messages instead of the messages themselves.'
+			data-tooltip-place='top'
+		>
+			Earlier messages summarized to fit the context window {isOpen ? '▾' : '▸'}
+		</div>
+		{isOpen && <ToolChildrenWrapper>
+			<CodeChildren className='bg-void-bg-3'>
+				<pre className='font-mono whitespace-pre-wrap'>{summary}</pre>
+			</CodeChildren>
+		</ToolChildrenWrapper>}
+	</div>
 }
 
 const CommandBarInChat = ({ messages }: { messages: ChatMessage[] }) => {

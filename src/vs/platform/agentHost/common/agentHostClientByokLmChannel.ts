@@ -36,7 +36,7 @@ export const AGENT_HOST_CLIENT_BYOK_LM_CHANNEL = 'agentHostClientByokLm';
  */
 export function createAgentHostClientByokLmConnection(channel: IChannel): IByokLmBridgeConnection {
 	return {
-		chat: (request) => channel.call('chat', request) as Promise<IByokLmChatResult>,
+		chat: (request, token) => channel.call('chat', request, token) as Promise<IByokLmChatResult>,
 		onDidChangeModels: channel.listen<IByokLmModelInfo[]>('models'),
 	};
 }
@@ -102,10 +102,10 @@ export class AgentHostClientByokLmChannel implements IServerChannel {
 		return emitter.event;
 	}
 
-	async call<T>(_ctx: unknown, command: string, arg?: unknown): Promise<T> {
+	async call<T>(_ctx: unknown, command: string, arg?: unknown, cancellationToken?: CancellationToken): Promise<T> {
 		switch (command) {
 			case 'chat': {
-				const result = await this._handler.chat(arg as IByokLmChatRequest, CancellationToken.None);
+				const result = await this._handler.chat(arg as IByokLmChatRequest, cancellationToken ?? CancellationToken.None);
 				return result as T;
 			}
 		}

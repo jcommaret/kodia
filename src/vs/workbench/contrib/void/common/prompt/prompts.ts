@@ -466,7 +466,9 @@ const toolsNotOfferedToModels: ReadonlySet<BuiltinToolName> = new Set(['read_pro
 // tools that change nothing but still need approval: Gather mode offers them too
 const readOnlyToolsNeedingApproval: ReadonlySet<BuiltinToolName> = new Set(['fetch_url'])
 
-export const availableTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined) => {
+// explicitTools: Kodia Agents Window — an agent that runs its own tools offers exactly those, instead of the chat mode's
+export const availableTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined, explicitTools?: InternalToolInfo[]) => {
+	if (explicitTools) return explicitTools
 
 	const offeredToolNames = (Object.keys(builtinTools) as BuiltinToolName[]).filter(toolName => !toolsNotOfferedToModels.has(toolName))
 	const builtinToolNames: BuiltinToolName[] | undefined = chatMode === 'normal' ? undefined
@@ -509,7 +511,11 @@ export const reParsedToolXMLString = (toolName: ToolName, toolParams: RawToolPar
 /* We expect tools to come at the end - not a hard limit, but that's just how we process them, and the flow makes more sense that way. */
 // - You are allowed to call multiple tools by specifying them consecutively. However, there should be NO text or writing between tool calls or after them.
 const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined) => {
-	const tools = availableTools(chatMode, mcpTools)
+	return toolsXMLSystemPrompt(availableTools(chatMode, mcpTools))
+}
+
+// the XML tool-calling instructions for models without native tool calling (specialToolFormat undefined)
+export const toolsXMLSystemPrompt = (tools: InternalToolInfo[] | undefined) => {
 	if (!tools || tools.length === 0) return null
 
 	const toolXMLDefinitions = (`\

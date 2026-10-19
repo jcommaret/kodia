@@ -87,6 +87,9 @@ import './mistralAgentHostKeyBridge.js'
 // Agents Window: offer only the models shown in Kodia's model dropdown
 import './agentHostShownModelsBridge.js'
 
+// Agents Window: the Kodia agent runs every model shown in Kodia's model dropdown
+import './kodiaAgentHostLmHandler.js'
+
 // metrics
 import '../common/metricsService.js'
 

@@ -19,6 +19,7 @@ import { resolveNLSConfiguration } from './vs/base/node/nls.js';
 import { getUNCHost, addUNCHostToAllowlist } from './vs/base/node/unc.js';
 import { INLSConfiguration } from './vs/nls.js';
 import { NativeParsedArgs } from './vs/platform/environment/common/argv.js';
+import { copyLegacyDataFolders } from './vs/platform/environment/node/legacyDataFolders.js';
 
 perf.mark('code/didStartMain');
 
@@ -34,6 +35,15 @@ perf.mark('code/didLoadMainBundle');
 const portable = configurePortable(product);
 
 const args = parseCLIArgs();
+
+// Kodia: carry over the data folders named after Void (see legacyDataFolders.ts), before argv.json is read from the new one
+if (!portable.isPortable && !process.env['VSCODE_DEV']) {
+	copyLegacyDataFolders(fs, os.homedir(), [
+		{ from: '.void-editor', to: product.dataFolderName ?? '' },
+		{ from: '.void-editor-shared', to: product.sharedDataFolderName ?? '' },
+	]);
+}
+
 // Configure static command line arguments
 perf.mark('code/willConfigureCommandlineSwitches');
 const argvConfig = configureCommandlineSwitchesSync(args);

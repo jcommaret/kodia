@@ -48,7 +48,7 @@ import { ResolvedKeybinding } from '../../../../base/common/keybindings.js';
 import { EditorCommandsContextActionRunner } from '../editor/editorTabsControl.js';
 import { IEditorCommandsContext, IEditorPartOptionsChangeEvent, IToolbarActions } from '../../../common/editor.js';
 import { CodeWindow, mainWindow } from '../../../../base/browser/window.js';
-import { ACCOUNTS_ACTIVITY_TILE_ACTION, GLOBAL_ACTIVITY_TITLE_ACTION, TitleBarLeadingActionsGroup } from './titlebarActions.js';
+import { ACCOUNTS_ACTIVITY_TILE_ACTION, GLOBAL_ACTIVITY_TITLE_ACTION, TitleBarLeadingActionsGroup, TitleBarTrailingActionsGroup } from './titlebarActions.js';
 import { IView } from '../../../../base/browser/ui/grid/grid.js';
 import { createInstantHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
@@ -276,6 +276,8 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 	private readonly actionToolBarDisposable = this._register(new DisposableStore());
 	private readonly editorActionsChangeDisposable = this._register(new DisposableStore());
 	private actionToolBarElement!: HTMLElement;
+	private trailingActionToolBar!: WorkbenchToolBar;
+	private trailingActionToolBarElement!: HTMLElement;
 	private readonly centerAdjacentToolBarDisposable = this._register(new DisposableStore());
 	private centerAdjacentToolBarElement: HTMLElement | undefined;
 	private readonly updateToolBarDisposable = this._register(new DisposableStore());
@@ -532,6 +534,7 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 		// Create Toolbar Actions
 		if (hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {
 			this.actionToolBarElement = append(this.rightContent, $('div.action-toolbar-container'));
+			this.trailingActionToolBarElement = append(this.rightContent, $('div.action-toolbar-container.trailing-action-toolbar-container'));
 			this.createActionToolBar();
 			this.createActionToolBarMenus();
 		}
@@ -701,6 +704,16 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 			hoverDelegate: this.hoverDelegate
 		}));
 
+		this.trailingActionToolBar = this.actionToolBarDisposable.add(this.instantiationService.createInstance(WorkbenchToolBar, this.trailingActionToolBarElement, {
+			contextMenu: MenuId.TitleBarContext,
+			orientation: ActionsOrientation.HORIZONTAL,
+			ariaLabel: localize('ariaLabelTitleActions', "Title actions"),
+			getKeyBinding: action => this.getKeybinding(action),
+			telemetrySource: 'titlePart',
+			actionViewItemProvider: (action, options) => this.actionViewItemProvider(action, options),
+			hoverDelegate: this.hoverDelegate
+		}));
+
 		if (this.editorActionsEnabled) {
 			this.actionToolBarDisposable.add(this.editorGroupsContainer.onDidChangeActiveGroup(() => this.createActionToolBarMenus({ editorActions: true })));
 		}
@@ -754,9 +767,9 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 			}
 
 			// --- Global Actions (after layout so e.g. notification bell appears to the right of layout controls).
-			// Filter out the leading group up front so it isn't duplicated into the overflow `secondary` bucket.
+			// Filter out the leading and trailing groups up front so they aren't duplicated into the overflow `secondary` bucket.
 			if (this.globalToolbarMenu) {
-				const trailingGroups = this.globalToolbarMenu.getActions().filter(([group]) => group !== TitleBarLeadingActionsGroup);
+				const trailingGroups = this.globalToolbarMenu.getActions().filter(([group]) => group !== TitleBarLeadingActionsGroup && group !== TitleBarTrailingActionsGroup);
 				fillInActionBarActions(
 					trailingGroups,
 					actions
@@ -773,6 +786,19 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 			}
 
 			this.actionToolBar.setActions(prepareActions(actions.primary), prepareActions(actions.secondary));
+
+			// --- Trailing Global Actions (own tool bar after the action tool bar and its overflow menu, at the far right;
+			// opt-in via TitleBarTrailingActionsGroup).
+			const trailing: IToolbarActions = { primary: [], secondary: [] };
+			if (this.globalToolbarMenu) {
+				fillInActionBarActions(
+					this.globalToolbarMenu.getActions(),
+					trailing,
+					actionGroup => actionGroup === TitleBarTrailingActionsGroup
+				);
+			}
+			this.trailingActionToolBar.setActions(prepareActions(trailing.primary));
+			this.trailingActionToolBarElement.classList.toggle('has-no-actions', trailing.primary.length === 0);
 		};
 
 		// Create/Update the menus which should be in the title tool bar

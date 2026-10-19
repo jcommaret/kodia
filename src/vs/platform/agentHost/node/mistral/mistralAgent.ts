@@ -196,9 +196,9 @@ export class MistralAgent extends Disposable implements IAgent {
 	) {
 		super();
 		this._apiKey = process.env[AgentHostMistralApiKeyEnvVar] || undefined;
-		// Seed synchronously so the picker is never empty, then replace with the
-		// real, capability-filtered catalog from the Mistral API.
-		this._models.set(this._buildSeedModels(), undefined);
+		// Seed synchronously when there is a key, then replace with the real,
+		// capability-filtered catalog from the Mistral API.
+		this._resetModels();
 		void this._refreshModels();
 	}
 
@@ -225,6 +225,7 @@ export class MistralAgent extends Disposable implements IAgent {
 		const changed = token !== this._apiKey;
 		this._apiKey = token || undefined;
 		if (changed) {
+			this._resetModels();
 			this._onDidChangeApiKey.fire();
 			await this._refreshModels();
 		}
@@ -233,6 +234,15 @@ export class MistralAgent extends Disposable implements IAgent {
 
 	refreshModels(): Promise<void> {
 		return this._refreshModels();
+	}
+
+	/**
+	 * Kodia: models are only advertised while there is an API key, so the Agents
+	 * window never offers a Mistral model it cannot use. With a key, the seed list
+	 * stands in until the live catalog replaces it.
+	 */
+	private _resetModels(): void {
+		this._models.set(this._apiKey ? this._buildSeedModels() : [], undefined);
 	}
 
 	private _buildSeedModels(): readonly IAgentModelInfo[] {
@@ -248,9 +258,9 @@ export class MistralAgent extends Disposable implements IAgent {
 	/**
 	 * Replace the seed catalog with the user's real, tool-capable Mistral
 	 * models. Agent chats require function calling, so models that don't
-	 * advertise it are filtered out. On any failure (no key, network, empty
-	 * result) the existing models are left untouched so the picker keeps
-	 * working with the seed list.
+	 * advertise it are filtered out. Without a key there is nothing to fetch.
+	 * On any other failure (network, empty result) the existing models are left
+	 * untouched so the picker keeps working with the seed list.
 	 */
 	private async _refreshModels(): Promise<void> {
 		const apiKey = this._apiKey;

@@ -24,6 +24,13 @@ import { NotificationsPosition, NotificationsSettings } from '../../../common/no
  */
 export const TitleBarLeadingActionsGroup = '0_leading';
 
+/**
+ * Menu group for actions contributed to {@link MenuId.TitleBar} that should render
+ * in their own tool bar at the far right, **after** every other title bar action
+ * (including the accounts and manage actions and the overflow menu).
+ */
+export const TitleBarTrailingActionsGroup = 'z_trailing';
+
 // --- Context Menu Actions --- //
 
 export class ToggleTitleBarConfigAction extends Action2 {

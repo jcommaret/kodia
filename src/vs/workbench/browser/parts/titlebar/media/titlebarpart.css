@@ -451,6 +451,11 @@
 	margin-left: auto;
 }
 
+/* Trailing actions sit right after the action tool bar (and its overflow menu), at the far right. */
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container + .trailing-action-toolbar-container {
+	margin-left: 0;
+}
+
 .monaco-workbench.mac:not(.web) .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container,
 .monaco-workbench.mac:not(.web) .part.titlebar > .titlebar-container > .titlebar-right > .update-toolbar-container {
 	position: relative;

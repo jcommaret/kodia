@@ -10,7 +10,7 @@ import { INativeHostService } from '../../../platform/native/common/native.js';
 import { IOpenedMainWindow, IOpenEmptyWindowOptions, IOpenWindowOptions, IWindowOpenable, isFolderToOpen } from '../../../platform/window/common/window.js';
 import { constObservable } from '../../../base/common/observable.js';
 import { URI } from '../../../base/common/uri.js';
-import { getChatSessionToOpenInEditor, openSessionInVSCode, returnToVSCodeEditor, shouldShowReturnToVSCodeEditor } from '../../electron-browser/actions/vscodeActions.js';
+import { getChatSessionToOpenInEditor, openSessionInVSCode, returnToVSCodeEditor, shouldShowReturnToVSCodeEditor, switchToIDE } from '../../electron-browser/actions/vscodeActions.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
 import { IChat } from '../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../services/sessions/browser/sessionsProvidersService.js';
@@ -112,13 +112,57 @@ suite('VS Code Actions', () => {
 
 		assert.deepStrictEqual(calls, [{ empty: true }]);
 	});
+
+	suite('switchToIDE', () => {
+		const agentsWindowId = 1;
+		const session = createSession('switch', true, [URI.file('/repo')]);
+
+		async function switchWith(windows: IOpenedMainWindow[]): Promise<string[]> {
+			const calls: string[] = [];
+			const nativeHostService = new class extends mock<INativeHostService>() {
+				override async getWindows(): Promise<IOpenedMainWindow[]> {
+					return windows;
+				}
+				override async focusWindow(options?: { targetWindowId?: number }): Promise<void> {
+					calls.push(`focus:${options?.targetWindowId}`);
+				}
+				override async openWindow(toOpen?: IOpenEmptyWindowOptions | IWindowOpenable[]): Promise<void> {
+					calls.push(`open:${Array.isArray(toOpen) ? toOpen.filter(isFolderToOpen).map(openable => openable.folderUri.toString()).join(',') : 'empty'}`);
+				}
+			}();
+			await switchToIDE(
+				nativeHostService,
+				agentsWindowId,
+				session,
+				new class extends mock<ISessionsProvidersService>() { }(),
+				new class extends mock<IRemoteAgentHostService>() { }(),
+			);
+			return calls;
+		}
+
+		test('focuses the editor window showing the session folder', async () => {
+			const calls = await switchWith([createWindow(agentsWindowId), createWindow(2, URI.file('/other')), createWindow(3, URI.file('/repo'))]);
+			assert.deepStrictEqual(calls, ['focus:3']);
+		});
+
+		test('focuses another editor window when none shows the session folder', async () => {
+			const calls = await switchWith([createWindow(agentsWindowId), createWindow(2, URI.file('/other')), createWindow(3)]);
+			assert.deepStrictEqual(calls, ['focus:2']);
+		});
+
+		test('opens the session folder when the Agents window is the only window', async () => {
+			const calls = await switchWith([createWindow(agentsWindowId)]);
+			assert.deepStrictEqual(calls, ['open:file:///repo']);
+		});
+	});
 });
 
-function createWindow(id: number): IOpenedMainWindow {
+function createWindow(id: number, folderUri?: URI): IOpenedMainWindow {
 	return {
 		id,
 		title: `Window ${id}`,
 		dirty: false,
+		workspace: folderUri ? { id: `folder-${id}`, uri: folderUri } : undefined,
 	};
 }
 

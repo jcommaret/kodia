@@ -9,11 +9,13 @@ import { IManagedHover } from '../../../../../base/browser/ui/hover/hover.js';
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IAction } from '../../../../../base/common/actions.js';
 import { disposableLongTimeout } from '../../../../../base/common/async.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
 import { isCancellationError } from '../../../../../base/common/errors.js';
 import { StringSHA1 } from '../../../../../base/common/hash.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
 import { autorun, observableFromEvent } from '../../../../../base/common/observable.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { EditorContextKeys } from '../../../../../editor/common/editorContextKeys.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
@@ -36,7 +38,7 @@ import { Schemas } from '../../../../../base/common/network.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
 import { EditorAreaFocusContext, IsSessionsWindowContext } from '../../../../common/contextkeys.js';
-import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
+import { TitleBarTrailingActionsGroup, ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { IChatWidget, IChatWidgetService, isIChatResourceViewContext } from '../../browser/chat.js';
@@ -251,7 +253,9 @@ export class OpenWorkspaceInAgentsWindowTitleBarAction extends Action2 {
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: false,
 			menu: {
-				id: MenuId.TitleBarAdjacentCenter,
+				// Kodia: at the far right of the title bar (upstream puts it next to the command center).
+				id: MenuId.TitleBar,
+				group: TitleBarTrailingActionsGroup,
 				order: -1000,
 				when: ContextKeyExpr.and(
 					OPEN_AGENTS_WINDOW_PRECONDITION,
@@ -484,7 +488,9 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 	override render(container: HTMLElement): void {
 		super.render(container);
 
-		container.classList.add('open-in-agents-titlebar-widget', 'expand-on-hover');
+		// Kodia: at the far right of the title bar, a label expanding on hover would shift every other
+		// title bar action, so it only expands when an experiment asks for it (Kodia has none).
+		container.classList.add('open-in-agents-titlebar-widget');
 		container.setAttribute('role', 'button');
 		this._register(addDisposableListener(container, EventType.MOUSE_ENTER, () => {
 			this.isHovered = true;
@@ -499,7 +505,7 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 			([expandOnHover]) => {
 				this.expansionTreatmentResolved = true;
 				this.logExpansionExperimentTrigger();
-				container.classList.toggle('expand-on-hover', expandOnHover ?? true);
+				container.classList.toggle('expand-on-hover', expandOnHover ?? false);
 			},
 			this.assignmentService,
 			this.logService,
@@ -510,7 +516,7 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		container.setAttribute('aria-label', hoverText);
 		this.hover = this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
-		const icon = append(container, $('span.open-in-agents-titlebar-widget-icon'));
+		const icon = append(container, $(`span.open-in-agents-titlebar-widget-icon${ThemeIcon.asCSSSelector(Codicon.agent)}`));
 		icon.setAttribute('aria-hidden', 'true');
 
 		this.labelElement = append(container, $('span.open-in-agents-titlebar-widget-label'));
@@ -570,7 +576,7 @@ export class OpenWorkspaceInAgentsContribution extends Disposable implements IWo
 		updateHasCreatedSession();
 		this._register(usage.onDidChangeCreatedSessionCount(this._store)(updateHasCreatedSession));
 
-		this._register(actionViewItemService.register(MenuId.TitleBarAdjacentCenter, OPEN_WORKSPACE_IN_AGENTS_WINDOW_TITLE_BAR_COMMAND_ID, (action, options) => {
+		this._register(actionViewItemService.register(MenuId.TitleBar, OPEN_WORKSPACE_IN_AGENTS_WINDOW_TITLE_BAR_COMMAND_ID, (action, options) => {
 			return instantiationService.createInstance(OpenWorkspaceInAgentsTitleBarWidget, action, options);
 		}, undefined));
 	}

@@ -6,6 +6,7 @@
 import { Codicon } from '../../../base/common/codicons.js';
 import { getWindowId } from '../../../base/browser/dom.js';
 import { mainWindow } from '../../../base/browser/window.js';
+import { isEqual } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../editor/browser/editorExtensions.js';
 import { EditorContextKeys } from '../../../editor/common/editorContextKeys.js';
@@ -31,6 +32,7 @@ import { Disposable } from '../../../base/common/lifecycle.js';
 import { resolveRemoteFolderUri } from '../../browser/openInVSCodeUtils.js';
 import { INativeHostService } from '../../../platform/native/common/native.js';
 import { IOpenedMainWindow } from '../../../platform/window/common/window.js';
+import { isSingleFolderWorkspaceIdentifier } from '../../../platform/workspace/common/workspace.js';
 import { OPEN_VSCODE_WINDOW_COMMAND_ID, RETURN_TO_VSCODE_EDITOR_COMMAND_ID, SHOULD_SHOW_RETURN_TO_VSCODE_EDITOR_COMMAND_ID } from '../../common/sessionCommands.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
 
@@ -71,15 +73,23 @@ export async function openSessionInVSCode(
 	sessionsProvidersService: ISessionsProvidersService,
 	remoteAgentHostService: IRemoteAgentHostService,
 ): Promise<void> {
-	const folderUris = session?.activeChat.get().workspace.get()?.folders.map(folder =>
-		resolveRemoteFolderUri(folder.workingDirectory, session.providerId, sessionsProvidersService, remoteAgentHostService)
-	);
-	if (!folderUris?.length) {
+	const folderUris = getSessionFolderUris(session, sessionsProvidersService, remoteAgentHostService);
+	if (!folderUris.length) {
 		return nativeHostService.openWindow();
 	}
 
 	const chatSessionToOpen = getChatSessionToOpenInEditor(session);
 	return nativeHostService.openWindow(folderUris.map(folderUri => ({ folderUri })), { forceNewWindow: true, chatSessionToOpen });
+}
+
+function getSessionFolderUris(
+	session: IActiveSession | undefined,
+	sessionsProvidersService: ISessionsProvidersService,
+	remoteAgentHostService: IRemoteAgentHostService,
+): URI[] {
+	return session?.activeChat.get().workspace.get()?.folders.map(folder =>
+		resolveRemoteFolderUri(folder.workingDirectory, session.providerId, sessionsProvidersService, remoteAgentHostService)
+	) ?? [];
 }
 
 /**
@@ -95,8 +105,16 @@ export class OpenVSCodeWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenVSCodeWindowAction.ID,
-			title: localize2('openVSCodeWindow', 'Open VS Code Window'),
+			// Kodia: a title bar button at the far right, where the IDE has its button to open the Agents window.
+			title: localize2('switchToIDE', 'Switch to IDE'),
+			icon: Codicon.code,
 			f1: true,
+			menu: [{
+				id: Menus.TitleBarRightLayout,
+				group: 'navigation',
+				order: 1000, // after the account widget
+				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsPhoneLayoutContext.negate()),
+			}],
 			keybinding: {
 				primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyA,
 				weight: KeybindingWeight.WorkbenchContrib,
@@ -108,17 +126,34 @@ export class OpenVSCodeWindowAction extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const nativeHostService = accessor.get(INativeHostService);
+		const sessionsService = accessor.get(ISessionsService);
+		const sessionsProvidersService = accessor.get(ISessionsProvidersService);
+		const remoteAgentHostService = accessor.get(IRemoteAgentHostService);
 
-		const windows = await nativeHostService.getWindows({ includeAuxiliaryWindows: false });
-		const currentWindowId = getWindowId(mainWindow);
-		const vscodeWindow = windows.find(w => w.id !== currentWindowId);
-
-		if (vscodeWindow) {
-			await nativeHostService.focusWindow({ targetWindowId: vscodeWindow.id });
-		} else {
-			await nativeHostService.openWindow();
-		}
+		await switchToIDE(nativeHostService, getWindowId(mainWindow), sessionsService.activeSession.get(), sessionsProvidersService, remoteAgentHostService);
 	}
+}
+
+/**
+ * Kodia: focuses an editor window, preferring the one showing the active session's folder. When no editor
+ * window is open, opens one on the active session's folders (or an empty one when the session has none).
+ */
+export async function switchToIDE(
+	nativeHostService: INativeHostService,
+	currentWindowId: number,
+	session: IActiveSession | undefined,
+	sessionsProvidersService: ISessionsProvidersService,
+	remoteAgentHostService: IRemoteAgentHostService,
+): Promise<void> {
+	const windows = await nativeHostService.getWindows({ includeAuxiliaryWindows: false });
+	const editorWindows = windows.filter(w => w.id !== currentWindowId);
+	if (!editorWindows.length) {
+		return openSessionInVSCode(nativeHostService, session, sessionsProvidersService, remoteAgentHostService);
+	}
+
+	const folderUris = getSessionFolderUris(session, sessionsProvidersService, remoteAgentHostService);
+	const sessionWindow = editorWindows.find(({ workspace }) => isSingleFolderWorkspaceIdentifier(workspace) && folderUris.some(folderUri => isEqual(folderUri, workspace.uri)));
+	await nativeHostService.focusWindow({ targetWindowId: (sessionWindow ?? editorWindows[0]).id });
 }
 
 export class ReturnToVSCodeEditorAction extends Action2 {

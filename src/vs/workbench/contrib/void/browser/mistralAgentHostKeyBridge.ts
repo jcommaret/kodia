@@ -66,7 +66,8 @@ class MistralAgentHostKeyBridge extends Disposable implements IWorkbenchContribu
 			return;
 		}
 		const voidKey = this._voidSettingsService.state.settingsOfProvider.mistral?.apiKey ?? '';
-		if (!voidKey || voidKey === this._lastPushed) {
+		// A removed key is pushed too (as ''), so the agent stops offering its models.
+		if (voidKey === (this._lastPushed ?? '')) {
 			return;
 		}
 		this._lastPushed = voidKey;

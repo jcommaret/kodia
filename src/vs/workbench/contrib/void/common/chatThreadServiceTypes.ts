@@ -55,6 +55,15 @@ export type ContextClearedEntry = {
 	keepFromIdx: number;
 }
 
+// Appended when the thread still didn't fit after clearing old tool results: from then on, the messages before
+// keepFromIdx (a user or assistant message) go to the model as this summary, written by the chat model itself.
+// What was decided survives, instead of the oldest messages being cut on every request.
+export type ContextSummaryEntry = {
+	role: 'context_summary';
+	summary: string;
+	keepFromIdx: number;
+}
+
 
 // WARNING: changing this format is a big deal!!!!!! need to migrate old format to new format on users' computers so people don't get errors.
 export type ChatMessage =
@@ -82,6 +91,7 @@ export type ChatMessage =
 	| DecorativeCanceledTool
 	| CheckpointEntry
 	| ContextClearedEntry
+	| ContextSummaryEntry
 
 
 // one of the square items that indicates a selection in a chat bubble

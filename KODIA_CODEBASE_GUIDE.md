@@ -55,14 +55,14 @@ flowchart LR
 	CTS <--> TOOLS["toolsService / terminalToolService / mcpService"]
 ```
 
-- **`chatThreadService`** owns the chat threads. It runs the agent loop (send, run tools, send again), and keeps the checkpoints used to undo a turn.
+- **`chatThreadService`** owns the chat threads. It runs the agent loop (send, run tools, send again), and keeps the checkpoints used to undo a turn. When a thread outgrows the model's context window, it first clears old tool results (`context_cleared`), then has the model summarize the older messages (`context_summary`, see `common/helpers/threadSummary.ts`).
 - **`convertToLLMMessageService`** builds the system message and turns the thread into each provider's message format:
-  - the system message includes the workspace's `.voidrules` files and the project memory;
+  - the system message includes the workspace's rules files (`.voidrules`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.windsurfrules`; see `PROJECT_RULES_FILE_NAMES`) and the project memory;
   - the conversion covers OpenAI-compatible, Anthropic and Gemini formats, tool calls and attachments.
 - **`sendLLMMessageService`** forwards the request to the main process.
 - **`sendLLMMessage.impl.ts`** talks to the providers (Anthropic, OpenAI-compatible, Gemini, Mistral, Ollama…). Models without native tool calling use XML tool calls, parsed by `extractGrammar.ts`.
 - **`modelCapabilities.ts`** describes every model: context window, prices, reasoning, tool format, vision, PDF support, caching. Update it when providers change their catalog. The weekly `model-catalog.yml` workflow reports drift.
-- **`toolsService`** implements the built-in tools: read, search, edit and create files, and project memory. **`terminalToolService`** runs commands. **`mcpService`**, with `electron-main/mcpChannel.ts`, connects MCP servers.
+- **`toolsService`** implements the built-in tools: read, search, edit and create files, project memory, and `fetch_url` (web pages, fetched by `electron-main/webFetchMainService.ts` because a window's requests hit CORS). **`terminalToolService`** runs commands. **`mcpService`**, with `electron-main/mcpChannel.ts`, connects MCP servers.
 
 Sending from the main process avoids CSP issues with local providers and gives access to Node modules.
 
@@ -105,7 +105,7 @@ Terms (`voidSettingsTypes.ts`):
 
 ## Other features
 
-- **Autocomplete** (`autocompleteService`): fill-in-the-middle completions, with caching and post-processing.
+- **Autocomplete** (`autocompleteService`): fill-in-the-middle completions, with caching and post-processing. The prompt starts with the parts of the other open files most like the code before the cursor (`common/helpers/autocompleteContext.ts`).
 - **Commit messages** (`voidSCMService`, `electron-main/voidSCMMainService.ts`): the "generate commit message" button in Source Control.
 - **Project memory** (`projectMemoryService`): notes the agent keeps in `.kodia/memory.md`, added to the system message.
 - **Local models**:

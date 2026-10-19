@@ -28,6 +28,9 @@ import { MAX_CHILDREN_URIs_PAGE, MAX_FILE_CHARS_PAGE, MAX_PROJECT_MEMORY_TOKENS,
 import { IVoidSettingsService } from '../common/voidSettingsService.js'
 import { generateUuid } from '../../../../base/common/uuid.js'
 import { IProjectMemoryService } from '../common/projectMemoryService.js'
+import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
+import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
+import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
 
 
 // tool use for AI
@@ -202,6 +205,9 @@ const checkIfIsFolder = (uriStr: string) => {
 	return false
 }
 
+// fetch_url keeps this many pages, to read their next pages without downloading them again
+const MAX_RECENT_PAGES = 10
+
 export interface IToolsService {
 	readonly _serviceBrand: undefined;
 	validateParams: ValidateBuiltinParams;
@@ -234,8 +240,20 @@ export class ToolsService implements IToolsService {
 		@IProjectMemoryService private readonly projectMemoryService: IProjectMemoryService,
 		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
 		@ITextModelService textModelService: ITextModelService,
+		@IMainProcessService mainProcessService: IMainProcessService,
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
+		const webFetchService = ProxyChannel.toService<IKodiaWebFetchService>(mainProcessService.getChannel('void-channel-webFetch'))
+
+		const recentPages = new Map<string, WebFetchResult>()
+		const fetchPage = async (url: string) => {
+			const cached = recentPages.get(url)
+			if (cached) return cached
+			const page = await webFetchService.fetchURL(url)
+			recentPages.set(url, page)
+			if (recentPages.size > MAX_RECENT_PAGES) recentPages.delete(recentPages.keys().next().value!)
+			return page
+		}
 
 		const modelOfFile = async (uri: URI) => {
 			await voidModelService.initializeModel(uri)
@@ -365,6 +383,14 @@ export class ToolsService implements IToolsService {
 
 			read_project_memory: (params: RawToolParamsObj) => {
 				return {}
+			},
+
+			fetch_url: (params: RawToolParamsObj) => {
+				const { url: urlUnknown, page_number: pageNumberUnknown } = params
+				const url = validateStr('url', urlUnknown).trim()
+				if (!/^https?:\/\//i.test(url)) throw new Error(`Invalid LLM output: url must start with http:// or https://, got "${url}".`)
+				const pageNumber = validatePageNum(pageNumberUnknown)
+				return { url, pageNumber }
 			},
 
 			// ---
@@ -593,6 +619,15 @@ export class ToolsService implements IToolsService {
 				return { result: { content } }
 			},
 
+			fetch_url: async ({ url, pageNumber }) => {
+				const page = await fetchPage(url)
+				const fromIdx = MAX_FILE_CHARS_PAGE * (pageNumber - 1)
+				const toIdx = MAX_FILE_CHARS_PAGE * pageNumber - 1
+				const content = page.text.slice(fromIdx, toIdx + 1) // paginate
+				const hasNextPage = (page.text.length - 1) - toIdx >= 1
+				return { result: { url: page.url, title: page.title, content, totalLen: page.text.length, hasNextPage } }
+			},
+
 			// ---
 
 			create_file_or_folder: async ({ uri, isFolder }) => {
@@ -742,6 +777,12 @@ export class ToolsService implements IToolsService {
 			},
 			read_project_memory: (params, result) => {
 				return result.content || 'No project memory stored yet.'
+			},
+			fetch_url: (params, result) => {
+				const header = `${result.title ? `${result.title}\n` : ''}${result.url}${result.url !== params.url ? ` (redirected from ${params.url})` : ''}`
+				const content = result.content || (params.pageNumber > 1 ? '(No content on this page.)' : '(The page has no text. It may need JavaScript to render.)')
+				const truncated = result.hasNextPage ? `${nextPageStr(true)}\nMore info because truncated: this page has ${result.totalLen} characters.` : ''
+				return `${header}\n\n${content}${truncated}`
 			},
 			// ---
 			create_file_or_folder: (params, result) => {

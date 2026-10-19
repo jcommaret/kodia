@@ -11,10 +11,12 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { URI } from '../../../../base/common/uri.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
-import { chat_userMessageContent, isABuiltinToolName } from '../common/prompt/prompts.js';
+import { chat_userMessageContent, isABuiltinToolName, summarizeThread_systemMessage, summarizeThread_userMessage } from '../common/prompt/prompts.js';
+import { chooseSummaryKeepIdx, transcriptForSummary } from '../common/helpers/threadSummary.js';
+import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { AnthropicReasoning, getErrorMessage, LLMUsage, RawToolCallObj, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { FeatureName, ModelSelection, ModelSelectionOptions } from '../common/voidSettingsTypes.js';
+import { FeatureName, ModelSelection, ModelSelectionOptions, OverridesOfModel } from '../common/voidSettingsTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, ToolCallParams, ToolName, ToolResult } from '../common/toolsServiceTypes.js';
 import { IToolsService } from './toolsService.js';
@@ -550,6 +552,60 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		return true
 	}
 
+	// the keepFromIdx of the latest summary tried per thread, so a summary that failed isn't retried on every request
+	private readonly _summaryTriedAt = new Map<string, number>()
+
+	// The thread still doesn't fit after clearing old tool results: have the chat model summarize its older messages
+	// (ContextSummaryEntry). Returns false if there was nothing new to summarize, or the summary failed or was stopped.
+	private async _summarizeOlderMessages(threadId: string, { modelSelection, modelSelectionOptions, overridesOfModel, onInterrupt }: {
+		modelSelection: ModelSelection, modelSelectionOptions: ModelSelectionOptions | undefined, overridesOfModel: OverridesOfModel, onInterrupt: () => void,
+	}): Promise<boolean> {
+		const messages = this.state.allThreads[threadId]?.messages
+		if (!messages) return false
+
+		const lastSummary = findLast(messages, m => m.role === 'context_summary')
+		const previousSummary = lastSummary?.role === 'context_summary' ? lastSummary : undefined
+		const summarizedBefore = previousSummary?.keepFromIdx ?? 0
+		const keepFromIdx = chooseSummaryKeepIdx(messages, summarizedBefore)
+		if (keepFromIdx === null || (this._summaryTriedAt.get(threadId) ?? -1) >= keepFromIdx) return false
+		this._summaryTriedAt.set(threadId, keepFromIdx)
+
+		// the transcript takes up to half the window (~3 characters per token)
+		const { contextWindow } = getModelCapabilities(modelSelection.providerName, modelSelection.modelName, overridesOfModel)
+		const maxChars = Math.max(8_000, Math.floor((contextWindow - 8_000) * 0.5 * 3))
+		const transcript = transcriptForSummary(messages.slice(summarizedBefore, keepFromIdx), { previousSummary: previousSummary?.summary, maxChars })
+		const { messages: llmMessages, separateSystemMessage } = this._convertToLLMMessagesService.prepareLLMSimpleMessages({
+			simpleMessages: [{ role: 'user', content: summarizeThread_userMessage(transcript) }],
+			systemMessage: summarizeThread_systemMessage,
+			modelSelection,
+			featureName: 'Chat',
+		})
+
+		const summary = await new Promise<string | null>(resolve => {
+			const requestId = this._llmMessageService.sendLLMMessage({
+				messagesType: 'chatMessages',
+				messages: llmMessages,
+				separateSystemMessage,
+				chatMode: null,
+				modelSelection,
+				modelSelectionOptions,
+				overridesOfModel,
+				logging: { loggingName: 'Chat - Summarize thread', loggingExtras: { threadId } },
+				onText: () => { },
+				onFinalMessage: ({ fullText }) => resolve(fullText.trim() || null),
+				onError: (e) => { console.error('Error summarizing the thread:', e.message); resolve(null) },
+				onAbort: () => resolve(null),
+			})
+			if (!requestId) return resolve(null)
+			// stopping the chat stops the summary too
+			this._setStreamState(threadId, { isRunning: 'idle', interrupt: Promise.resolve(() => { onInterrupt(); this._llmMessageService.abort(requestId) }) })
+		})
+		if (!summary) return false
+
+		this._addMessageToThread(threadId, { role: 'context_summary', summary, keepFromIdx })
+		return true
+	}
+
 	// every tool still marked running — several when a turn's calls run in parallel
 	private _rejectRunningTools(threadId: string) {
 		const messages = this.state.allThreads[threadId]?.messages ?? [] // snapshot: updates below replace the array, not mutate it
@@ -833,6 +889,12 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			let prepared = await prepare()
 			// too long for the model: clear old tool results once, rather than truncating messages on every request
 			if (prepared.wasOverBudget && this._clearOldToolResults(threadId)) prepared = await prepare()
+			// still too long: summarize the older messages (when that fails, prepare's truncation is the fallback)
+			if (prepared.wasOverBudget && modelSelection && !interruptedWhenIdle) {
+				const summarized = await this._summarizeOlderMessages(threadId, { modelSelection, modelSelectionOptions, overridesOfModel, onInterrupt: () => { interruptedWhenIdle = true } })
+				if (!interruptedWhenIdle) this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
+				if (summarized && !interruptedWhenIdle) prepared = await prepare()
+			}
 			const { messages, separateSystemMessage, estimatedInputTokens } = prepared
 
 			if (interruptedWhenIdle) {

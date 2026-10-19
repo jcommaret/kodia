@@ -1582,7 +1582,7 @@ export const Settings = () => {
 									<h4 className={`text-void-fg-3 mb-4`}>
 										<ChatMarkdownRender inPTag={true} string={`
 System instructions to include with all AI requests.
-Alternatively, place a \`.voidrules\` file in the root of your workspace.
+Kodia also reads \`.voidrules\`, \`AGENTS.md\`, \`CLAUDE.md\`, \`.cursorrules\` and \`.windsurfrules\` from the root of your workspace.
 								`} chatMessageLocation={undefined} />
 									</h4>
 									<ErrorBoundary>

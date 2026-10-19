@@ -36,6 +36,53 @@ export const MAX_PROJECT_MEMORY_TOKENS = 2_000
 export const MAX_PREFIX_SUFFIX_CHARS = 20_000
 
 
+// --- summarizing a thread that outgrew the context window (ContextSummaryEntry) ---
+
+export const summarizeThread_systemMessage = `\
+You summarize a conversation between a user and an AI coding agent. The agent will continue the work from your summary alone: the messages you summarize will be gone.
+
+Keep everything the agent needs to continue:
+- what the user asked for, with their exact constraints and preferences;
+- the decisions made, and why;
+- the files read, created or changed (full paths), and what changed in them;
+- the commands run and what they showed, the errors met and how they were fixed;
+- what is done, and what remains to do.
+
+Leave out pleasantries and details that no longer matter. Write short bullet points under short headings, at most about 600 words. State only what the conversation shows.`
+
+export const summarizeThread_userMessage = (transcript: string) => `\
+Summarize this conversation, following your instructions.
+
+<conversation>
+${transcript}
+</conversation>`
+
+// sent to the chat model in place of the summarized messages; latestRequest when the summary cut the current turn
+export const summarizedThreadMessage = (summary: string, latestRequest: string | undefined) => [
+	`(The earlier part of this conversation was summarized to fit the context window.)`,
+	`SUMMARY OF THE EARLIER CONVERSATION:\n${summary}`,
+	...latestRequest !== undefined ? [`THE USER'S CURRENT REQUEST, which you are working on:\n${latestRequest}`] : [],
+].join('\n\n')
+
+
+// The instruction files read from the root of each workspace folder: Kodia's own, then the ones
+// other agents use, so a project set up for Codex, Claude Code, Cursor or Windsurf works as is
+export const PROJECT_RULES_FILE_NAMES = ['.voidrules', 'AGENTS.md', 'CLAUDE.md', '.cursorrules', '.windsurfrules'] as const
+
+// Labels each rules file with its path. A file with the same content as an earlier one (a symlink, a copy) is left out.
+export const joinProjectRules = (files: { path: string, content: string }[]): string => {
+	const seen = new Set<string>()
+	const parts: string[] = []
+	for (const { path, content } of files) {
+		const trimmed = content.trim()
+		if (!trimmed || seen.has(trimmed)) continue
+		seen.add(trimmed)
+		parts.push(`From ${path}:\n${trimmed}`)
+	}
+	return parts.join('\n\n')
+}
+
+
 export const ORIGINAL = `<<<<<<< ORIGINAL`
 export const DIVIDER = `=======`
 export const FINAL = `>>>>>>> UPDATED`
@@ -303,6 +350,15 @@ export const builtinTools: {
 		params: {},
 	},
 
+	fetch_url: {
+		name: 'fetch_url',
+		description: `Fetches a web page and returns its text (as markdown: headings, lists, links and code blocks). Use it to read documentation, an API reference, a changelog or an issue, especially a URL the user gave you. Each URL needs the user's approval, so fetch only what you need, and never put workspace code, secrets or personal data in a URL.`,
+		params: {
+			url: { description: 'The full http(s) URL of the page.' },
+			...paginationParam,
+		},
+	},
+
 	// --- editing (create/delete) ---
 
 	create_file_or_folder: {
@@ -407,11 +463,14 @@ export const isABuiltinToolName = (toolName: string): toolName is BuiltinToolNam
 // built-in tools kept for older threads, but no longer given to models
 const toolsNotOfferedToModels: ReadonlySet<BuiltinToolName> = new Set(['read_project_memory'])
 
+// tools that change nothing but still need approval: Gather mode offers them too
+const readOnlyToolsNeedingApproval: ReadonlySet<BuiltinToolName> = new Set(['fetch_url'])
+
 export const availableTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined) => {
 
 	const offeredToolNames = (Object.keys(builtinTools) as BuiltinToolName[]).filter(toolName => !toolsNotOfferedToModels.has(toolName))
 	const builtinToolNames: BuiltinToolName[] | undefined = chatMode === 'normal' ? undefined
-		: chatMode === 'gather' ? offeredToolNames.filter(toolName => !(toolName in approvalTypeOfBuiltinToolName))
+		: chatMode === 'gather' ? offeredToolNames.filter(toolName => !(toolName in approvalTypeOfBuiltinToolName) || readOnlyToolsNeedingApproval.has(toolName))
 			: chatMode === 'agent' ? offeredToolNames
 				: undefined
 

@@ -5,7 +5,9 @@
 
 import { registerAction2 } from '../../platform/actions/common/actions.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../workbench/common/contributions.js';
-import { OpenSessionInVSCodeAction, OpenInVSCodeWidgetContribution, OpenVSCodeWindowAction, ReturnToVSCodeEditorAction, ShouldShowReturnToVSCodeEditorAction } from './actions/vscodeActions.js';
+import { KodiaManageModelsContribution, OpenSessionInVSCodeAction, OpenInVSCodeWidgetContribution, OpenVSCodeWindowAction, ReturnToVSCodeEditorAction, ShouldShowReturnToVSCodeEditorAction } from './actions/vscodeActions.js';
+import { registerMainProcessRemoteService } from '../../platform/ipc/electron-browser/services.js';
+import { IKodiaWindowsService, KODIA_WINDOWS_CHANNEL } from '../../platform/windows/common/kodiaWindows.js';
 
 // Actions
 (function registerActions(): void {
@@ -17,4 +19,9 @@ import { OpenSessionInVSCodeAction, OpenInVSCodeWidgetContribution, OpenVSCodeWi
 
 (function registerWorkbenchContributions(): void {
 	registerWorkbenchContribution2(OpenInVSCodeWidgetContribution.ID, OpenInVSCodeWidgetContribution, WorkbenchPhase.BlockRestore);
+	// Kodia: "Manage Models..." opens Kodia's settings in an editor window
+	registerWorkbenchContribution2(KodiaManageModelsContribution.ID, KodiaManageModelsContribution, WorkbenchPhase.BlockRestore);
 })();
+
+// Kodia: opens Kodia's settings in an editor window (see KodiaManageModelsContribution)
+registerMainProcessRemoteService(IKodiaWindowsService, KODIA_WINDOWS_CHANNEL);

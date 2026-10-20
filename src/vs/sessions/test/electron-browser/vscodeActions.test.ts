@@ -10,7 +10,8 @@ import { INativeHostService } from '../../../platform/native/common/native.js';
 import { IOpenedMainWindow, IOpenEmptyWindowOptions, IOpenWindowOptions, IWindowOpenable, isFolderToOpen } from '../../../platform/window/common/window.js';
 import { constObservable } from '../../../base/common/observable.js';
 import { URI } from '../../../base/common/uri.js';
-import { getChatSessionToOpenInEditor, openSessionInVSCode, returnToVSCodeEditor, shouldShowReturnToVSCodeEditor, switchToIDE } from '../../electron-browser/actions/vscodeActions.js';
+import { getChatSessionToOpenInEditor, openKodiaSettingsInIDE, openSessionInVSCode, returnToVSCodeEditor, shouldShowReturnToVSCodeEditor, switchToIDE } from '../../electron-browser/actions/vscodeActions.js';
+import { IKodiaWindowsService } from '../../../platform/windows/common/kodiaWindows.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
 import { IChat } from '../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../services/sessions/browser/sessionsProvidersService.js';
@@ -153,6 +154,58 @@ suite('VS Code Actions', () => {
 		test('opens the session folder when the Agents window is the only window', async () => {
 			const calls = await switchWith([createWindow(agentsWindowId)]);
 			assert.deepStrictEqual(calls, ['open:file:///repo']);
+		});
+	});
+
+	suite('openKodiaSettingsInIDE', () => {
+		const agentsWindowId = 1;
+		const session = createSession('settings', true, [URI.file('/repo')]);
+
+		// windowsAfterOpen: what getWindows returns once the Agents window has opened a window
+		async function openSettingsWith(windows: IOpenedMainWindow[], windowsAfterOpen?: IOpenedMainWindow[]): Promise<string[]> {
+			const calls: string[] = [];
+			let opened = false;
+			const nativeHostService = new class extends mock<INativeHostService>() {
+				override async getWindows(): Promise<IOpenedMainWindow[]> {
+					return opened && windowsAfterOpen ? windowsAfterOpen : windows;
+				}
+				override async focusWindow(options?: { targetWindowId?: number }): Promise<void> {
+					calls.push(`focus:${options?.targetWindowId}`);
+				}
+				override async openWindow(): Promise<void> {
+					opened = true;
+					calls.push('open');
+				}
+			}();
+			const kodiaWindowsService = new class extends mock<IKodiaWindowsService>() {
+				override async openSettingsInWindow(windowId: number): Promise<void> {
+					calls.push(`settings:${windowId}`);
+				}
+			}();
+			await openKodiaSettingsInIDE(
+				nativeHostService,
+				kodiaWindowsService,
+				agentsWindowId,
+				session,
+				new class extends mock<ISessionsProvidersService>() { }(),
+				new class extends mock<IRemoteAgentHostService>() { }(),
+			);
+			return calls;
+		}
+
+		test('opens the settings in the editor window Switch to IDE focuses', async () => {
+			const calls = await openSettingsWith([createWindow(agentsWindowId), createWindow(2, URI.file('/other')), createWindow(3, URI.file('/repo'))]);
+			assert.deepStrictEqual(calls, ['focus:3', 'settings:3']);
+		});
+
+		test('opens the settings in the window it opens when the Agents window is the only window', async () => {
+			const calls = await openSettingsWith([createWindow(agentsWindowId)], [createWindow(agentsWindowId), createWindow(4, URI.file('/repo'))]);
+			assert.deepStrictEqual(calls, ['open', 'settings:4']);
+		});
+
+		test('does nothing when the opened window cannot be found', async () => {
+			const calls = await openSettingsWith([createWindow(agentsWindowId)], [createWindow(agentsWindowId)]);
+			assert.deepStrictEqual(calls, ['open']);
 		});
 	});
 });

@@ -26,6 +26,7 @@ import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextke
 import { mountVoidSettings } from './react/out/void-settings-tsx/index.js'
 import { Codicon } from '../../../../base/common/codicons.js';
 import { toDisposable } from '../../../../base/common/lifecycle.js';
+import { KODIA_OPEN_SETTINGS_COMMAND_ID } from '../../../../platform/windows/common/kodiaWindows.js';
 
 
 // refer to preferences.contribution.ts keybindings editor
@@ -167,7 +168,8 @@ registerAction2(class extends Action2 {
 
 
 
-export const VOID_OPEN_SETTINGS_ACTION_ID = 'workbench.action.openVoidSettings'
+// shared with the Agents Window, which opens these settings in an editor window
+export const VOID_OPEN_SETTINGS_ACTION_ID = KODIA_OPEN_SETTINGS_COMMAND_ID
 registerAction2(class extends Action2 {
 	constructor() {
 		super({

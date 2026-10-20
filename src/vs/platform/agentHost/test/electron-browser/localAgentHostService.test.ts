@@ -24,6 +24,7 @@ import { AgentHostClientState, AgentHostProtocolClient } from '../../browser/age
 import { IMcpNotification, isFatalAgentHostStartError, toFatalAgentHostStartError } from '../../common/agent.js';
 import { AGENT_HOST_CLIENT_PROXY_CHANNEL } from '../../common/agentHostClientProxyChannel.js';
 import { AGENT_HOST_CLIENT_BYOK_LM_CHANNEL, AgentHostClientByokLmChannel } from '../../common/agentHostClientByokLmChannel.js';
+import { KODIA_AGENT_HOST_LM_CHANNEL } from '../../common/kodiaAgentHostLm.js';
 import { AgentHostClientType, editorWindowAgentHostClientInfo } from '../../common/agentHostClientInfo.js';
 import { AgentHostStartupTelemetry } from '../../common/agentHostStartupTelemetry.js';
 import { AgentHostClientConnectionKind } from '../../common/agentHostTelemetry.js';
@@ -267,7 +268,7 @@ suite('registerAgentHostClientChannels', () => {
 	test('registers both channels when the BYOK handler is available', () => {
 		const { server, registered } = fakeChannelServer();
 		registerAgentHostClientChannels(server, fakeInstantiationService(false), new NullLogService());
-		assert.deepStrictEqual(registered, [AGENT_HOST_CLIENT_PROXY_CHANNEL, AGENT_HOST_CLIENT_BYOK_LM_CHANNEL]);
+		assert.deepStrictEqual(registered, [AGENT_HOST_CLIENT_PROXY_CHANNEL, AGENT_HOST_CLIENT_BYOK_LM_CHANNEL, KODIA_AGENT_HOST_LM_CHANNEL]);
 	});
 
 	test('classifies only utility process validation errors as fatal', () => {
@@ -379,7 +380,7 @@ suite('registerAgentHostClientChannels', () => {
 	test('registers a null BYOK channel when the handler is missing', () => {
 		const { server, registered } = fakeChannelServer();
 		registerAgentHostClientChannels(server, fakeInstantiationService(true), new NullLogService());
-		assert.deepStrictEqual(registered, [AGENT_HOST_CLIENT_PROXY_CHANNEL, AGENT_HOST_CLIENT_BYOK_LM_CHANNEL]);
+		assert.deepStrictEqual(registered, [AGENT_HOST_CLIENT_PROXY_CHANNEL, AGENT_HOST_CLIENT_BYOK_LM_CHANNEL, KODIA_AGENT_HOST_LM_CHANNEL]);
 	});
 });
 

@@ -133,6 +133,7 @@ type SendLLMType = {
 	promptCacheKey?: string; // the same for requests sharing a prefix (e.g. a thread's agent loop), to help provider-side prompt caching
 	promptCacheTTL?: '1h'; // Anthropic: keep the prompt cache 1 hour instead of 5 minutes
 	prediction?: string; // the output we expect (e.g. the code being rewritten), sent only to models with supportsPredictedOutputs
+	tools?: InternalToolInfo[]; // Kodia Agents Window: exactly these tools instead of the chat mode's (the agent runs them itself)
 } | {
 	messagesType: 'FIMMessage';
 	messages: LLMFIMMessage;
@@ -141,6 +142,7 @@ type SendLLMType = {
 	promptCacheKey?: string; // the same for completions in one file (Mistral only)
 	promptCacheTTL?: undefined;
 	prediction?: undefined;
+	tools?: undefined;
 }
 export type ServiceSendLLMMessageParams = {
 	onText: OnText;

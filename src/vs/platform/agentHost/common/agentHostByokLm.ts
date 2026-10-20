@@ -239,7 +239,8 @@ export interface IAgentHostByokLmHandler {
  * pushes its models over {@link onDidChangeModels}; `chat` stays a round-trip.
  */
 export interface IByokLmBridgeConnection {
-	chat(request: IByokLmChatRequest): Promise<IByokLmChatResult>;
+	/** Kodia: `token` cancels the request in the renderer (the Kodia agent aborts turns). */
+	chat(request: IByokLmChatRequest, token?: CancellationToken): Promise<IByokLmChatResult>;
 	/** Emits the renderer's current BYOK model snapshot on subscribe and on every change. */
 	readonly onDidChangeModels: Event<IByokLmModelInfo[]>;
 }

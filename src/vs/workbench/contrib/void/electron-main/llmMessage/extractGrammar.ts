@@ -261,10 +261,11 @@ export const extractXMLToolsWrapper = (
 	onFinalMessage: OnFinalMessage,
 	chatMode: ChatMode | null,
 	mcpTools: InternalToolInfo[] | undefined,
+	explicitTools?: InternalToolInfo[],
 ): { newOnText: OnText, newOnFinalMessage: OnFinalMessage } => {
 
 	if (!chatMode) return { newOnText: onText, newOnFinalMessage: onFinalMessage }
-	const tools = availableTools(chatMode, mcpTools)
+	const tools = availableTools(chatMode, mcpTools, explicitTools)
 	if (!tools) return { newOnText: onText, newOnFinalMessage: onFinalMessage }
 
 	const toolOfToolName: ToolOfToolName = {}

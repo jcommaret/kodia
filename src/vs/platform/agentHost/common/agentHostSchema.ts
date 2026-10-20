@@ -459,6 +459,15 @@ export const AgentHostByokModelsEnabledConfigKey = 'byokModelsEnabled';
  */
 export const AgentHostCodexEnabledConfigKey = 'codexAgentEnabled';
 
+/**
+ * Kodia: root config key forwarded from the renderer carrying, per agent
+ * provider id, the models shown in Kodia's model dropdown ("Show in Dropdown"
+ * in Kodia's settings). An agent with an entry offers only those models; an
+ * agent without one (its Kodia provider is not set up) offers its own catalog.
+ * See `agentShownModels.ts`.
+ */
+export const AgentHostShownModelsConfigKey = 'shownAgentModels';
+
 /** Root config key carrying the effective edit auto-approve patterns. */
 export const AgentHostEditAutoApprovePatternsConfigKey = 'editAutoApprovePatterns';
 
@@ -846,6 +855,11 @@ export const platformRootSchema = createSchema({
 		title: localize('agentHost.config.codexAgentEnabled.title', "Codex Agent"),
 		description: localize('agentHost.config.codexAgentEnabled.description', "Whether the Codex provider is enabled."),
 		default: false,
+	}),
+	[AgentHostShownModelsConfigKey]: schemaProperty<Record<string, string[]>>({
+		type: 'object',
+		title: localize('agentHost.config.shownAgentModels.title', "Agent Models"),
+		description: localize('agentHost.config.shownAgentModels.description', "Per agent, the models it offers, forwarded from the models shown in Kodia's model dropdown. Agents without an entry offer their own catalog."),
 	}),
 	[AgentHostTerminalAutoApproveEnabledConfigKey]: schemaProperty<boolean>({
 		type: 'boolean',

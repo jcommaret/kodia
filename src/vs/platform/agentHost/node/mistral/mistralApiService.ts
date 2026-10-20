@@ -23,6 +23,8 @@ import { isRateLimitError, retryAfterMs, TokenBucketRateLimiter } from './mistra
 export interface IMistralModel {
 	readonly id: string;
 	readonly name: string;
+	/** Alias ids that point to this model (e.g. `mistral-large-latest` for `mistral-large-2512`). */
+	readonly aliases?: readonly string[];
 	/** `maxContextLength` from the catalog, when advertised. */
 	readonly maxContextWindow: number | undefined;
 	/** Whether the model advertises the `function_calling` capability. */
@@ -194,6 +196,7 @@ export class MistralApiService extends Disposable implements IMistralApiService 
 			.map(m => ({
 				id: m.id,
 				name: m.name ?? m.id,
+				aliases: m.aliases ?? [],
 				maxContextWindow: m.maxContextLength ?? undefined,
 				supportsFunctionCalling: m.capabilities?.functionCalling ?? false,
 				supportsVision: m.capabilities?.vision ?? false,

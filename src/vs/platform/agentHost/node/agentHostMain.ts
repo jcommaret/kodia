@@ -26,6 +26,7 @@ import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeSdkPackage } from './claude/claudeAgentSdkService.js';
 import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
 import { MistralAgent } from './mistral/mistralAgent.js';
+import { IKodiaLmBridgeRegistry, KodiaAgent } from './kodia/kodiaAgent.js';
 import { IMistralApiService, MistralApiService } from './mistral/mistralApiService.js';
 import { ServiceCollection } from '../../instantiation/common/serviceCollection.js';
 import { createCodexProviderConfiguration } from './codex/codexProviderConfiguration.js';
@@ -56,6 +57,7 @@ import { BANG_COMMAND_PREFIX } from './agentHostBangCommand.js';
 import { AgentHostClientFileSystemProvider } from '../common/agentHostClientFileSystemProvider.js';
 import { AGENT_CLIENT_SCHEME } from '../common/agentClientUri.js';
 import { AGENT_HOST_CLIENT_BYOK_LM_CHANNEL, createAgentHostClientByokLmConnection } from '../common/agentHostClientByokLmChannel.js';
+import { KODIA_AGENT_HOST_LM_CHANNEL } from '../common/kodiaAgentHostLm.js';
 import { AGENT_HOST_CLIENT_PROXY_CHANNEL, createAgentHostClientProxyConnection } from '../common/agentHostClientProxyChannel.js';
 import { join } from '../../../base/common/path.js';
 import ErrorTelemetry from '../../telemetry/node/errorTelemetry.js';
@@ -118,6 +120,8 @@ async function startAgentHost(): Promise<void> {
 	// after the block) can forward agent-SDK download progress to clients.
 	let sdkDownloadProgress: Event<IAgentSdkDownloadProgress> | undefined;
 	let byokLmBridgeRegistry: ByokLmBridgeRegistry;
+	// Kodia: the Kodia windows that run the Kodia agent's model requests.
+	const kodiaLmBridgeRegistry = new ByokLmBridgeRegistry();
 	let proxyResolver!: IAgentHostProxyResolver;
 	const hostLaunchKind = readAgentHostLaunchKind(process.env[AgentHostLaunchKindEnvVar]);
 	try {
@@ -197,6 +201,10 @@ async function startAgentHost(): Promise<void> {
 		const mistralApiService = disposables.add(instantiationService.createInstance(MistralApiService));
 		const mistralInstantiationService = instantiationService.createChild(new ServiceCollection([IMistralApiService, mistralApiService]));
 		providerService.registerProvider(mistralInstantiationService.createInstance(MistralAgent));
+		// Kodia: the Kodia agent runs every model shown in Kodia's model dropdown; a Kodia window
+		// runs its model requests (see `kodiaAgentHostLm.ts`).
+		const kodiaInstantiationService = instantiationService.createChild(new ServiceCollection([IKodiaLmBridgeRegistry, kodiaLmBridgeRegistry]));
+		providerService.registerProvider(kodiaInstantiationService.createInstance(KodiaAgent));
 		completionTriggerCharacters = runtimeServices.completions.triggerCharacters;
 	} catch (err) {
 		logService.error('Failed to create AgentService', err);
@@ -286,6 +294,7 @@ async function startAgentHost(): Promise<void> {
 					const byokLmConnection = createAgentHostClientByokLmConnection(getChannel(AGENT_HOST_CLIENT_BYOK_LM_CHANNEL));
 					connectionStore.add(byokLmBridgeRegistry.register(clientId, byokLmConnection));
 				}
+				connectionStore.add(kodiaLmBridgeRegistry.register(clientId, createAgentHostClientByokLmConnection(getChannel(KODIA_AGENT_HOST_LM_CHANNEL))));
 				authorityRegistrations.set(connection, connectionStore);
 			};
 			localDataPlaneDisposables.add(server.onDidAddConnection(registerConnection));

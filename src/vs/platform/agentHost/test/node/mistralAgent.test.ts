@@ -5,14 +5,18 @@
 
 import assert from 'assert';
 import * as os from 'os';
+import { Emitter } from '../../../../base/common/event.js';
 import { isWindows } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
+import { mock } from '../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentChatDataChange, type IAgentMaterializeChatEvent, type IAgentToolPendingConfirmationSignal } from '../../common/agent.js';
+import { AgentHostShownModelsConfigKey } from '../../common/agentHostSchema.js';
 import { AgentHostMistralApiKeyEnvVar } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import { buildDefaultChatUri, ResponsePartKind, ToolCallStatus, type ResponsePart } from '../../common/state/sessionState.js';
+import { IAgentConfigurationService } from '../../node/agentConfigurationService.js';
 import { MistralAgent } from '../../node/mistral/mistralAgent.js';
 import { IMistralApiService, IMistralModel } from '../../node/mistral/mistralApiService.js';
 import { createNullSessionDataService, createSessionDataService, TestSessionDatabase } from '../common/sessionTestHelpers.js';
@@ -59,6 +63,26 @@ class FakeMistralApiService implements IMistralApiService {
 	}
 }
 
+/** Root config holding the Mistral models Kodia forwards; unset until a test sets them. */
+class TestRootConfigService extends mock<IAgentConfigurationService>() {
+	private readonly _onDidRootConfigChange = new Emitter<void>();
+	override readonly onDidRootConfigChange = this._onDidRootConfigChange.event;
+	private _shownModels: string[] | undefined;
+
+	override getRootValue(_schema: never, key: string) {
+		return (key === AgentHostShownModelsConfigKey && this._shownModels ? { mistral: this._shownModels } : undefined) as never;
+	}
+
+	setShownModels(models: string[] | undefined): void {
+		this._shownModels = models;
+		this._onDidRootConfigChange.fire();
+	}
+
+	dispose(): void {
+		this._onDidRootConfigChange.dispose();
+	}
+}
+
 function model(id: string, supportsFunctionCalling: boolean, extra?: Partial<IMistralModel>): IMistralModel {
 	return { id, name: id, maxContextWindow: 128_000, supportsFunctionCalling, supportsVision: false, ...extra };
 }
@@ -93,8 +117,8 @@ suite('MistralAgent', () => {
 	setup(() => { savedEnv = process.env[AgentHostMistralApiKeyEnvVar]; delete process.env[AgentHostMistralApiKeyEnvVar]; });
 	teardown(() => { if (savedEnv === undefined) { delete process.env[AgentHostMistralApiKeyEnvVar]; } else { process.env[AgentHostMistralApiKeyEnvVar] = savedEnv; } });
 
-	function createAgent(api: IMistralApiService, data = createNullSessionDataService()): MistralAgent {
-		return store.add(new MistralAgent(new NullLogService(), api, data));
+	function createAgent(api: IMistralApiService, data = createNullSessionDataService(), config = store.add(new TestRootConfigService())): MistralAgent {
+		return store.add(new MistralAgent(new NullLogService(), api, data, config));
 	}
 
 	async function authedAgent(api: FakeMistralApiService) {
@@ -155,6 +179,46 @@ suite('MistralAgent', () => {
 		const failing = createAgent(new FakeMistralApiService(async () => { throw new Error('network'); }));
 		assert.strictEqual(await failing.authenticate('', 'sk-test'), true, 'authenticate should still succeed despite a model-fetch failure');
 		assert.deepStrictEqual(failing.models.get(), seeded);
+	});
+
+	test('offers only the models shown in Kodia\'s dropdown, in their order', async () => {
+		const config = store.add(new TestRootConfigService());
+		config.setShownModels(['mistral-large-latest', 'zai-glm-5-3', 'mistral-embed', 'my-custom-model']);
+		const agent = createAgent(new FakeMistralApiService(async () => [
+			model('devstral-2512', true), // not shown -> filtered out
+			model('mistral-embed', false), // shown but no function calling -> filtered out
+			model('mistral-large-2512', true, { aliases: ['mistral-large-latest'], supportsVision: true, maxContextWindow: 256_000 }),
+			model('zai-glm-5-3', true, { maxContextWindow: 1_000_000 }),
+		]), undefined, config);
+
+		await agent.authenticate('', 'sk-test');
+
+		const models = agent.models.get();
+		assert.deepStrictEqual(models.map(m => m.id), ['mistral-large-latest', 'zai-glm-5-3', 'my-custom-model']);
+		const large = models[0];
+		assert.strictEqual(large.supportsVision, true, 'metadata comes from the catalog entry the alias points to');
+		assert.strictEqual(large.maxContextWindow, 256_000);
+		assert.strictEqual(models[1].name, 'Z.ai GLM 5.3');
+	});
+
+	test('follows changes to the models shown in Kodia\'s dropdown', async () => {
+		const config = store.add(new TestRootConfigService());
+		const agent = createAgent(new FakeMistralApiService(async () => [model('devstral-2512', true), model('codestral-2508', true, { aliases: ['codestral-latest'] })]), undefined, config);
+		await agent.authenticate('', 'sk-test');
+		assert.deepStrictEqual(agent.models.get().map(m => m.id), ['devstral-2512', 'codestral-2508'], 'the whole catalog until Kodia forwards its models');
+
+		config.setShownModels(['codestral-latest']);
+		assert.deepStrictEqual(agent.models.get().map(m => m.id), ['codestral-latest']);
+
+		config.setShownModels([]);
+		assert.deepStrictEqual(agent.models.get(), []);
+	});
+
+	test('offers no shown model without an API key', () => {
+		const config = store.add(new TestRootConfigService());
+		config.setShownModels(['mistral-large-latest']);
+		const agent = createAgent(new FakeMistralApiService(), undefined, config);
+		assert.deepStrictEqual(agent.models.get(), []);
 	});
 
 	test('authenticate with an empty token clears the key, reports unauthenticated and drops the models', async () => {

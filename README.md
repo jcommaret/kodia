@@ -37,6 +37,7 @@ Up to 2.5.5, Kodia used Void's identifiers. It now has its own, so it no longer 
 
 - **macOS**: install the new version from the `.dmg`. When macOS asks whether Kodia may use its keychain item ("Kodia Safe Storage"), choose *Always Allow*, or Kodia can't read your API keys.
 - **Linux**: the package and the command are now called `kodia`. Uninstall the old `void` package.
+- **Windows**: the installer also has its own identity now. Whether you run it or Kodia updates itself, it removes the previous Kodia (2.6.4 or earlier) and installs into the same folder with the same options, so *Apps & features* lists a single Kodia. An installed Void is left alone. If a taskbar or Start menu pin stops opening Kodia, pin it again.
 - **Everywhere**: the command-line launcher is `kodia` (it was `void`), and links use `kodia://`.
 
 ## Build from source

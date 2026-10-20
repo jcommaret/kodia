@@ -17,10 +17,11 @@ import { IEnvironmentMainService } from '../../environment/electron-main/environ
 import { ILifecycleMainService, LifecycleMainPhase } from '../../lifecycle/electron-main/lifecycleMainService.js';
 import { ILogService } from '../../log/common/log.js';
 import { IProductService } from '../../product/common/productService.js';
-import { IRequestService } from '../../request/common/request.js';
+import { asJson, IRequestService } from '../../request/common/request.js';
 import { StorageScope, StorageTarget } from '../../storage/common/storage.js';
 import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
+import { createKodiaUpdateURL, getKodiaReleaseName, isNewerUpdate } from '../common/kodiaUpdate.js';
 import { AvailableForDownload, DisablementReason, IUpdate, IUpdateService, State, StateType, UpdateType } from '../common/update.js';
 
 const LAST_KNOWN_VERSION_STORAGE_KEY = 'abstractUpdateService/lastKnownVersion';
@@ -30,16 +31,9 @@ export interface IUpdateURLOptions {
 	readonly internalOrg?: string;
 }
 
-export function createUpdateURL(baseUpdateUrl: string, platform: string, quality: string, commit: string, options?: IUpdateURLOptions): string {
-	const url = new URL(`${baseUpdateUrl}/api/update/${platform}/${quality}/${commit}`);
-
-	if (options?.background) {
-		url.searchParams.set('bg', 'true');
-	}
-
-	url.searchParams.set('u', options?.internalOrg ?? 'none');
-
-	return url.toString();
+export function createUpdateURL(baseUpdateUrl: string, platform: string, quality: string, _commit: string, _options?: IUpdateURLOptions): string {
+	// Kodia: a static manifest per platform instead of Microsoft's update API, see kodiaUpdate.ts
+	return new URL(createKodiaUpdateURL(baseUpdateUrl, platform, quality)).toString();
 }
 
 /**
@@ -670,8 +664,9 @@ export abstract class AbstractUpdateService extends Disposable implements IUpdat
 			const context = await this.requestService.request({ url, headers, callSite: 'updateService.isLatestVersion' }, token);
 			const statusCode = context.res.statusCode;
 			this.logService.trace('update#isLatestVersion() - response', { statusCode });
-			// The update server replies with 204 (No Content) when no update is available.
-			return statusCode === 204;
+			// Kodia: the feed always describes the latest release, see kodiaUpdate.ts
+			const update = await asJson<IUpdate>(context);
+			return !isNewerUpdate(update, this.getBaselineUpdate(commit));
 
 		} catch (error) {
 			this.logService.error('update#isLatestVersion(): failed to check for updates');
@@ -682,6 +677,19 @@ export abstract class AbstractUpdateService extends Disposable implements IUpdat
 
 	async _applySpecificUpdate(packagePath: string): Promise<void> {
 		// noop
+	}
+
+	/**
+	 * Kodia: what the feed's release is compared with (see isNewerUpdate): the pending update being overwritten when
+	 * `pendingCommit` is given, else this build. Read it before leaving the state that holds the pending update.
+	 */
+	protected getBaselineUpdate(pendingCommit?: string): IUpdate {
+		if (pendingCommit === undefined) {
+			return { version: this.productService.commit!, name: getKodiaReleaseName(this.productService) };
+		}
+		const state = this.state;
+		const pending = state.type === StateType.Ready || state.type === StateType.Overwriting ? state.update : undefined;
+		return pending?.version === pendingCommit ? pending : { version: pendingCommit };
 	}
 
 	async setInternalOrg(internalOrg: string | undefined): Promise<void> {

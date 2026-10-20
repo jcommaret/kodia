@@ -6,6 +6,7 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { DeferredPromise, timeout } from '../../../../base/common/async.js';
+import { bufferToStream, VSBuffer } from '../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
@@ -144,7 +145,7 @@ suite('AbstractUpdateService', () => {
 	let requestCount: number;
 	let meteredConnectionService: TestMeteredConnectionService;
 
-	function createService(mode: string, options?: { isBuilt?: boolean; disableUpdates?: boolean; updateUrl?: string; isConnectionMetered?: boolean; meteredConnectionInitialization?: Promise<void>; postInitializeGate?: Promise<void>; supportsUpdateOverwrite?: boolean }): TestUpdateService {
+	function createService(mode: string, options?: { isBuilt?: boolean; disableUpdates?: boolean; updateUrl?: string; isConnectionMetered?: boolean; meteredConnectionInitialization?: Promise<void>; postInitializeGate?: Promise<void>; supportsUpdateOverwrite?: boolean; feed?: IUpdate }): TestUpdateService {
 		configurationService = new PolicyTestConfigurationService();
 		configurationService.setUserConfiguration('update.mode', mode);
 		requestCount = 0;
@@ -164,7 +165,9 @@ suite('AbstractUpdateService', () => {
 		const requestService = {
 			request: () => {
 				requestCount++;
-				return Promise.reject(new Error('not expected'));
+				return options?.feed
+					? Promise.resolve({ res: { headers: {}, statusCode: 200 }, stream: bufferToStream(VSBuffer.fromString(JSON.stringify(options.feed))) })
+					: Promise.reject(new Error('not expected'));
 			}
 		} as unknown as IRequestService;
 
@@ -173,6 +176,7 @@ suite('AbstractUpdateService', () => {
 			commit: 'abc123',
 			quality: 'stable',
 			version: '1.0.0',
+			voidVersion: '2.5.5',
 			target: 'user'
 		} as unknown as IProductService;
 
@@ -352,6 +356,22 @@ suite('AbstractUpdateService', () => {
 			downloadCount: 1,
 			requestCount: 1,
 		});
+	});
+
+	test('compares the static feed with this build, or with the pending update', async () => {
+		const feed: IUpdate = { url: 'https://update.example/Kodia.zip', name: '1.0.0-2.5.6', version: 'def456', productVersion: '1.0.0.0' };
+		const service = createService('default', { feed });
+		await service.whenInitialized;
+
+		assert.strictEqual(await service.isLatestVersion(), false, 'newer than this build');
+		assert.strictEqual(await service.isLatestVersion('def456'), true, 'already pending');
+
+		service.forceState(State.Ready({ version: 'older', name: '1.0.0-2.5.7' }, false, false));
+		assert.strictEqual(await service.isLatestVersion('older'), true, 'the pending update is newer');
+
+		const olderFeed = createService('default', { feed: { ...feed, name: '1.0.0-2.5.4' } });
+		await olderFeed.whenInitialized;
+		assert.strictEqual(await olderFeed.isLatestVersion(), true, 'no downgrade');
 	});
 
 	test('automatic checks resume when the connection is no longer metered', async () => {

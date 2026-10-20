@@ -14,6 +14,7 @@ import { IProductService } from '../../product/common/productService.js';
 import { asJson, IRequestService } from '../../request/common/request.js';
 import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
+import { isNewerUpdate } from '../common/kodiaUpdate.js';
 import { AvailableForDownload, IUpdate, State, StateType, UpdateType } from '../common/update.js';
 import { AbstractUpdateService, createUpdateURL, IUpdateURLOptions } from './abstractUpdateService.js';
 
@@ -56,7 +57,8 @@ export class LinuxUpdateService extends AbstractUpdateService {
 					return;
 				}
 
-				if (!update || !update.url || !update.version || !update.productVersion) {
+				// Kodia: the feed always describes the latest release, see kodiaUpdate.ts
+				if (!isNewerUpdate(update, this.getBaselineUpdate())) {
 					this.setState(State.Idle(UpdateType.Archive, undefined, explicit || undefined));
 				} else {
 					this.setState(State.AvailableForDownload(update));

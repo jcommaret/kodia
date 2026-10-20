@@ -1,6 +1,9 @@
+# Kodia: inno_updater.exe stays at 0.23.0. 0.26.0 dropped the swap of a background update staged in {app}\_
+# (microsoft/inno-updater#78), which Kodia's user setup uses as it doesn't set product.win32VersionedUpdate: a
+# background update then fails with "New executable not found". Don't bump it without turning versioned updates on.
 [package]
 name = "inno_updater"
-version = "0.26.0"
+version = "0.23.0"
 authors = ["Microsoft <monacotools@microsoft.com>"]
 edition = "2024"
 build = "build.rs"

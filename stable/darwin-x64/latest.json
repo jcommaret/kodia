@@ -1,8 +1,8 @@
 {
-  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.5.7/Kodia-darwin-x64-1.141.0-2.5.7.zip",
-  "name": "1.141.0-2.5.7",
-  "version": "5a86f7892853cbd85441c42a26ecdf996578b154",
+  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.5.8/Kodia-darwin-x64-1.141.0-2.5.8.zip",
+  "name": "1.141.0-2.5.8",
+  "version": "484c80c01c6ce3d9b8be88f36be70212c41c8b97",
   "productVersion": "1.141.0.0",
-  "timestamp": 1792465680979,
-  "sha256hash": "068b8b613b146f359b9c8be0ca8d0e926cadc2a14e90b9ada7c98c389f3e3813"
+  "timestamp": 1792493257566,
+  "sha256hash": "6778bc4f968744bd298a81ca2c0ffd30da2be87b3b76b12904086e93a4b2d858"
 }

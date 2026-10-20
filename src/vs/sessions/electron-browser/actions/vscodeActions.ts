@@ -35,6 +35,8 @@ import { IOpenedMainWindow } from '../../../platform/window/common/window.js';
 import { isSingleFolderWorkspaceIdentifier } from '../../../platform/workspace/common/workspace.js';
 import { OPEN_VSCODE_WINDOW_COMMAND_ID, RETURN_TO_VSCODE_EDITOR_COMMAND_ID, SHOULD_SHOW_RETURN_TO_VSCODE_EDITOR_COMMAND_ID } from '../../common/sessionCommands.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
+import { CommandsRegistry } from '../../../platform/commands/common/commands.js';
+import { IKodiaWindowsService } from '../../../platform/windows/common/kodiaWindows.js';
 
 export class OpenSessionInVSCodeAction extends Action2 {
 	static readonly ID = 'agents.openSessionInVSCode';
@@ -135,8 +137,9 @@ export class OpenVSCodeWindowAction extends Action2 {
 }
 
 /**
- * Kodia: focuses an editor window, preferring the one showing the active session's folder. When no editor
- * window is open, opens one on the active session's folders (or an empty one when the session has none).
+ * Kodia: focuses an editor window, preferring the one showing the active session's folder, and returns its id. When
+ * no editor window is open, opens one on the active session's folders (or an empty one when the session has none),
+ * and returns the id of that new window.
  */
 export async function switchToIDE(
 	nativeHostService: INativeHostService,
@@ -144,16 +147,65 @@ export async function switchToIDE(
 	session: IActiveSession | undefined,
 	sessionsProvidersService: ISessionsProvidersService,
 	remoteAgentHostService: IRemoteAgentHostService,
-): Promise<void> {
+): Promise<number | undefined> {
 	const windows = await nativeHostService.getWindows({ includeAuxiliaryWindows: false });
 	const editorWindows = windows.filter(w => w.id !== currentWindowId);
 	if (!editorWindows.length) {
-		return openSessionInVSCode(nativeHostService, session, sessionsProvidersService, remoteAgentHostService);
+		await openSessionInVSCode(nativeHostService, session, sessionsProvidersService, remoteAgentHostService);
+		// the window just opened is the one that wasn't there before
+		const windowsAfter = await nativeHostService.getWindows({ includeAuxiliaryWindows: false });
+		return windowsAfter.find(w => w.id !== currentWindowId && !windows.some(before => before.id === w.id))?.id;
 	}
 
 	const folderUris = getSessionFolderUris(session, sessionsProvidersService, remoteAgentHostService);
 	const sessionWindow = editorWindows.find(({ workspace }) => isSingleFolderWorkspaceIdentifier(workspace) && folderUris.some(folderUri => isEqual(folderUri, workspace.uri)));
-	await nativeHostService.focusWindow({ targetWindowId: (sessionWindow ?? editorWindows[0]).id });
+	const targetWindowId = (sessionWindow ?? editorWindows[0]).id;
+	await nativeHostService.focusWindow({ targetWindowId });
+	return targetWindowId;
+}
+
+// The command behind "Manage Models..." in the chat model picker: MANAGE_CHAT_COMMAND_ID in
+// vs/workbench/contrib/chat/common/constants.ts, which the sessions layer can't import.
+const MANAGE_MODELS_COMMAND_ID = 'workbench.action.chat.manage';
+
+/**
+ * Kodia: opens Kodia's settings, where its models are set up, in the editor window Switch to IDE goes to.
+ * The Agents Window doesn't load Kodia's contribution, so its settings only exist in editor windows.
+ */
+export async function openKodiaSettingsInIDE(
+	nativeHostService: INativeHostService,
+	kodiaWindowsService: IKodiaWindowsService,
+	currentWindowId: number,
+	session: IActiveSession | undefined,
+	sessionsProvidersService: ISessionsProvidersService,
+	remoteAgentHostService: IRemoteAgentHostService,
+): Promise<void> {
+	const windowId = await switchToIDE(nativeHostService, currentWindowId, session, sessionsProvidersService, remoteAgentHostService);
+	if (windowId !== undefined) {
+		await kodiaWindowsService.openSettingsInWindow(windowId);
+	}
+}
+
+/**
+ * Kodia: "Manage Models..." in the Agents Window's model picker opens Kodia's settings instead of VS Code's language
+ * models screen, which never lists Kodia's providers. The chat contribution registers its own handler for the
+ * command when its module loads; this one is registered later, when the workbench starts, so it takes precedence.
+ */
+export class KodiaManageModelsContribution extends Disposable implements IWorkbenchContribution {
+
+	static readonly ID = 'workbench.contrib.kodiaManageModels';
+
+	constructor() {
+		super();
+		this._register(CommandsRegistry.registerCommand(MANAGE_MODELS_COMMAND_ID, accessor => openKodiaSettingsInIDE(
+			accessor.get(INativeHostService),
+			accessor.get(IKodiaWindowsService),
+			getWindowId(mainWindow),
+			accessor.get(ISessionsService).activeSession.get(),
+			accessor.get(ISessionsProvidersService),
+			accessor.get(IRemoteAgentHostService),
+		)));
+	}
 }
 
 export class ReturnToVSCodeEditorAction extends Action2 {

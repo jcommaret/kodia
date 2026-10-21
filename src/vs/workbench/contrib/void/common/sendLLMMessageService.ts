@@ -6,7 +6,7 @@
 import { EventLLMMessageOnTextParams, EventLLMMessageOnErrorParams, EventLLMMessageOnFinalMessageParams, ServiceSendLLMMessageParams, MainSendLLMMessageParams, MainLLMMessageAbortParams, ServiceModelListParams, EventModelListOnSuccessParams, EventModelListOnErrorParams, MainModelListParams, OllamaModelResponse, OpenaiCompatibleModelResponse, } from './sendLLMMessageTypes.js';
 import { ModelSelection } from './voidSettingsTypes.js';
 
-import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { IChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
@@ -66,7 +66,7 @@ export class LLMMessageService extends Disposable implements ILLMMessageService 
 		@IMainProcessService private readonly mainProcessService: IMainProcessService, // used as a renderer (only usable on client side)
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 		// @INotificationService private readonly notificationService: INotificationService,
-		@IMCPService private readonly mcpService: IMCPService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 	) {
 		super()
 
@@ -125,7 +125,10 @@ export class LLMMessageService extends Disposable implements ILLMMessageService 
 
 		const { settingsOfProvider, } = this.voidSettingsService.state
 
-		const mcpTools = this.mcpService.getMCPTools()
+		// a request's own tools replace the MCP tools (see availableTools); the Agents Window always gives its own, and
+		// leaves the MCP service, which starts the MCP servers, to the editor windows
+		const mcpTools = params.messagesType === 'chatMessages' && params.tools ? undefined
+			: this.instantiationService.invokeFunction(accessor => accessor.get(IMCPService)).getMCPTools()
 
 		// add state for request id
 		const requestId = generateUuid();

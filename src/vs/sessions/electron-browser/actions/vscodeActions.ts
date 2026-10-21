@@ -188,8 +188,9 @@ export async function openKodiaSettingsInIDE(
 
 /**
  * Kodia: "Manage Models..." in the Agents Window's model picker opens Kodia's settings instead of VS Code's language
- * models screen, which never lists Kodia's providers. The chat contribution registers its own handler for the
- * command when its module loads; this one is registered later, when the workbench starts, so it takes precedence.
+ * models screen, which never lists Kodia's providers. The chat's own action registers the command once the workbench
+ * has restored; this handler is registered right after it, so it takes precedence (the latest registration wins).
+ * Registering it first would make the chat's action throw, and its other model actions would go missing.
  */
 export class KodiaManageModelsContribution extends Disposable implements IWorkbenchContribution {
 
@@ -197,7 +198,7 @@ export class KodiaManageModelsContribution extends Disposable implements IWorkbe
 
 	constructor() {
 		super();
-		this._register(CommandsRegistry.registerCommand(MANAGE_MODELS_COMMAND_ID, accessor => openKodiaSettingsInIDE(
+		const override = () => this._register(CommandsRegistry.registerCommand(MANAGE_MODELS_COMMAND_ID, accessor => openKodiaSettingsInIDE(
 			accessor.get(INativeHostService),
 			accessor.get(IKodiaWindowsService),
 			getWindowId(mainWindow),
@@ -205,6 +206,16 @@ export class KodiaManageModelsContribution extends Disposable implements IWorkbe
 			accessor.get(ISessionsProvidersService),
 			accessor.get(IRemoteAgentHostService),
 		)));
+		if (CommandsRegistry.getCommand(MANAGE_MODELS_COMMAND_ID)) {
+			override();
+			return;
+		}
+		const listener = this._register(CommandsRegistry.onDidRegisterCommand(id => {
+			if (id === MANAGE_MODELS_COMMAND_ID) {
+				listener.dispose();
+				override();
+			}
+		}));
 	}
 }
 

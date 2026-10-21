@@ -35,6 +35,7 @@ import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 import { logSettingExperimentTrigger } from '../../telemetry/common/experimentTrigger.js';
 import { AgentHostOverlapProviderPreparationConfigKey, AgentHostShownModelsConfigKey, platformRootSchema } from '../common/agentHostSchema.js';
 import { getShownModelIds, isShownModel } from '../common/agentShownModels.js';
+import { KODIA_AGENT_PROVIDER_ID } from '../common/kodiaAgentHostLm.js';
 import { AgentHostOverlapProviderPreparationSettingId } from '../common/agentService.js';
 import { CopilotCliVSCodeAssignmentContextKey } from '../common/copilotCliConfig.js';
 import { ISessionDataService } from '../common/sessionDataService.js';
@@ -521,8 +522,9 @@ export class AgentSideEffects extends Disposable {
 			const d = a.getDescriptor();
 			const protectedResources = a.getProtectedResources();
 			const allModels = reader ? a.models.read(reader) : a.models.get();
-			// Kodia: offer only the models shown in Kodia's model dropdown.
-			const shownIds = getShownModelIds(shownModels, d.provider);
+			// Kodia's own agent already publishes exactly the models switched on in
+			// Kodia settings. The dropdown filter applies only to the other agents.
+			const shownIds = d.provider === KODIA_AGENT_PROVIDER_ID ? undefined : getShownModelIds(shownModels, d.provider);
 			const models = shownIds ? allModels.filter(m => isShownModel(m.id, shownIds)) : allModels;
 			const customizations = a.getCustomizations?.();
 			return {

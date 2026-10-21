@@ -18,13 +18,19 @@ suite('agentShownModels', () => {
 		assert.strictEqual(getShownModelIds({ claude: 'claude-opus-4-7' }, 'claude'), undefined);
 	});
 
-	test('isShownModel matches exactly, ignoring case and a release date', () => {
-		const shown = ['claude-sonnet-4-5', 'gpt-4o', 'GPT-5.5'];
+	test('isShownModel matches the same model across catalog spellings', () => {
+		const shown = ['claude-sonnet-4-5', 'claude-sonnet-4-6', 'gpt-4o', 'GPT-5.5'];
 		assert.ok(isShownModel('claude-sonnet-4-5', shown));
 		assert.ok(isShownModel('claude-sonnet-4-5-20250929', shown));
+		assert.ok(isShownModel('claude-sonnet-4.6', shown));
+		assert.ok(isShownModel('claude-sonnet-4-6-20250514', shown));
 		assert.ok(isShownModel('gpt-4o-2024-08-06', shown));
 		assert.ok(isShownModel('gpt-5.5', shown));
+		assert.ok(isShownModel('@provider=openai:gpt-5.5', shown));
+		assert.ok(isShownModel('@provider=vscode-proxy:gpt-5.5', shown));
+		assert.ok(isShownModel('gpt-5.5', ['gpt-5.5-2024-08-06']));
 		assert.ok(!isShownModel('gpt-5.5-codex', shown));
+		assert.ok(!isShownModel('@provider=openai:gpt-5.5-codex', shown));
 		assert.ok(!isShownModel('claude-sonnet-4', shown));
 		assert.ok(!isShownModel('claude-opus-4-7', []));
 	});

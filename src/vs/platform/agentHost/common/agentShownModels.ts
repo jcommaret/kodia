@@ -25,15 +25,34 @@ function withoutReleaseDate(id: string): string {
 }
 
 /**
- * Whether a model from an agent's catalog is one of the shown models. Ignores
- * case and a trailing release date, since agents often list a dated snapshot
- * (`claude-sonnet-4-5-20250929`) of the model Kodia lists (`claude-sonnet-4-5`).
+ * The model id an agent actually runs, stripped of a selection prefix.
+ * Codex publishes `@provider=openai:gpt-5.5`; the model Kodia lists is `gpt-5.5`.
+ */
+function bareModelId(id: string): string {
+	const prefixed = /^@provider=[^:]+:(.+)$/.exec(id);
+	const bare = prefixed?.[1] ?? id;
+	try {
+		return decodeURIComponent(bare);
+	} catch {
+		return bare;
+	}
+}
+
+/**
+ * One comparable form for a catalog id and a Kodia dropdown id.
+ * Agents publish the same model under a different spelling: Claude's catalog
+ * uses `claude-sonnet-4.6` where Kodia lists `claude-sonnet-4-6`, and either
+ * side may carry a trailing release date.
+ */
+function canonicalModelId(id: string): string {
+	return withoutReleaseDate(bareModelId(id.toLowerCase())).replaceAll('.', '-');
+}
+
+/**
+ * Whether a model from an agent's catalog is one of the shown models.
+ * A longer id (`gpt-5.5-codex`, `claude-sonnet-4`) does not match a shorter one.
  */
 export function isShownModel(id: string, shownIds: readonly string[]): boolean {
-	const lower = id.toLowerCase();
-	const undated = withoutReleaseDate(lower);
-	return shownIds.some(shownId => {
-		const shown = shownId.toLowerCase();
-		return shown === lower || shown === undated;
-	});
+	const canonical = canonicalModelId(id);
+	return shownIds.some(shownId => canonicalModelId(shownId) === canonical);
 }

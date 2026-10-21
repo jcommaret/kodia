@@ -22,6 +22,7 @@ import { findDevContainerSample } from '../../../../../platform/agentHost/common
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { localize } from '../../../../../nls.js';
 import { AgentSession, AuthenticateParams, AuthenticateResult, CODEX_AGENT_PROVIDER_ID, type IAgentSessionChatMetadata, IAgentSessionMetadata, protectedResourcesRequireGitHubCopilotSignIn } from '../../../../../platform/agentHost/common/agent.js';
+import { KODIA_AGENT_PROVIDER_ID } from '../../../../../platform/agentHost/common/kodiaAgentHostLm.js';
 import { AgentMergeSessionOverrides, AgentMergeSessionState, readAgentMergeFolderState, readAgentMergeFolderStates } from '../../../../../platform/agentHost/common/agentMerge.js';
 import { readAgentSdkSetupInfos } from '../../../../../platform/agentHost/common/agentSdkSetup.js';
 import { IAgentConnection } from '../../../../../platform/agentHost/common/agentService.js';
@@ -4361,7 +4362,11 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			}))
 			// Kodia: agents that can run (they have models) come first, so the default session type,
 			// the first one, is never an agent still waiting for credentials while another one works.
-			.sort((a, b) => Number(a.authRequirement !== SessionTypeAuthRequirement.None) - Number(b.authRequirement !== SessionTypeAuthRequirement.None));
+			// Among those, Kodia leads: its picker is the models switched on in Kodia settings.
+			.sort((a, b) => {
+				const byAuth = Number(a.authRequirement !== SessionTypeAuthRequirement.None) - Number(b.authRequirement !== SessionTypeAuthRequirement.None);
+				return byAuth !== 0 ? byAuth : Number(b.id === KODIA_AGENT_PROVIDER_ID) - Number(a.id === KODIA_AGENT_PROVIDER_ID);
+			});
 
 		const prev = this._sessionTypes;
 		if (prev.length === next.length && prev.every((t, i) => t.id === next[i].id
@@ -5962,10 +5967,14 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		// `agent-host-<provider>` chat session type) rather than hardcoding names.
 		const resourceScheme = this._resolveSessionResourceScheme(sessionId);
 		const showAutoModel = !resourceScheme || this._chatSessionsService.supportsAutoModelForSessionType(resourceScheme);
+		// Kodia's models are the ones switched on in settings (Gemini, MLX, OpenRouter, …).
+		// They are not in Copilot's featured list, so the grouped picker would hide every one
+		// of them behind the collapsed "Other Models" row.
+		const isKodia = this._agentProviderForSession(sessionId) === KODIA_AGENT_PROVIDER_ID;
 		return {
-			useGroupedModelPicker: true,
-			showFeatured: true,
-			showUnavailableFeatured: true,
+			useGroupedModelPicker: !isKodia,
+			showFeatured: !isKodia,
+			showUnavailableFeatured: !isKodia,
 			showManageModelsAction: true,
 			showAutoModel,
 		};
@@ -5997,6 +6006,15 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		const autoModelId = resolveConfiguredModel('auto', snapshot.models)?.identifier;
 		this._logService.warn(`[${this.id}] Selected model '${selectedModelId}' is unavailable for session '${sessionId}'; falling back to Auto instead of sending an unroutable model.`);
 		return autoModelId;
+	}
+
+	private _agentProviderForSession(sessionId: string): string | undefined {
+		const draft = this._getNewSession(sessionId)?.agentProvider;
+		if (draft) {
+			return draft;
+		}
+		const rawId = this._rawIdFromChatId(sessionId);
+		return rawId ? this._sessionCache.get(rawId)?.agentProvider : undefined;
 	}
 
 	private _resolveSessionResourceScheme(sessionId: string): string | undefined {

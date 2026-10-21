@@ -16,7 +16,7 @@ import { IMlxService } from '../common/mlxService.js';
 import { prepareSimpleLLMMessages } from '../common/prepareLLMMessages.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
-import { ModelSelection, ProviderName, providerNames } from '../common/voidSettingsTypes.js';
+import { displayInfoOfProviderName, ModelSelection, ProviderName, providerNames } from '../common/voidSettingsTypes.js';
 
 /**
  * Serves the Kodia agent of the Agents Window with Kodia's own LLM service, so
@@ -40,10 +40,14 @@ class KodiaAgentHostLmHandler extends Disposable implements IAgentHostByokLmHand
 
 	async listModels(): Promise<IByokLmModelInfo[]> {
 		await this._voidSettingsService.waitForInitState;
+		// `_modelOptions` is every model switched on for a provider that is set up
+		// ("Show in Dropdown" in Kodia settings): Gemini, MLX, OpenRouter, and the rest.
 		const { _modelOptions, overridesOfModel } = this._voidSettingsService.state;
 		return _modelOptions.map(({ name, selection: { providerName, modelName } }) => {
 			const { contextWindow, supportsVision } = getModelCapabilities(providerName, modelName, overridesOfModel);
-			return { vendor: providerName, id: modelName, name, maxContextWindowTokens: contextWindow, supportsVision: !!supportsVision };
+			const providerTitle = displayInfoOfProviderName(providerName).title;
+			const label = name.includes(providerTitle) ? name : `${providerTitle} · ${name}`;
+			return { vendor: providerName, id: modelName, name: label, maxContextWindowTokens: contextWindow, supportsVision: !!supportsVision };
 		});
 	}
 

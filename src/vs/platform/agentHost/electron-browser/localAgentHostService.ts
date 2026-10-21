@@ -644,8 +644,8 @@ export function registerAgentHostClientChannels(
 		client.registerChannel(AGENT_HOST_CLIENT_BYOK_LM_CHANNEL, new NullAgentHostClientByokLmChannel());
 	}
 
-	// Kodia: only Kodia's IDE windows can run Kodia's models for the Kodia agent;
-	// other windows (the Agents Window) register a channel that serves nothing.
+	// Kodia: the windows that load Kodia's LLM service (editor windows and the
+	// Agents Window) run Kodia's models for the Kodia agent; others serve nothing.
 	let kodiaHandler;
 	try {
 		kodiaHandler = instantiationService.invokeFunction(accessor => accessor.get(IKodiaAgentHostLmHandler));

@@ -12,15 +12,17 @@ import { IKodiaAgentHostLmHandler } from '../../../../platform/agentHost/common/
 import { toInternalTool, toOutput, toSimpleMessages, toUsage } from '../common/kodiaAgentHostLmMessages.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { toolsXMLSystemPrompt } from '../common/prompt/prompts.js';
+import { IMlxService } from '../common/mlxService.js';
+import { prepareSimpleLLMMessages } from '../common/prepareLLMMessages.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ModelSelection, ProviderName, providerNames } from '../common/voidSettingsTypes.js';
-import { IConvertToLLMMessageService } from './convertToLLMMessageService.js';
 
 /**
  * Serves the Kodia agent of the Agents Window with Kodia's own LLM service, so
  * it can run every model shown in Kodia's model dropdown, whatever its
- * provider. See {@link IKodiaAgentHostLmHandler}.
+ * provider. See {@link IKodiaAgentHostLmHandler}. Editor windows and the
+ * Agents Window both register it (see `kodiaAgentsWindow.contribution.ts`).
  */
 class KodiaAgentHostLmHandler extends Disposable implements IAgentHostByokLmHandler {
 	declare readonly _serviceBrand: undefined;
@@ -30,7 +32,7 @@ class KodiaAgentHostLmHandler extends Disposable implements IAgentHostByokLmHand
 	constructor(
 		@IVoidSettingsService private readonly _voidSettingsService: IVoidSettingsService,
 		@ILLMMessageService private readonly _llmMessageService: ILLMMessageService,
-		@IConvertToLLMMessageService private readonly _convertToLLMMessageService: IConvertToLLMMessageService,
+		@IMlxService private readonly _mlxService: IMlxService,
 	) {
 		super();
 		this.onDidChangeModels = this._voidSettingsService.onDidChangeState;
@@ -45,21 +47,29 @@ class KodiaAgentHostLmHandler extends Disposable implements IAgentHostByokLmHand
 		});
 	}
 
-	chat(request: IByokLmChatRequest, token: CancellationToken): Promise<IByokLmChatResult> {
+	async chat(request: IByokLmChatRequest, token: CancellationToken): Promise<IByokLmChatResult> {
 		if (!(providerNames as readonly string[]).includes(request.vendor)) {
-			return Promise.resolve({ output: [], error: `Unknown Kodia provider: ${request.vendor}` });
+			return { output: [], error: `Unknown Kodia provider: ${request.vendor}` };
 		}
 		const modelSelection: ModelSelection = { providerName: request.vendor as ProviderName, modelName: request.modelId };
-		const { overridesOfModel, optionsOfModelSelection } = this._voidSettingsService.state;
-		const tools = request.tools?.flatMap(toInternalTool);
+		// An editor window starts Kodia's MLX server; the Agents Window may be the only window open.
+		if (modelSelection.providerName === 'mlx' && this._voidSettingsService.state.globalSettings.autoSetupMlx) {
+			await this._mlxService.ensureReady({ installIfMissing: false, startServer: true }).catch(() => undefined);
+		}
+		const { overridesOfModel, optionsOfModelSelection, globalSettings } = this._voidSettingsService.state;
+		const tools = request.tools?.flatMap(toInternalTool) ?? [];
 		// Models without native tool calling are taught the XML format in the system message.
 		const { specialToolFormat } = getModelCapabilities(modelSelection.providerName, modelSelection.modelName, overridesOfModel);
 		const systemMessage = [request.instructions, specialToolFormat ? null : toolsXMLSystemPrompt(tools)].filter(Boolean).join('\n\n');
-		const { messages, separateSystemMessage } = this._convertToLLMMessageService.prepareLLMSimpleMessages({
+		const { messages, separateSystemMessage } = prepareSimpleLLMMessages({
 			simpleMessages: toSimpleMessages(request.input),
 			systemMessage,
+			// The agent works on its session's folder, not on an editor window's workspace, whose rules and memory don't apply.
+			aiInstructions: globalSettings.aiInstructions,
 			modelSelection,
 			featureName: 'Chat',
+			overridesOfModel,
+			optionsOfModelSelection,
 		});
 
 		return new Promise<IByokLmChatResult>(resolve => {

@@ -280,6 +280,11 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		this._resolver = resolver
 
 		this.readAndInitializeState()
+
+		// another window changed the settings (several editor windows, or one and the Agents Window, may be open)
+		this._register(this._storageService.onDidChangeValue(StorageScope.APPLICATION, VOID_SETTINGS_STORAGE_KEY, this._store)(e => {
+			if (e.external) this.readAndInitializeState()
+		}))
 	}
 
 

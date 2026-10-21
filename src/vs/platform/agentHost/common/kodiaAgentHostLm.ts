@@ -17,7 +17,8 @@ export const KODIA_AGENT_HOST_LM_CHANNEL = 'kodiaAgentHostLm';
 
 /**
  * Window-side handler serving the Kodia agent with Kodia's LLM service.
- * Registered only in Kodia's IDE windows; other windows serve nothing.
+ * Registered in Kodia's editor windows and in the Agents Window, so the agent
+ * runs with no editor window open.
  */
 export const IKodiaAgentHostLmHandler = createDecorator<IAgentHostByokLmHandler>('kodiaAgentHostLmHandler');
 

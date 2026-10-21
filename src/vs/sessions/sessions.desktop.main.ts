@@ -232,6 +232,9 @@ import '../workbench/contrib/policyExport/electron-browser/policyExport.contribu
 // Keybindings Export
 import '../workbench/contrib/keybindingsExport/electron-browser/keybindingsExport.contribution.js';
 
+// Kodia: runs Kodia's models, so the Agents Window works with no editor window open
+import '../workbench/contrib/void/browser/kodiaAgentsWindow.contribution.js';
+
 //#endregion
 
 

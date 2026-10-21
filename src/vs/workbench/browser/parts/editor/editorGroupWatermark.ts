@@ -9,18 +9,23 @@ import { isMacintosh, isNative, OS } from '../../../../base/common/platform.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { append, clearNode, $, h } from '../../../../base/browser/dom.js';
+import { addDisposableListener, append, clearNode, $, EventType, h } from '../../../../base/browser/dom.js';
+import { Button } from '../../../../base/browser/ui/button/button.js';
+import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { joinPath, resolvePath } from '../../../../base/common/resources.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { KeybindingLabel } from '../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
-import { defaultKeybindingLabelStyles } from '../../../../platform/theme/browser/defaultStyles.js';
+import { defaultButtonStyles, defaultKeybindingLabelStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { editorForeground, registerColor, transparent } from '../../../../platform/theme/common/colorRegistry.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
-import { isRecentFolder, IWorkspacesService } from '../../../../platform/workspaces/common/workspaces.js';
+import { IRecent, IRecentFolder, isRecentFolder, IWorkspacesService } from '../../../../platform/workspaces/common/workspaces.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { ILabelService, Verbosity } from '../../../../platform/label/common/label.js';
 import { ColorScheme } from '../../web.api.js';
 import { OpenFileFolderAction, OpenFolderAction } from '../../actions/workspaceActions.js';
-import { IWindowOpenable } from '../../../../platform/window/common/window.js';
+import { OpenRecentAction } from '../../actions/windowActions.js';
 import { splitRecentLabel } from '../../../../base/common/labels.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 
@@ -81,7 +86,14 @@ import { VIEWLET_ID as REMOTE_EXPLORER_VIEWLET_ID } from '../../../contrib/remot
 // ];
 
 
+// Kodia: a recent folder on the welcome screen, with its branch when it is a git worktree
+interface IWelcomeRecentFolder {
+	readonly folder: IRecentFolder;
+	readonly worktree: { readonly branch: string | undefined } | undefined;
+}
+
 export class EditorGroupWatermark extends Disposable {
+	private readonly watermark: HTMLElement; // Kodia: gets .kodia-welcome in an empty window
 	private readonly shortcuts: HTMLElement;
 	private readonly transientDisposables = this._register(new DisposableStore());
 	// private enabled: boolean = false;
@@ -100,19 +112,21 @@ export class EditorGroupWatermark extends Disposable {
 		@IHostService private readonly hostService: IHostService,
 		@ILabelService private readonly labelService: ILabelService,
 		@IViewsService private readonly viewsService: IViewsService,
+		@IFileService private readonly fileService: IFileService, // Kodia: tells git worktrees apart in the recent folders
 	) {
 		super();
 
 		// Kodia: VS Code 1.141 wraps the watermark in .editor-group-watermark-wrapper, and every watermark rule in
 		// editorgroupview.css (centering, logo size, hiding it once an editor opens) now targets that wrapper.
 		const elements = h('.editor-group-watermark-wrapper', [
-			h('.editor-group-watermark', [
+			h('.editor-group-watermark@watermark', [
 				h('.letterpress@icon'),
 				h('.shortcuts@shortcuts'),
 			]),
 		]);
 
 		append(container, elements.root);
+		this.watermark = elements.watermark;
 		this.shortcuts = elements.shortcuts; // shortcuts div is modified on render()
 
 		// void icon style
@@ -166,11 +180,6 @@ export class EditorGroupWatermark extends Disposable {
 
 		this.clear();
 		const voidIconBox = append(this.shortcuts, $('.watermark-box'));
-		const recentsBox = append(this.shortcuts, $('div'));
-		recentsBox.style.display = 'flex'
-		recentsBox.style.flex = 'row'
-		recentsBox.style.justifyContent = 'center'
-
 
 		const update = async () => {
 
@@ -178,112 +187,18 @@ export class EditorGroupWatermark extends Disposable {
 			const recentlyOpened = await this.workspacesService.getRecentlyOpened()
 				.catch(() => ({ files: [], workspaces: [] })).then(w => w.workspaces);
 
+			// Kodia - if the workbench is empty, show the welcome screen (its recent folders are resolved before clearing, like the list above)
+			const isEmptyWorkbench = this.contextService.getWorkbenchState() === WorkbenchState.EMPTY;
+			const recentFolders = isEmptyWorkbench ? await this.resolveRecentFolders(recentlyOpened) : [];
+
 			clearNode(voidIconBox);
-			clearNode(recentsBox);
 
 			this.currentDisposables.forEach(label => label.dispose());
 			this.currentDisposables.clear();
 
-
-			// Kodia - if the workbench is empty, show open
-			if (this.contextService.getWorkbenchState() === WorkbenchState.EMPTY) {
-
-				// Create a flex container for buttons with vertical direction
-				const buttonContainer = $('div');
-				buttonContainer.style.display = 'flex';
-				buttonContainer.style.flexDirection = 'column'; // Change to column for vertical stacking
-				buttonContainer.style.alignItems = 'center'; // Center the buttons horizontally
-				buttonContainer.style.gap = '8px'; // Reduce gap between buttons from 16px to 8px
-				buttonContainer.style.marginBottom = '16px';
-				voidIconBox.appendChild(buttonContainer);
-
-				// Open a folder
-				const openFolderButton = h('button')
-				openFolderButton.root.classList.add('void-openfolder-button')
-				openFolderButton.root.style.display = 'block'
-				openFolderButton.root.style.width = '124px' // Set width to 124px as requested
-				openFolderButton.root.textContent = 'Open Folder'
-				openFolderButton.root.onclick = () => {
-					this.commandService.executeCommand(isMacintosh && isNative ? OpenFileFolderAction.ID : OpenFolderAction.ID)
-					// if (this.contextKeyService.contextMatchesRules(ContextKeyExpr.and(WorkbenchStateContext.isEqualTo('workspace')))) {
-					// 	this.commandService.executeCommand(OpenFolderViaWorkspaceAction.ID);
-					// } else {
-					// 	this.commandService.executeCommand(isMacintosh ? 'workbench.action.files.openFileFolder' : 'workbench.action.files.openFolder');
-					// }
-				}
-				buttonContainer.appendChild(openFolderButton.root);
-
-				// Open SSH button
-				const openSSHButton = h('button')
-				openSSHButton.root.classList.add('void-openssh-button')
-				openSSHButton.root.style.display = 'block'
-				openSSHButton.root.style.backgroundColor = '#5a5a5a' // Made darker than the default gray
-				openSSHButton.root.style.width = '124px' // Set width to 124px as requested
-				openSSHButton.root.textContent = 'Open SSH'
-				openSSHButton.root.onclick = () => {
-					this.viewsService.openViewContainer(REMOTE_EXPLORER_VIEWLET_ID);
-				}
-				buttonContainer.appendChild(openSSHButton.root);
-
-
-				// Recents
-				if (recentlyOpened.length !== 0) {
-
-					voidIconBox.append(
-						...recentlyOpened.map((w, i) => {
-
-							let fullPath: string;
-							let windowOpenable: IWindowOpenable;
-							if (isRecentFolder(w)) {
-								windowOpenable = { folderUri: w.folderUri };
-								fullPath = w.label || this.labelService.getWorkspaceLabel(w.folderUri, { verbose: Verbosity.LONG });
-							}
-							else {
-								return null
-								// fullPath = w.label || this.labelService.getWorkspaceLabel(w.workspace, { verbose: Verbosity.LONG });
-								// windowOpenable = { workspaceUri: w.workspace.configPath };
-							}
-
-
-							const { name, parentPath } = splitRecentLabel(fullPath);
-
-							const linkSpan = $('span');
-							linkSpan.classList.add('void-link')
-							linkSpan.style.display = 'flex'
-							linkSpan.style.gap = '4px'
-							linkSpan.style.padding = '8px'
-
-							linkSpan.addEventListener('click', e => {
-								this.hostService.openWindow([windowOpenable], {
-									forceNewWindow: e.ctrlKey || e.metaKey,
-									remoteAuthority: w.remoteAuthority || null // local window if remoteAuthority is not set or can not be deducted from the openable
-								});
-								e.preventDefault();
-								e.stopPropagation();
-							});
-
-							const nameSpan = $('span');
-							nameSpan.innerText = name;
-							nameSpan.title = fullPath;
-							linkSpan.appendChild(nameSpan);
-
-							const dirSpan = $('span');
-							dirSpan.style.paddingLeft = '4px';
-							dirSpan.style.whiteSpace = 'nowrap';
-							dirSpan.style.overflow = 'hidden';
-							dirSpan.style.maxWidth = '300px';
-							dirSpan.innerText = parentPath;
-							dirSpan.title = fullPath;
-
-							linkSpan.appendChild(dirSpan);
-
-							return linkSpan
-						})
-							.filter(v => !!v)
-							.slice(0, 5) // take 5 most recent
-					)
-				}
-
+			this.watermark.classList.toggle('kodia-welcome', isEmptyWorkbench);
+			if (isEmptyWorkbench) {
+				this.renderWelcome(voidIconBox, recentFolders);
 			}
 			else {
 
@@ -331,6 +246,88 @@ export class EditorGroupWatermark extends Disposable {
 
 		update();
 		this.transientDisposables.add(this.keybindingService.onDidUpdateKeybindings(update));
+	}
+
+	// Kodia: the empty window's welcome screen (Open Folder, Open SSH, then the most recent folders)
+	private renderWelcome(container: HTMLElement, recentFolders: IWelcomeRecentFolder[]): void {
+		const actions = append(container, $('.kodia-welcome-actions'));
+
+		const openFolderButton = new Button(actions, { ...defaultButtonStyles, supportIcons: true });
+		openFolderButton.label = `$(folder-opened) ${localize('kodia.watermark.openFolder', "Open Folder")}`;
+		this.currentDisposables.add(openFolderButton);
+		this.currentDisposables.add(openFolderButton.onDidClick(() => this.commandService.executeCommand(isMacintosh && isNative ? OpenFileFolderAction.ID : OpenFolderAction.ID)));
+
+		const openSSHButton = new Button(actions, { ...defaultButtonStyles, secondary: true, supportIcons: true });
+		openSSHButton.label = `$(remote-explorer) ${localize('kodia.watermark.openSSH', "Open SSH")}`;
+		this.currentDisposables.add(openSSHButton);
+		this.currentDisposables.add(openSSHButton.onDidClick(() => this.viewsService.openViewContainer(REMOTE_EXPLORER_VIEWLET_ID)));
+
+		if (recentFolders.length === 0) {
+			return;
+		}
+
+		const recent = append(container, $('.kodia-welcome-recent'));
+		const header = append(recent, $('.kodia-welcome-recent-header'));
+		const recentLabel = localize('kodia.watermark.recent', "Recent");
+		append(header, $('h3.kodia-welcome-recent-title', undefined, recentLabel));
+		const openRecentKeybinding = this.keybindingService.lookupKeybinding(OpenRecentAction.ID)?.getLabel();
+		const more = append(header, $('button.kodia-welcome-recent-more', {
+			type: 'button',
+			title: openRecentKeybinding ? localize('kodia.watermark.openRecentKeybinding', "Open Recent ({0})", openRecentKeybinding) : localize('kodia.watermark.openRecent', "Open Recent"),
+		}, localize('kodia.watermark.more', "More...")));
+		this.currentDisposables.add(addDisposableListener(more, EventType.CLICK, () => this.commandService.executeCommand(OpenRecentAction.ID)));
+
+		const list = append(recent, $('ul.kodia-welcome-recent-list', { 'aria-label': recentLabel }));
+		for (const { folder, worktree } of recentFolders) {
+			const fullPath = folder.label || this.labelService.getWorkspaceLabel(folder.folderUri, { verbose: Verbosity.LONG });
+			const { name, parentPath } = splitRecentLabel(fullPath);
+
+			// a branch icon for a git worktree, a remote icon for a remote folder, a folder icon otherwise
+			const icon = worktree ? Codicon.gitBranch : folder.remoteAuthority ? Codicon.remote : Codicon.folder;
+			const title = !worktree ? fullPath
+				: worktree.branch ? localize('kodia.watermark.worktreeBranch', "{0}\nGit worktree on branch {1}", fullPath, worktree.branch)
+					: localize('kodia.watermark.worktree', "{0}\nGit worktree", fullPath);
+
+			// the name stays on one line; the parent path takes the room left and ends with an ellipsis (full path in the tooltip)
+			const entry = append(append(list, $('li')), $('button.kodia-welcome-recent-entry', { type: 'button', title }));
+			append(entry, renderIcon(icon)).classList.add('kodia-welcome-recent-icon');
+			append(entry, $('span.kodia-welcome-recent-name', undefined, name));
+			append(entry, $('span.kodia-welcome-recent-path', undefined, parentPath));
+
+			this.currentDisposables.add(addDisposableListener(entry, EventType.CLICK, e => {
+				this.hostService.openWindow([{ folderUri: folder.folderUri }], {
+					forceNewWindow: e.ctrlKey || e.metaKey,
+					remoteAuthority: folder.remoteAuthority || null // local window if remoteAuthority is not set or can not be deducted from the openable
+				});
+				e.preventDefault();
+				e.stopPropagation();
+			}));
+		}
+	}
+
+	// Kodia: the 5 most recent folders, each with its branch when it is a git worktree
+	private resolveRecentFolders(recents: readonly IRecent[]): Promise<IWelcomeRecentFolder[]> {
+		const folders = recents.filter(isRecentFolder).slice(0, 5);
+		return Promise.all(folders.map(async folder => ({ folder, worktree: await this.resolveWorktree(folder) })));
+	}
+
+	// Kodia: a git worktree has a `.git` file pointing into the main repository's `.git/worktrees/` (a submodule's points
+	// into `.git/modules/`), and its branch is in that folder's HEAD. Anything unreadable (gone, remote...) is a plain folder.
+	private async resolveWorktree(folder: IRecentFolder): Promise<{ readonly branch: string | undefined } | undefined> {
+		try {
+			const dotGit = joinPath(folder.folderUri, '.git');
+			if (!(await this.fileService.stat(dotGit)).isFile) {
+				return undefined;
+			}
+			const gitDir = /^gitdir:\s*(.+)$/m.exec((await this.fileService.readFile(dotGit)).value.toString())?.[1].trim();
+			if (!gitDir || !/[\\/]worktrees[\\/][^\\/]+$/.test(gitDir)) {
+				return undefined;
+			}
+			const head = (await this.fileService.readFile(joinPath(resolvePath(folder.folderUri, gitDir), 'HEAD')).catch(() => undefined))?.value.toString();
+			return { branch: head && /^ref:\s*refs\/heads\/(.+)$/m.exec(head)?.[1].trim() || undefined };
+		} catch {
+			return undefined;
+		}
 	}
 
 	private clear(): void {

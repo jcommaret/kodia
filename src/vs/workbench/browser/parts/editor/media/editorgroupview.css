@@ -189,6 +189,133 @@
 	margin-inline-start: 24px;
 }
 
+/* Kodia: the empty window's welcome screen (EditorGroupWatermark.renderWelcome): a smaller logo, the
+   Open Folder / Open SSH buttons side by side, then the recent folders, in a wider column than the
+   keybinding hints get. Only while every group is empty, like VS Code's own shortcuts. */
+
+.monaco-workbench .part.editor > .content.empty:not(.auxiliary) .editor-group-container > .editor-group-watermark-wrapper > .editor-group-watermark.kodia-welcome {
+	box-sizing: border-box;
+	max-width: 440px;
+	padding: 0 24px;
+}
+
+.monaco-workbench .part.editor > .content.empty:not(.auxiliary) .editor-group-container > .editor-group-watermark-wrapper > .editor-group-watermark.kodia-welcome > .letterpress {
+	width: min(160px, 100%);
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-actions {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	gap: 8px;
+	margin-top: 32px;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-actions .monaco-text-button {
+	padding: 6px 12px;
+	font-size: var(--vscode-fontSize-body1);
+	line-height: 18px;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent {
+	margin-top: 32px;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 0 8px;
+	margin-bottom: 4px;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-title {
+	margin: 0;
+	font-size: var(--vscode-fontSize-label2);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-more {
+	padding: 0;
+	border: none;
+	background: none;
+	font: inherit;
+	font-size: var(--vscode-fontSize-label1);
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-more:hover {
+	color: var(--vscode-textLink-activeForeground);
+	text-decoration: underline;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-entry {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	box-sizing: border-box;
+	width: 100%;
+	padding: 4px 8px;
+	border: none;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: none;
+	font: inherit;
+	line-height: 20px;
+	text-align: start;
+	cursor: pointer;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-entry:hover {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+.monaco-workbench.hc-black .editor-group-watermark .kodia-welcome-recent-entry:hover,
+.monaco-workbench.hc-light .editor-group-watermark .kodia-welcome-recent-entry:hover {
+	outline: 1px dashed var(--vscode-contrastActiveBorder);
+	outline-offset: -1px;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-icon {
+	flex: none;
+	color: var(--vscode-icon-foreground);
+}
+
+/* the name keeps its line and its full width first; the parent path gets what is left */
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-name {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-textLink-foreground);
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-entry:hover .kodia-welcome-recent-name {
+	color: var(--vscode-textLink-activeForeground);
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-path {
+	flex: 1 1 0;
+	min-width: 0;
+	margin-inline-start: 10px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: end;
+	font-size: var(--vscode-fontSize-label1);
+	color: var(--vscode-descriptionForeground);
+}
+
 /* Title */
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title {

@@ -1949,7 +1949,7 @@
     "@vscode/extension-telemetry": "^0.9.8",
     "dompurify": "^3.4.16",
     "highlight.js": "^11.8.0",
-    "markdown-it": "^14.3.1",
+    "markdown-it": "^14.3.3",
     "morphdom": "^2.7.7",
     "picomatch": "^2.3.2",
     "punycode": "^2.3.1",

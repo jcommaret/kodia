@@ -1,8 +1,8 @@
 {
-  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.5.8/Kodia-win32-x64-1.141.0-2.5.8.zip",
-  "name": "1.141.0-2.5.8",
-  "version": "484c80c01c6ce3d9b8be88f36be70212c41c8b97",
+  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.5.10/Kodia-win32-x64-1.141.0-2.5.10.zip",
+  "name": "1.141.0-2.5.10",
+  "version": "03473f70b3cfeeaec584c23bb64bed79bcb1dd17",
   "productVersion": "1.141.0.0",
-  "timestamp": 1792495051157,
-  "sha256hash": "f9e1714a87af2c230650c3442e95ba49f8330f3148c5ef2903260dd233a59234"
+  "timestamp": 1792583036505,
+  "sha256hash": "518a432fc0d9e230041a5d04ff719879c144995bbb6182f64ebd0d050b7e5d4c"
 }

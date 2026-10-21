@@ -10,13 +10,17 @@ import { INativeHostService } from '../../../platform/native/common/native.js';
 import { IOpenedMainWindow, IOpenEmptyWindowOptions, IOpenWindowOptions, IWindowOpenable, isFolderToOpen } from '../../../platform/window/common/window.js';
 import { constObservable } from '../../../base/common/observable.js';
 import { URI } from '../../../base/common/uri.js';
-import { getChatSessionToOpenInEditor, openKodiaSettingsInIDE, openSessionInVSCode, returnToVSCodeEditor, shouldShowReturnToVSCodeEditor, switchToIDE } from '../../electron-browser/actions/vscodeActions.js';
+import { getChatSessionToOpenInEditor, KodiaManageModelsContribution, openKodiaSettingsInIDE, openSessionInVSCode, returnToVSCodeEditor, shouldShowReturnToVSCodeEditor, switchToIDE } from '../../electron-browser/actions/vscodeActions.js';
 import { IKodiaWindowsService } from '../../../platform/windows/common/kodiaWindows.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
 import { IChat } from '../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../services/sessions/browser/sessionsProvidersService.js';
 import { IRemoteAgentHostService } from '../../../platform/agentHost/common/remoteAgentHostService.js';
 import { Codicon } from '../../../base/common/codicons.js';
+import { DisposableStore } from '../../../base/common/lifecycle.js';
+import { Action2, registerAction2 } from '../../../platform/actions/common/actions.js';
+import { CommandsRegistry } from '../../../platform/commands/common/commands.js';
+import { ServicesAccessor } from '../../../platform/instantiation/common/instantiation.js';
 
 suite('VS Code Actions', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -206,6 +210,48 @@ suite('VS Code Actions', () => {
 		test('does nothing when the opened window cannot be found', async () => {
 			const calls = await openSettingsWith([createWindow(agentsWindowId)], [createWindow(agentsWindowId)]);
 			assert.deepStrictEqual(calls, ['open']);
+		});
+	});
+
+	suite('KodiaManageModelsContribution', () => {
+		const manageModelsId = 'workbench.action.chat.manage';
+
+		// The chat's own "Manage Language Models" action
+		function registerChatAction(): ReturnType<typeof registerAction2> {
+			return registerAction2(class extends Action2 {
+				constructor() {
+					super({ id: manageModelsId, title: 'Manage Language Models' });
+				}
+				run(): string {
+					return 'chat';
+				}
+			});
+		}
+
+		// Runs the command with an accessor that fails on the first service asked for: the chat's action asks for none
+		function runCommand(): string {
+			const accessor: ServicesAccessor = { get: () => { throw new Error('kodia'); } };
+			try {
+				return String(CommandsRegistry.getCommand(manageModelsId)!.handler(accessor));
+			} catch (e) {
+				return (e as Error).message;
+			}
+		}
+
+		test('lets the chat register its action, then handles the command', () => {
+			const store = new DisposableStore();
+			store.add(new KodiaManageModelsContribution());
+			store.add(registerChatAction());
+			assert.strictEqual(runCommand(), 'kodia');
+			store.dispose();
+		});
+
+		test('handles the command when the chat registered its action first', () => {
+			const store = new DisposableStore();
+			store.add(registerChatAction());
+			store.add(new KodiaManageModelsContribution());
+			assert.strictEqual(runCommand(), 'kodia');
+			store.dispose();
 		});
 	});
 });

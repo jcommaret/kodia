@@ -1,8 +1,8 @@
 {
-  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.6.0/Kodia-darwin-arm64-1.141.0-2.6.0.zip",
-  "name": "1.141.0-2.6.0",
-  "version": "302ec224c4b4f4430b1d5595b4cc6a84c015656d",
+  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.6.1/Kodia-darwin-arm64-1.141.0-2.6.1.zip",
+  "name": "1.141.0-2.6.1",
+  "version": "ccee852a676815b76c6924a8e51afb0b8040b769",
   "productVersion": "1.141.0.0",
-  "timestamp": 1792586937345,
-  "sha256hash": "21808a0dbcb174fd424fa8611b92eaf85587c58283cc0372a4ca791a09dd3853"
+  "timestamp": 1792703362366,
+  "sha256hash": "e97f4800b46b780c03da594f29b05835333d5318e9a6e54fec55591013a8255c"
 }

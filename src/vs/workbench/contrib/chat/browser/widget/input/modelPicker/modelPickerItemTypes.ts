@@ -32,6 +32,8 @@ export interface IBuildModelPickerItemsOptions {
 		readonly setupRequired: boolean;
 		readonly showManageModelsInSetupRequired: boolean;
 		readonly isUBB: boolean;
+		/** Kodia: end the flat list (and the empty state) with "Manage Models...", which opens Kodia's settings. */
+		readonly showManageModelsInFlatList?: boolean;
 	};
 	readonly actions: {
 		readonly onSelect: (model: ILanguageModelChatMetadataAndIdentifier) => void;

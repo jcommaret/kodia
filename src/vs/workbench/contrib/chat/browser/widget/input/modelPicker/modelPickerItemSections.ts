@@ -127,7 +127,25 @@ export function buildUnavailableStateItems(options: IBuildModelPickerItemsOption
 		disabled: true,
 		hideIcon: false,
 		hover: hover ? { content: hover } : undefined,
-	}];
+	}, ...manageModelsItemsForFlatList(options)];
+}
+
+/** Kodia: "Manage Models..." after a separator, for the flat list and its empty state (see `showManageModelsInFlatList`). */
+function manageModelsItemsForFlatList(options: IBuildModelPickerItemsOptions): IActionListItem<IActionWidgetDropdownAction>[] {
+	if (!options.presentation.showManageModelsInFlatList || !options.manageModelsAction) {
+		return [];
+	}
+	return [
+		{ kind: ActionListItemKind.Separator },
+		{
+			item: options.manageModelsAction,
+			kind: ActionListItemKind.Action,
+			label: options.manageModelsAction.label,
+			group: { title: '', icon: Codicon.blank },
+			hideIcon: false,
+			showAlways: true,
+		},
+	];
 }
 
 export function buildFlatModelItems(options: IBuildModelPickerItemsOptions): IActionListItem<IActionWidgetDropdownAction>[] {
@@ -161,6 +179,7 @@ export function buildFlatModelItems(options: IBuildModelPickerItemsOptions): IAc
 		const { action, ariaDescription } = createModelAction(model, options.selectedModelId, options.actions.onSelect);
 		items.push(createModelItem(action, model, options.openerService, undefined, options.presentation.isUBB, ariaDescription, undefined, options.actions.onConfigure));
 	}
+	items.push(...manageModelsItemsForFlatList(options));
 	return items;
 }
 

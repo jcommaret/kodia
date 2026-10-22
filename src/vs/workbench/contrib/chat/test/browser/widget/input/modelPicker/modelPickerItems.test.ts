@@ -144,6 +144,7 @@ function callBuild(
 		onRequestTrust?: () => void;
 		setupRequired?: boolean;
 		showManageModelsInSetupRequired?: boolean;
+		showManageModelsInFlatList?: boolean;
 		onRequestSetup?: () => void;
 		onSelect?: (model: ILanguageModelChatMetadataAndIdentifier) => void;
 		entitlementService?: IChatEntitlementService;
@@ -176,6 +177,7 @@ function callBuild(
 			setupRequired: opts.setupRequired ?? false,
 			showManageModelsInSetupRequired: opts.showManageModelsInSetupRequired ?? false,
 			isUBB: false,
+			showManageModelsInFlatList: opts.showManageModelsInFlatList,
 		},
 		actions: {
 			onSelect,
@@ -323,6 +325,23 @@ suite('buildModelPickerItems', () => {
 		assert.strictEqual(actions.some(a => a.label === 'Auto'), false);
 		assert.strictEqual(actions[0].item?.id, 'noModels');
 		assert.strictEqual(actions[0].item?.enabled, false);
+	});
+
+	test('Kodia: the flat list ends with the manage models entry', () => {
+		const items = callBuild([createModel('gemini-3.8-flash', 'Gemini 3.8 Flash', 'agent-host-kodia')], { useGroupedModelPicker: false, showAutoModel: false, showManageModelsInFlatList: true });
+		const actions = getActionItems(items);
+		assert.deepStrictEqual(actions.map(a => a.label), ['Gemini 3.8 Flash', 'Manage Models...']);
+		assert.strictEqual(actions[1].item?.id, 'manageModels');
+	});
+
+	test('the flat list has no manage models entry outside Kodia', () => {
+		const items = callBuild([createModel('gpt-4o', 'GPT-4o')], { useGroupedModelPicker: false, showAutoModel: false });
+		assert.strictEqual(getActionItems(items).some(a => a.item?.id === 'manageModels'), false);
+	});
+
+	test('Kodia: with no models, the empty state still offers manage models', () => {
+		const items = callBuild([], { showAutoModel: false, showManageModelsInFlatList: true });
+		assert.deepStrictEqual(getActionItems(items).map(a => a.item?.id), ['noModels', 'manageModels']);
 	});
 
 	test('showAutoModel=false attaches inline upgrade link for Free users', () => {

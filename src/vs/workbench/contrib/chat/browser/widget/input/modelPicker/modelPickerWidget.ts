@@ -28,6 +28,7 @@ import { ICommandService } from '../../../../../../../platform/commands/common/c
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { IOpenerService } from '../../../../../../../platform/opener/common/opener.js';
 import { IProductService } from '../../../../../../../platform/product/common/productService.js';
+import { isKodiaProduct } from './kodiaModelPicker.js';
 import { ITelemetryService } from '../../../../../../../platform/telemetry/common/telemetry.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../../platform/storage/common/storage.js';
 import { COPILOT_VENDOR_ID, getLanguageModelProviderDisplayName, IModelControlEntry, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService, isUserProvidedModel } from '../../../../common/languageModels.js';
@@ -342,6 +343,10 @@ export class ModelPickerWidget extends Disposable {
 	}
 
 	private _requiresSetup(): boolean {
+		// Kodia: no Copilot to sign in to; the models come from Kodia's settings (see kodiaModelPicker.ts)
+		if (isKodiaProduct(this._productService)) {
+			return false;
+		}
 		return modelPickerRequiresSetup({
 			entitlement: this._entitlementService.entitlement,
 			anonymous: this._entitlementService.anonymous,
@@ -584,7 +589,8 @@ export class ModelPickerWidget extends Disposable {
 		const presentation = this._delegate.getPresentationOptions();
 		const manifest = this._languageModelsService.getModelsControlManifest();
 		const controlModelsForTier: IStringDictionary<IModelControlEntry> = getModelPickerControlModels(manifest, this._entitlementService.entitlement, models);
-		const canShowManageModelsAction = presentation.showManageModelsAction && shouldShowManageModelsAction(this._entitlementService);
+		// Kodia: always offered, it opens Kodia's settings (see kodiaModelPicker.ts)
+		const canShowManageModelsAction = presentation.showManageModelsAction && (isKodiaProduct(this._productService) || shouldShowManageModelsAction(this._entitlementService));
 		const manageModelsAction = canShowManageModelsAction ? createManageModelsAction(this._commandService) : undefined;
 		const logModelPickerInteraction = (interaction: ChatModelPickerInteraction) => {
 			this._telemetryService.publicLog2<ChatModelPickerInteractionEvent, ChatModelPickerInteractionClassification>('chat.modelPickerInteraction', { interaction });
@@ -681,6 +687,8 @@ export class ModelPickerWidget extends Disposable {
 				restrictedMode: this.isRestrictedMode(),
 				setupRequired: this.isSetupRequired(),
 				showManageModelsInSetupRequired: this._configurationService.getValue<boolean>(AgentHostAllowSignedOutWhenUsableSettingId) === true,
+				// Kodia: the flat picker of the Kodia agent ends with "Manage Models..." (see kodiaModelPicker.ts)
+				showManageModelsInFlatList: isKodiaProduct(this._productService),
 				isUBB: !!this._entitlementService.quotas.usageBasedBilling,
 			},
 			actions: {

@@ -11,7 +11,8 @@ This guide explains how that code fits together. To build and run Kodia, see [HO
 | `src/vs/workbench/contrib/void/` | Kodia's features: chat sidebar, Apply, Ctrl+K, autocomplete, settings, tools, MCP. |
 | `src/vs/workbench/contrib/void/browser/react/` | The React UI (sidebar, settings, onboarding, Ctrl+K, tooltips), bundled separately. |
 | `src/vs/workbench/contrib/void/test/` | Unit tests (`npm run test-void`). |
-| `src/vs/platform/agentHost/node/mistral/` | The Mistral agent for the Agents window. |
+| `src/vs/platform/agentHost/node/kodia/` | The Kodia agent, the Agents window's only agent. |
+| `src/vs/platform/agentHost/node/mistral/` | The former Mistral agent, no longer registered. |
 | `scripts/void/` | Maintenance scripts, such as the model catalog check. |
 | `.github/workflows/` | CI: `pr-checks.yml` on every pull request, `model-catalog.yml` weekly. |
 
@@ -115,16 +116,16 @@ Terms (`voidSettingsTypes.ts`):
 - **Updates** (`voidUpdateMainService`): checks the latest GitHub release of `jcommaret/kodia` (`kodiaLinks.ts`).
 - **Copilot**: removed. `disableCopilotContribution` turns off VS Code's built-in AI features (`chat.disableAIFeatures`) and any Copilot extension a user installs.
 
-## The Agents window and the Mistral agent
+## The Agents window and the Kodia agent
 
 The Agents window is VS Code's agent session window. It talks to the **agent host**, a separate Node process (`src/vs/platform/agentHost/`) that runs agent "providers".
 
-Kodia adds one: `MistralAgent` (`src/vs/platform/agentHost/node/mistral/`). It runs a tool loop on top of Mistral's Conversations API:
-- each chat is one server-side conversation;
-- the tools (read, write, list, run a command) execute locally;
-- writes and commands go through the host's approval flow.
+Kodia registers only one: `KodiaAgent` (`src/vs/platform/agentHost/node/kodia/`, see `agentHostMain.ts`). It runs a tool loop with every model shown in Kodia's model dropdown, whatever its provider:
+- the tools (read, write, list, run a command) execute locally in the agent host;
+- writes and commands go through the host's approval flow;
+- a Kodia window (an editor window or the Agents window itself) sends the model requests with Kodia's own LLM service and keys (`browser/kodiaAgentHostLmHandler.ts`).
 
-The API key comes from Kodia's settings: `browser/mistralAgentHostKeyBridge.ts` pushes it to the agent host. See `src/vs/platform/agentHost/AGENTS.md` for the host's architecture.
+VS Code's Copilot, Claude and Codex agents and the former Mistral agent (`node/mistral/`) are not registered. See `src/vs/platform/agentHost/AGENTS.md` for the host's architecture.
 
 ## Upstream updates
 

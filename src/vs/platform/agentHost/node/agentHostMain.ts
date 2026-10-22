@@ -15,19 +15,13 @@ import { URI } from '../../../base/common/uri.js';
 import { generateUuid } from '../../../base/common/uuid.js';
 import * as os from 'os';
 import * as inspector from 'inspector';
-import { AgentHostClaudeAgentEnabledEnvVar, AgentHostCodexAgentCodexHomeEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostIpcChannels, IAgentHostInspectInfo, IAgentHostSocketInfo, IConnectionTrackerService, isAgentEnabled } from '../common/agentService.js';
-import { AgentHostCodexEnabledConfigKey, platformRootSchema } from '../common/agentHostSchema.js';
+import { AgentHostCodexAgentCodexHomeEnvVar, AgentHostIpcChannels, IAgentHostInspectInfo, IAgentHostSocketInfo, IConnectionTrackerService } from '../common/agentService.js';
 import { AgentModelRefreshScheduler, MODEL_REFRESH_INTERVAL_MS } from './agentModelRefreshScheduler.js';
 import { AgentService } from './agentService.js';
 import { AgentHostStateManager, IAgentHostStateManager } from './agentHostStateManager.js';
 import { IAgentConfigurationService } from './agentConfigurationService.js';
 import { IAgentHostCompletions } from './agentHostCompletions.js';
-import { ClaudeAgent } from './claude/claudeAgent.js';
-import { ClaudeSdkPackage } from './claude/claudeAgentSdkService.js';
-import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
-import { MistralAgent } from './mistral/mistralAgent.js';
 import { IKodiaLmBridgeRegistry, KodiaAgent } from './kodia/kodiaAgent.js';
-import { IMistralApiService, MistralApiService } from './mistral/mistralApiService.js';
 import { ServiceCollection } from '../../instantiation/common/serviceCollection.js';
 import { createCodexProviderConfiguration } from './codex/codexProviderConfiguration.js';
 import { ByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
@@ -149,60 +143,16 @@ async function startAgentHost(): Promise<void> {
 			stateManager: accessor.get(IAgentHostStateManager),
 			completions: accessor.get(IAgentHostCompletions),
 		}));
-		const agentConfigurationService = runtimeServices.configurationService;
 		fileService = runtimeServices.fileService;
 		proxyResolver = runtimeServices.proxyResolver;
 		stateManager = runtimeServices.stateManager;
 		errorTelemetry.value = new ErrorTelemetry(runtimeServices.telemetryService);
-		const agentSdkDownloader = runtimeServices.agentSdkDownloader;
 		const providerService = runtimeServices.providerService;
 		sdkDownloadProgress = runtime.sdkDownloadProgress;
-		// Kodia: no Copilot agent. Kodia ships without GitHub Copilot, so the agent could only ask to sign in.
-		// Claude and Codex providers are gated on two things:
-		//  1. The user-facing enable toggle (`chat.agentHost.<x>Agent.enabled`,
-		//     forwarded as an env var by the starters). Claude defaults to on.
-		//     Codex defaults to on outside Stable and off in Stable; if a starter
-		//     does not forward its resolved value, the host fallback is off.
-		//  2. The SDK being reachable. Claude is a devDependency of this repo
-		//     so the bare-import path in `ClaudeAgentSdkService._loadSdk`
-		//     always succeeds in dev; in built products the SDK ships via
-		//     `product.agentSdks.claude` and the downloader handles it. Codex
-		//     is likewise a devDependency, so `CodexAgent._resolveSdkRoot`
-		//     resolves it from `node_modules` in dev; built products use the
-		//     env-var override or a `product.agentSdks.codex` entry.
-		// If either gate fails, the provider is not registered and never appears
-		// in the agent picker (matches the pre-CDN UX exactly).
-		if (isAgentEnabled(process.env[AgentHostClaudeAgentEnabledEnvVar], true) && (!environmentService.isBuilt || agentSdkDownloader.isAvailable(ClaudeSdkPackage))) {
-			providerService.registerProvider(instantiationService.createInstance(ClaudeAgent));
-		}
-		// Codex registration is one-way (register-on-enable): the env-var toggle
-		// or the renderer-forwarded `codexAgentEnabled` root config enables it.
-		// Disabling requires an agent host restart.
-		if (!environmentService.isBuilt || agentSdkDownloader.isAvailable(CodexSdkPackage)) {
-			let codexRegistered = false;
-			const registerCodexIfEnabled = () => {
-				if (codexRegistered) {
-					return;
-				}
-				const enabledByEnv = isAgentEnabled(process.env[AgentHostCodexAgentEnabledEnvVar], false);
-				const enabledByRootConfig = agentConfigurationService.getRootValue(platformRootSchema, AgentHostCodexEnabledConfigKey) === true;
-				if (enabledByEnv || enabledByRootConfig) {
-					codexRegistered = true;
-					providerService.registerProvider(instantiationService.createInstance(CodexAgent));
-				}
-			};
-			registerCodexIfEnabled();
-			disposables.add(agentConfigurationService.onDidRootConfigChange(registerCodexIfEnabled));
-		}
-		// Kodia: the Mistral agent is always registered so it appears in the Agents window whenever the
-		// agent host runs. There is no SDK to gate on: the agentic loop and the tools are native
-		// (`node/mistral/`). Its API key comes from Kodia's settings through the key bridge, or from
-		// `VSCODE_AGENT_HOST_MISTRAL_API_KEY`; without one a turn fails fast with a clear error.
-		const mistralApiService = disposables.add(instantiationService.createInstance(MistralApiService));
-		const mistralInstantiationService = instantiationService.createChild(new ServiceCollection([IMistralApiService, mistralApiService]));
-		providerService.registerProvider(mistralInstantiationService.createInstance(MistralAgent));
-		// Kodia: the Kodia agent runs every model shown in Kodia's model dropdown; a Kodia window
-		// runs its model requests (see `kodiaAgentHostLm.ts`).
+		// Kodia: the Kodia agent is the only agent. It runs every model shown in Kodia's model dropdown
+		// (Anthropic, OpenAI, Mistral, Gemini, local models…) with Kodia's own keys, so the Copilot, Claude,
+		// Codex and Mistral agents are not registered. Sessions created with them stay on disk but don't open.
+		// A Kodia window runs its model requests (see `kodiaAgentHostLm.ts`).
 		const kodiaInstantiationService = instantiationService.createChild(new ServiceCollection([IKodiaLmBridgeRegistry, kodiaLmBridgeRegistry]));
 		providerService.registerProvider(kodiaInstantiationService.createInstance(KodiaAgent));
 		completionTriggerCharacters = runtimeServices.completions.triggerCharacters;

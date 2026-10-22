@@ -14,7 +14,7 @@ You bring the models: Kodia talks directly to the providers you configure, or to
 - **Apply and Ctrl+K**: apply suggested code, or edit a selection in place. Changes show as diffs you accept or reject.
 - **Checkpoints**: undo everything a turn changed.
 - **Autocomplete** with fill-in-the-middle models (Codestral and others), with context from your other open files.
-- **Agents window**: long-running agent sessions, with Kodia's Mistral agent.
+- **Agents window**: long-running agent sessions with the Kodia agent, which runs every model shown in Kodia's model dropdown.
 - **Providers**:
   - cloud: Anthropic, OpenAI, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter;
   - cloud platforms: Google Vertex, Azure, AWS Bedrock, LiteLLM;

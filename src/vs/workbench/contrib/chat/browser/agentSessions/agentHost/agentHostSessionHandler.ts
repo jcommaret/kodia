@@ -3970,11 +3970,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			}
 			if (!opts.suppressErrorMarkdown) {
 				const errorDetails = this._getTurnErrorDetails(lastTurn, false);
-				// Kodia: the Mistral agent reports its per-minute token limit as a dedicated part (a countdown
-				// with a retry button) rather than as error markdown.
-				if (getTurnError(lastTurn)?.errorType === 'MistralRateLimitExceeded') {
-					opts.sink([{ kind: 'mistralRateLimit', resetAt: Date.now() + 60_000 }]);
-				} else if (errorDetails) {
+				if (errorDetails) {
 					opts.sink([{ kind: 'markdownContent', content: new MarkdownString(`\n\n${errorDetails.message}`) }]);
 				}
 			}

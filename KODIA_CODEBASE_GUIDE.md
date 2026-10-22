@@ -12,7 +12,6 @@ This guide explains how that code fits together. To build and run Kodia, see [HO
 | `src/vs/workbench/contrib/void/browser/react/` | The React UI (sidebar, settings, onboarding, Ctrl+K, tooltips), bundled separately. |
 | `src/vs/workbench/contrib/void/test/` | Unit tests (`npm run test-void`). |
 | `src/vs/platform/agentHost/node/kodia/` | The Kodia agent, the Agents window's only agent. |
-| `src/vs/platform/agentHost/node/mistral/` | The former Mistral agent, no longer registered. |
 | `scripts/void/` | Maintenance scripts, such as the model catalog check. |
 | `.github/workflows/` | CI: `pr-checks.yml` on every pull request, `model-catalog.yml` weekly. |
 
@@ -121,11 +120,11 @@ Terms (`voidSettingsTypes.ts`):
 The Agents window is VS Code's agent session window. It talks to the **agent host**, a separate Node process (`src/vs/platform/agentHost/`) that runs agent "providers".
 
 Kodia registers only one: `KodiaAgent` (`src/vs/platform/agentHost/node/kodia/`, see `agentHostMain.ts`). It runs a tool loop with every model shown in Kodia's model dropdown, whatever its provider:
-- the tools (read, write, list, run a command) execute locally in the agent host;
+- the tools (read, write, list, run a command, in `kodiaTools.ts`) execute locally in the agent host;
 - writes and commands go through the host's approval flow;
 - a Kodia window (an editor window or the Agents window itself) sends the model requests with Kodia's own LLM service and keys (`browser/kodiaAgentHostLmHandler.ts`).
 
-VS Code's Copilot, Claude and Codex agents and the former Mistral agent (`node/mistral/`) are not registered. See `src/vs/platform/agentHost/AGENTS.md` for the host's architecture.
+VS Code's Copilot, Claude and Codex agents are not registered. See `src/vs/platform/agentHost/AGENTS.md` for the host's architecture.
 
 ## Upstream updates
 

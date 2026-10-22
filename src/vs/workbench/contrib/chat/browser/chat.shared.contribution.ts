@@ -19,7 +19,7 @@ import '../../../../platform/agentHost/common/agentHostEnablementService.js';
 import { AgentHostAutoReplyEnabledConfigKey, AgentHostEditAutoApprovePatternsConfigKey, AgentHostExternalSessionsMode, AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostMcpConnectorsEnabledConfigKey, AgentHostMigrateLegacyCopilotCliEnabledConfigKey, AgentHostSessionCatalogEnabledConfigKey, AgentHostSessionSyncEnabledConfigKey, AgentHostShowExternalSessionsConfigKey } from '../../../../platform/agentHost/common/agentHostSchema.js';
 import '../../../../platform/agentHost/common/agentHostStarter.config.contribution.js';
 import { AgentMergeSettingId } from '../../../../platform/agentHost/common/agentMerge.js';
-import { AgentHostAhpJsonlLoggingSettingId, AgentHostAllowSignedOutWhenUsableSettingId, AgentHostMistralApiKeySettingId, AgentHostMistralRequestsPerSecondSettingId, CodexPreferAgentHostEditorSettingId } from '../../../../platform/agentHost/common/agentService.js';
+import { AgentHostAhpJsonlLoggingSettingId, AgentHostAllowSignedOutWhenUsableSettingId, CodexPreferAgentHostEditorSettingId } from '../../../../platform/agentHost/common/agentService.js';
 import { AgentHostCopilotModelCapabilityOverridesSettingId, AgentHostCopilotRuntimePathSettingId, AgentHostCopilotSdkLogLevelSettingId, AgentHostCustomTerminalToolEnabledSettingId, AgentHostHydraFusionEnabledSettingId, AgentHostOpus48PromptEnabledSettingId, AgentHostShellToolInitScriptEnabledSettingId, AgentHostToolSearchDeferThresholdSettingId, AgentHostToolSearchEnabledSettingId, CopilotAutoModeTierOverrideSettingId, CopilotClaudeAdvisorEnabledSettingId, CopilotCliConfigKey, CopilotSkillCharBudgetSettingId, CopilotTgrepEnabledSettingId, copilotSdkLogLevelSettingValues, DEFAULT_COPILOT_SKILL_CHAR_BUDGET, normalizeSkillCharBudget } from '../../../../platform/agentHost/common/copilotCliConfig.js';
 import { CopilotSemanticSearchEnabledSettingId } from '../../../../platform/agentHost/common/semanticSearchConstants.js';
 import { ChatMicrosoftAuthenticationEnabledSettingId, ChatMicrosoftAuthenticationMode, DEFAULT_EDIT_AUTO_APPROVE_PATTERNS, mergeChatEditAutoApprovePatterns } from '../../../../platform/chat/common/chatSettings.js';
@@ -269,22 +269,6 @@ import './widget/input/editor/chatInputEditorHover.js';
 import { ChatPasteProvidersFeature } from './widget/input/editor/chatPasteProviders.js';
 import { QuickChatService } from './widgetHosts/chatQuick.js';
 import { IRepositoryPickerOptions, PICK_REPOSITORY_COMMAND_ID, RepositoryPicker } from './agentSessions/repositoryPicker.js';
-
-CommandsRegistry.registerCommand('void.chat.retryRateLimited', (accessor: ServicesAccessor) => {
-	const widget = accessor.get(IChatWidgetService).lastFocusedWidget;
-	if (!widget) { return; }
-	const sessionResource = widget.viewModel?.sessionResource;
-	if (!sessionResource) { return; }
-	const chatModel = accessor.get(IChatService).getSession(sessionResource);
-	const lastRequest = chatModel?.getRequests().at(-1);
-	if (lastRequest) {
-		accessor.get(IChatService).resendRequest(lastRequest, {
-			userSelectedModelId: widget.input.currentLanguageModel,
-			attempt: (lastRequest.attempt ?? -1) + 1,
-			...widget.getModeRequestOptions(),
-		});
-	}
-});
 
 CommandsRegistry.registerCommand('_chat.notifyQuestionCarouselAnswer', (accessor: ServicesAccessor, resolveId: string, answers?: import('../common/chatService/chatService.js').IChatQuestionAnswers) => {
 	accessor.get(IChatService).notifyQuestionCarouselAnswer('', resolveId, answers);
@@ -1627,22 +1611,6 @@ configurationRegistry.registerConfiguration({
 			experiment: {
 				mode: 'startup'
 			},
-		},
-		[AgentHostMistralApiKeySettingId]: {
-			type: 'string',
-			description: nls.localize('chat.agentHost.mistralAgent.apiKey', "Experimental. Mistral API key. When set, the Mistral agent provider is registered inside the agent host, with a native local tool-using harness backed by the Mistral API. If left empty, Void reuses the Mistral API key configured in Void Settings. The agent host process must be restarted (reload window) for changes to take effect."),
-			default: '',
-			// Machine-scoped so the key is never synced via Settings Sync.
-			scope: ConfigurationScope.MACHINE,
-			tags: ['experimental', 'advanced'],
-		},
-		[AgentHostMistralRequestsPerSecondSettingId]: {
-			type: 'number',
-			description: nls.localize('chat.agentHost.mistralAgent.requestsPerSecond', "Experimental. Caps how many requests per second the Mistral agent provider opens against the Mistral API (a client-side throttle that smooths bursts under Mistral's per-workspace rate limit). Defaults to `1`; set to `0` to disable the throttle. `429 Too Many Requests` responses are retried with backoff regardless. The agent host process must be restarted (reload window) for changes to take effect."),
-			default: 1,
-			minimum: 0,
-			scope: ConfigurationScope.MACHINE,
-			tags: ['experimental', 'advanced'],
 		},
 		[AgentHostCustomTerminalToolEnabledSettingId]: {
 			type: 'boolean',

@@ -23,7 +23,7 @@ import { UtilityProcess } from '../../utilityProcess/electron-main/utilityProces
 import { AgentHostStartError, IAgentHostConnection, IAgentHostShutdownRequest, IAgentHostStarter, IAgentHostStartRequest, isFatalAgentHostStartError, toFatalAgentHostStartError } from '../common/agent.js';
 import { buildAgentHostTelemetryIdEnv, IAgentHostForwardedTelemetryIds } from '../common/agentHostTelemetryEnv.js';
 import { AgentHostLaunchKind, AgentHostLaunchKindEnvVar, telemetryLevelToAgentHostValue } from '../common/agentHostTelemetry.js';
-import { AgentHostClaudeAgentEnabledSettingId, AgentHostCodexAgentBinaryArgsSettingId, AgentHostCodexAgentEnabledSettingId, AgentHostCodexAgentSdkRootSettingId, AgentHostCodexAgentCodexHomeSettingId, AgentHostIpcChannels, AgentHostMistralApiKeyEnvVar, AgentHostMistralApiKeySettingId, AgentHostMistralRequestsPerSecondEnvVar, AgentHostMistralRequestsPerSecondSettingId, AgentHostOTelCaptureContentSettingId, AgentHostOTelCaptureIdentitySettingId, AgentHostOTelDbSpanExporterEnabledSettingId, AgentHostOTelEnabledSettingId, AgentHostOTelExporterTypeSettingId, AgentHostOTelOtlpEndpointSettingId, AgentHostOTelOutfileSettingId, AgentHostOTelPolicyIpcChannel, AgentHostOTelPolicyState, AgentHostRestartIpcChannel, AgentHostWillRestartIpcChannel, buildAgentHostOTelEnv, buildAgentSdkEnv, IAgentHostManagementService, IAgentHostOTelSettings, readAgentHostOTelPolicySettings } from '../common/agentService.js';
+import { AgentHostClaudeAgentEnabledSettingId, AgentHostCodexAgentBinaryArgsSettingId, AgentHostCodexAgentEnabledSettingId, AgentHostCodexAgentSdkRootSettingId, AgentHostCodexAgentCodexHomeSettingId, AgentHostIpcChannels, AgentHostOTelCaptureContentSettingId, AgentHostOTelCaptureIdentitySettingId, AgentHostOTelDbSpanExporterEnabledSettingId, AgentHostOTelEnabledSettingId, AgentHostOTelExporterTypeSettingId, AgentHostOTelOtlpEndpointSettingId, AgentHostOTelOutfileSettingId, AgentHostOTelPolicyIpcChannel, AgentHostOTelPolicyState, AgentHostRestartIpcChannel, AgentHostWillRestartIpcChannel, buildAgentHostOTelEnv, buildAgentSdkEnv, IAgentHostManagementService, IAgentHostOTelSettings, readAgentHostOTelPolicySettings } from '../common/agentService.js';
 import { deepClone } from '../../../base/common/objects.js';
 import '../common/agentHostStarter.config.contribution.js';
 
@@ -131,21 +131,6 @@ export class ElectronAgentHostStarter extends Disposable implements IAgentHostSt
 			codexAgentEnabled: this._configurationService.getValue<boolean>(AgentHostCodexAgentEnabledSettingId),
 		}, process.env);
 
-		// Kodia's Mistral agent is opt-in: enabled when the user sets an API key. The agent host reads it
-		// from `AgentHostMistralApiKeyEnvVar` to register the provider and to authenticate Mistral API calls,
-		// and seeds the client-side requests-per-second limiter from `AgentHostMistralRequestsPerSecondEnvVar`
-		// (0 = no proactive throttle).
-		const mistralApiKey = this._configurationService.getValue<string>(AgentHostMistralApiKeySettingId)
-			|| process.env[AgentHostMistralApiKeyEnvVar]
-			|| '';
-		const mistralRps = this._configurationService.getValue<number>(AgentHostMistralRequestsPerSecondSettingId)
-			|| Number(process.env[AgentHostMistralRequestsPerSecondEnvVar])
-			|| 0;
-		const mistralEnv: Record<string, string> = {
-			...(mistralApiKey ? { [AgentHostMistralApiKeyEnvVar]: mistralApiKey } : {}),
-			...(mistralRps > 0 ? { [AgentHostMistralRequestsPerSecondEnvVar]: String(mistralRps) } : {}),
-		};
-
 		// Translate `chat.agentHost.otel.*` settings into the env vars consumed by
 		// the agent host process. Any value already present on `process.env` wins
 		// for user settings, while enterprise policy values win over inherited env —
@@ -199,7 +184,6 @@ export class ElectronAgentHostStarter extends Disposable implements IAgentHostSt
 					VSCODE_VERBOSE_LOGGING: 'true',
 					[AgentHostLaunchKindEnvVar]: AgentHostLaunchKind.VSCodeMainProcess,
 					...sdkEnv,
-					...mistralEnv,
 					...otelEnv,
 					...telemetryIdEnv,
 				}

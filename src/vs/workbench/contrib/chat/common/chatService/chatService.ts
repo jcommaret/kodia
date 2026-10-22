@@ -1519,12 +1519,6 @@ export interface IChatDisabledClaudeHooksPart {
 	readonly kind: 'disabledClaudeHooks';
 }
 
-export interface IChatMistralRateLimitPart {
-	readonly kind: 'mistralRateLimit';
-	/** Unix timestamp (ms) at which the per-minute token window resets. */
-	readonly resetAt: number;
-}
-
 /** A single approval option shown in the plan review dropdown button. */
 export interface IChatPlanApprovalAction {
 	/**
@@ -1665,8 +1659,7 @@ export type IChatProgress =
 	| IChatHookPart
 	| IChatExternalToolInvocationUpdate
 	| IChatDisabledClaudeHooksPart
-	| IChatAutoModeResolutionPart
-	| IChatMistralRateLimitPart;
+	| IChatAutoModeResolutionPart;
 
 export interface IChatFollowup {
 	kind: 'reply';

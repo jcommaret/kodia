@@ -344,62 +344,6 @@ export const AgentHostCodexAgentCodexHomeEnvVar = 'CODEX_HOME';
 /** Forwarded extra args for `codex app-server` (JSON-encoded string[]). */
 export const AgentHostCodexAgentBinaryArgsEnvVar = 'VSCODE_AGENT_HOST_CODEX_APP_SERVER_ARGS';
 
-// -- Mistral agent settings ------------------------------------------------------
-
-/**
- * Workbench setting holding the user's Mistral API key. When non-empty, the
- * `MistralAgent` provider is registered inside the agent host. Unlike the
- * Claude SDK (a local package path), Mistral needs only an API key: the
- * agentic loop and tool execution are implemented natively in the agent host
- * (`node/mistral/`), and the key authenticates `chat.stream` calls to
- * `api.mistral.ai`. When empty (the default), the Mistral provider is not
- * registered. The agent host process must be restarted for changes to take
- * effect.
- *
- * The agent host is a separate node utility process and cannot read Void's
- * renderer-side `IVoidSettingsService`, so the key is plumbed through as a
- * setting → env var, mirroring {@link AgentHostClaudeAgentSdkPathSettingId}.
- */
-export const AgentHostMistralApiKeySettingId = 'chat.agentHost.mistralAgent.apiKey';
-
-/**
- * Environment variable that holds the Mistral API key. When set to a non-empty
- * value, the agent host process registers the Mistral agent provider. Set by
- * the agent host starters from {@link AgentHostMistralApiKeySettingId}, and may
- * also be set directly by developers as an override.
- */
-export const AgentHostMistralApiKeyEnvVar = 'VSCODE_AGENT_HOST_MISTRAL_API_KEY';
-
-/**
- * Protected-resource identifier the Mistral agent advertises so the workbench
- * can push the API key to the running agent host via `authenticate` (routing
- * matches providers by this resource). Used by both `MistralAgent`
- * (`getProtectedResources`) and the renderer key bridge.
- */
-export const AgentHostMistralResource = 'https://api.mistral.ai';
-
-/**
- * Workbench setting capping how many requests per second the Mistral agent
- * provider opens against `api.mistral.ai` (a client-side token-bucket throttle
- * smoothing bursts under Mistral's per-workspace rate limit). Defaults to `1`;
- * set to `0` to disable the proactive throttle. The agent host still retries
- * `429 Too Many Requests` responses with exponential backoff regardless of this
- * value.
- *
- * Like {@link AgentHostMistralApiKeySettingId}, the value is plumbed to the
- * separate agent host process as a setting → env var, so changes take effect on
- * the next agent host (re)start / window reload.
- */
-export const AgentHostMistralRequestsPerSecondSettingId = 'chat.agentHost.mistralAgent.requestsPerSecond';
-
-/**
- * Environment variable carrying the Mistral requests-per-second cap. Set by the
- * agent host starters from {@link AgentHostMistralRequestsPerSecondSettingId},
- * and may also be set directly by developers as an override. Parsed as a number;
- * a missing, non-numeric, or non-positive value means "no proactive throttle".
- */
-export const AgentHostMistralRequestsPerSecondEnvVar = 'VSCODE_AGENT_HOST_MISTRAL_RPS';
-
 // -- OpenTelemetry settings ------------------------------------------------------
 //
 // The `chat.agentHost.otel.*` namespace surfaces the same exporter knobs the CLI

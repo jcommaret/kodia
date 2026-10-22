@@ -106,7 +106,6 @@ import { ChatMcpServersInteractionContentPart } from './chatContentParts/chatMcp
 import { ChatMcpAuthenticationContentPart } from './chatContentParts/chatMcpAuthenticationContentPart.js';
 import { ChatMcpServersStartingContentPart } from './chatContentParts/chatMcpServersStartingContentPart.js';
 import { ChatDisabledClaudeHooksContentPart } from './chatContentParts/chatDisabledClaudeHooksContentPart.js';
-import { ChatMistralRateLimitPart } from './chatContentParts/chatMistralRateLimitPart.js';
 import { ChatMultiDiffContentPart } from './chatContentParts/chatMultiDiffContentPart.js';
 import { ChatProgressContentPart, ChatWorkingProgressContentPart } from './chatContentParts/chatProgressContentPart.js';
 import { ChatPullRequestContentPart } from './chatContentParts/chatPullRequestContentPart.js';
@@ -4547,8 +4546,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 					onDidFinishStarting: () => this.showWorkingProgressAfterMcp(context, templateData),
 					onDidRemoveFocusedAction: () => this.chatWidgetService.getWidgetBySessionResource(context.element.sessionResource)?.focusInput(),
 				});
-			} else if (content.kind === 'mistralRateLimit') {
-				return this.instantiationService.createInstance(ChatMistralRateLimitPart, content);
 			} else if (content.kind === 'disabledClaudeHooks') {
 				return this.renderDisabledClaudeHooks(content, context);
 			} else if (content.kind === 'thinking') {

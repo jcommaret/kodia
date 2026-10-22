@@ -41,7 +41,7 @@ import { NullTelemetryService } from '../../../telemetry/common/telemetryUtils.j
 import { TestExperimentTriggerTelemetryService } from '../../../telemetry/test/common/experimentTriggerTestUtils.js';
 import { AgentHostOverlapProviderPreparationSettingId } from '../../common/agentService.js';
 import { CopilotCliVSCodeAssignmentContextKey } from '../../common/copilotCliConfig.js';
-import { AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostMarkdownPlanRichLinksEnabledConfigKey, AgentHostOverlapProviderPreparationConfigKey, AgentHostShownModelsConfigKey, AgentHostTelemetryLevelConfigKey, AgentHostWorkspaceSnapshotEnabledConfigKey, platformSessionSchema, telemetryLevelToAgentHostConfigValue } from '../../common/agentHostSchema.js';
+import { AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostMarkdownPlanRichLinksEnabledConfigKey, AgentHostOverlapProviderPreparationConfigKey, AgentHostTelemetryLevelConfigKey, AgentHostWorkspaceSnapshotEnabledConfigKey, platformSessionSchema, telemetryLevelToAgentHostConfigValue } from '../../common/agentHostSchema.js';
 import { AgentConfigurationService, IAgentConfigurationService } from '../../node/agentConfigurationService.js';
 import { AgentHostTelemetryService } from '../../node/agentHostTelemetryService.js';
 import { AgentHostClientConnectionService, IAgentHostClientConnectionService } from '../../node/agentHostClientConnectionService.js';
@@ -4321,20 +4321,6 @@ suite('AgentSideEffects', () => {
 				configSchema: undefined,
 				_meta: undefined,
 			}]);
-		});
-
-		test('Kodia: publishes only the models shown in Kodia\'s dropdown', async () => {
-			stateManager.dispatchServerAction(ROOT_STATE_URI, { type: ActionType.RootConfigChanged, config: { [AgentHostShownModelsConfigKey]: { mock: ['mock-model'] } } });
-			const envelope = Event.toPromise(Event.filter(stateManager.onDidEmitEnvelope, e => e.action.type === ActionType.RootAgentsChanged && e.action.agents[0]?.models.length === 1));
-			agent.setModels([
-				{ provider: 'mock', id: 'mock-model-20250929', name: 'mock Model', supportsVision: false },
-				{ provider: 'mock', id: 'other-model', name: 'Other Model', supportsVision: false },
-			]);
-
-			const { action } = await envelope;
-
-			assert.strictEqual(action.type, ActionType.RootAgentsChanged);
-			assert.deepStrictEqual(action.agents[0].models.map(m => m.id), ['mock-model-20250929']);
 		});
 
 		test('model observable update publishes model metadata', async () => {

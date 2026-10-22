@@ -80,11 +80,11 @@ npm run typecheck --prefix build
 npm run test-void
 ```
 
-When you change the Mistral agent, also run its tests:
+When you change the Kodia agent, also run its tests:
 
 ```bash
 npm run transpile-client
-npm run test-node -- --runGlob "vs/platform/agentHost/test/node/mistral*.test.js"
+npm run test-node -- --runGlob "vs/platform/agentHost/test/node/kodia*.test.js"
 ```
 
 ### Commits
@@ -95,7 +95,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 - Open the pull request against `master`. One topic per pull request.
 - Explain what changed and why, and how you tested it.
-- If you change a VS Code core file (anything outside `contrib/void` and `agentHost/node/mistral`), keep the change minimal and add a `Kodia:` comment explaining it. This keeps upstream merges manageable.
+- If you change a VS Code core file (anything outside `contrib/void` and `agentHost/node/kodia`), keep the change minimal and add a `Kodia:` comment explaining it. This keeps upstream merges manageable.
 - Pull requests are merged with a merge commit, not squashed.
 
 ## Building a local executable

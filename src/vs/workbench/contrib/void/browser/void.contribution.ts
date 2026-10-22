@@ -81,12 +81,6 @@ import '../common/refreshModelService.js'
 import '../common/mlxService.js'
 import './mlxWorkbenchContrib.js'
 
-// Mistral agent host: reuse the Mistral key from Void Settings in the Agents Window
-import './mistralAgentHostKeyBridge.js'
-
-// Agents Window: offer only the models shown in Kodia's model dropdown
-import './agentHostShownModelsBridge.js'
-
 // Agents Window: the Kodia agent runs every model shown in Kodia's model dropdown
 import './kodiaAgentHostLmHandler.js'
 

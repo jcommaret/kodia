@@ -127,7 +127,7 @@ export const subTextMdOfProviderName = (providerName: ProviderName): string => {
 	if (providerName === 'gemini') return 'Get your [API Key here](https://aistudio.google.com/apikey). Read about [rate limits here](https://ai.google.dev/gemini-api/docs/rate-limits#current-rate-limits).'
 	if (providerName === 'groq') return 'Get your [API Key here](https://console.groq.com/keys).'
 	if (providerName === 'xAI') return 'Get your [API Key here](https://console.x.ai).'
-	if (providerName === 'mistral') return 'Get your [API Key here](https://console.mistral.ai/api-keys). In the Agents Window, requests are throttled to **1/sec** by default to stay under Mistral rate limits — adjust with the `chat.agentHost.mistralAgent.requestsPerSecond` setting (reload the window to apply).'
+	if (providerName === 'mistral') return 'Get your [API Key here](https://console.mistral.ai/api-keys).'
 	if (providerName === 'openAICompatible') return `Use any provider that's OpenAI-compatible (use this for llama.cpp and more).`
 	if (providerName === 'googleVertex') return 'You must authenticate before using Vertex with Kodia. Read more about endpoints [here](https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library), and regions [here](https://cloud.google.com/vertex-ai/docs/general/locations#available-regions).'
 	if (providerName === 'microsoftAzure') return 'Read more about endpoints [here](https://learn.microsoft.com/en-us/rest/api/aifoundry/model-inference/get-chat-completions/get-chat-completions?view=rest-aifoundry-model-inference-2024-05-01-preview&tabs=HTTP), and get your API key [here](https://learn.microsoft.com/en-us/azure/search/search-security-api-keys?tabs=rest-use%2Cportal-find%2Cportal-query#find-existing-keys).'

@@ -5,22 +5,22 @@
 
 import * as cp from 'child_process';
 import * as fs from 'fs';
-import * as path from 'path';
 import { promisify } from 'util';
-import type { FunctionTool } from '@mistralai/mistralai/models/components/index.js';
+import * as path from '../../../../base/common/path.js';
 import { URI } from '../../../../base/common/uri.js';
+import type { IByokLmFunctionTool } from '../../common/agentHostByokLm.js';
 
 const execAsync = promisify(cp.exec);
 
 /** Context passed to a local tool executor for one tool call. */
-export interface IMistralToolContext {
+export interface IKodiaToolContext {
 	readonly workingDirectory: URI | undefined;
 	readonly signal: AbortSignal;
 }
 
-export interface IMistralToolResult {
+export interface IKodiaToolResult {
 	readonly success: boolean;
-	/** Text fed back to the model as the `function.result`. */
+	/** Text fed back to the model as the tool call's output. */
 	readonly output: string;
 	/** True when the tool wrote to the filesystem (drives edit tracking later). */
 	readonly didWrite?: boolean;
@@ -29,65 +29,57 @@ export interface IMistralToolResult {
 }
 
 /**
- * The local toolset advertised to Mistral as client `function` tools. Kept
- * focused and OpenAI-JSON-Schema shaped (the Conversations API forwards these
- * verbatim). Richer tools (grep/glob/multi-file edit) can be added later; the
- * model can already shell out via `run_bash`.
+ * The local toolset the Kodia agent offers its models, in the bridge's wire
+ * shape. Kept focused and OpenAI-JSON-Schema shaped. Richer tools
+ * (grep/glob/multi-file edit) can be added later; the model can already shell
+ * out via `run_bash`.
  */
-export const MISTRAL_TOOLS: (FunctionTool & { type: 'function' })[] = [
+export const KODIA_TOOLS: IByokLmFunctionTool[] = [
 	{
 		type: 'function',
-		function: {
-			name: 'read_file',
-			description: 'Read the full contents of a file at the given path (relative to the workspace root, or absolute).',
-			parameters: {
-				type: 'object',
-				properties: { path: { type: 'string', description: 'File path to read.' } },
-				required: ['path'],
-				additionalProperties: false,
-			},
+		name: 'read_file',
+		description: 'Read the full contents of a file at the given path (relative to the workspace root, or absolute).',
+		parametersSchema: {
+			type: 'object',
+			properties: { path: { type: 'string', description: 'File path to read.' } },
+			required: ['path'],
+			additionalProperties: false,
 		},
 	},
 	{
 		type: 'function',
-		function: {
-			name: 'write_file',
-			description: 'Create or overwrite a file with the given contents. Creates parent directories as needed.',
-			parameters: {
-				type: 'object',
-				properties: {
-					path: { type: 'string', description: 'File path to write.' },
-					content: { type: 'string', description: 'Full file contents.' },
-				},
-				required: ['path', 'content'],
-				additionalProperties: false,
+		name: 'write_file',
+		description: 'Create or overwrite a file with the given contents. Creates parent directories as needed.',
+		parametersSchema: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'File path to write.' },
+				content: { type: 'string', description: 'Full file contents.' },
 			},
+			required: ['path', 'content'],
+			additionalProperties: false,
 		},
 	},
 	{
 		type: 'function',
-		function: {
-			name: 'list_dir',
-			description: 'List the entries of a directory. Directories are suffixed with "/".',
-			parameters: {
-				type: 'object',
-				properties: { path: { type: 'string', description: 'Directory path. Defaults to the workspace root.' } },
-				required: [],
-				additionalProperties: false,
-			},
+		name: 'list_dir',
+		description: 'List the entries of a directory. Directories are suffixed with "/".',
+		parametersSchema: {
+			type: 'object',
+			properties: { path: { type: 'string', description: 'Directory path. Defaults to the workspace root.' } },
+			required: [],
+			additionalProperties: false,
 		},
 	},
 	{
 		type: 'function',
-		function: {
-			name: 'run_bash',
-			description: 'Run a shell command in the workspace root and return its combined stdout/stderr.',
-			parameters: {
-				type: 'object',
-				properties: { command: { type: 'string', description: 'The shell command to run.' } },
-				required: ['command'],
-				additionalProperties: false,
-			},
+		name: 'run_bash',
+		description: 'Run a shell command in the workspace root and return its combined stdout/stderr.',
+		parametersSchema: {
+			type: 'object',
+			properties: { command: { type: 'string', description: 'The shell command to run.' } },
+			required: ['command'],
+			additionalProperties: false,
 		},
 	},
 ];
@@ -118,7 +110,7 @@ function resolveToolPath(p: unknown, root: string): string {
 }
 
 /** What the host shows, and checks against its approval rules, before a tool call runs. */
-export interface IMistralToolCallDescription {
+export interface IKodiaToolCallDescription {
 	readonly invocationMessage: string;
 	/** The bare command for `run_bash`, so terminal approval rules apply to it; the JSON arguments otherwise. */
 	readonly toolInput: string;
@@ -126,12 +118,12 @@ export interface IMistralToolCallDescription {
 	readonly path?: string;
 }
 
-export function describeMistralToolCall(name: string, argsJson: string, workingDirectory: URI | undefined): IMistralToolCallDescription {
+export function describeKodiaToolCall(name: string, argsJson: string, workingDirectory: URI | undefined): IKodiaToolCallDescription {
 	let args: Record<string, unknown> = {};
 	try {
 		args = argsJson ? JSON.parse(argsJson) : {};
 	} catch {
-		// Described as-is; executeMistralTool reports the invalid arguments.
+		// Described as-is; executeKodiaTool reports the invalid arguments.
 	}
 	const root = toolRoot(workingDirectory);
 	switch (name) {
@@ -156,7 +148,7 @@ const MAX_OUTPUT_BYTES = 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 120_000;
 
 /** Execute a client tool locally and return text to feed back to the model. */
-export async function executeMistralTool(name: string, argsJson: string, ctx: IMistralToolContext): Promise<IMistralToolResult> {
+export async function executeKodiaTool(name: string, argsJson: string, ctx: IKodiaToolContext): Promise<IKodiaToolResult> {
 	let args: Record<string, unknown>;
 	try {
 		args = argsJson ? JSON.parse(argsJson) : {};

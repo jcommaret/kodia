@@ -32,7 +32,7 @@ export class AgentHostEnablementService extends Disposable implements IAgentHost
 		super();
 		const aiFeaturesDisabled = observableConfigValue(ChatAIDisabledSettingId, false, configurationService);
 		// Kodia disables Copilot's AI features by default (chat.disableAIFeatures), but its own agents
-		// (the Mistral agent in the Agents Window) run in the agent host, so that setting doesn't gate it.
+		// (the Kodia agent in the Agents Window) run in the agent host, so that setting doesn't gate it.
 		const isVoidEditor = product.defaultChatAgent?.provider?.default?.id === 'void';
 		this.enabled = derived(this, reader => this._isAgentHostRuntimeAvailable && (isVoidEditor || !aiFeaturesDisabled.read(reader)));
 		this._register(bindContextKey(AGENT_HOST_ENABLED_CONTEXT_KEY, contextKeyService, reader => this.enabled.read(reader)));

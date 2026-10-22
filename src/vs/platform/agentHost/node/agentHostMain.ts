@@ -150,8 +150,9 @@ async function startAgentHost(): Promise<void> {
 		const providerService = runtimeServices.providerService;
 		sdkDownloadProgress = runtime.sdkDownloadProgress;
 		// Kodia: the Kodia agent is the only agent. It runs every model shown in Kodia's model dropdown
-		// (Anthropic, OpenAI, Mistral, Gemini, local models…) with Kodia's own keys, so the Copilot, Claude,
-		// Codex and Mistral agents are not registered. Sessions created with them stay on disk but don't open.
+		// (Anthropic, OpenAI, Mistral, Gemini, local models…) with Kodia's own keys, so the Copilot, Claude
+		// and Codex agents are not registered. Sessions created with them, or with the former Mistral agent,
+		// stay on disk but don't open.
 		// A Kodia window runs its model requests (see `kodiaAgentHostLm.ts`).
 		const kodiaInstantiationService = instantiationService.createChild(new ServiceCollection([IKodiaLmBridgeRegistry, kodiaLmBridgeRegistry]));
 		providerService.registerProvider(kodiaInstantiationService.createInstance(KodiaAgent));

@@ -15,7 +15,7 @@ import { localize } from '../../../../nls.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClient, IAgent, IAgentChatConfigCompletionsParams, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, IAgentChats, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSpawnChatEvent } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmModelInfo, IByokLmTool } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmModelInfo } from '../../common/agentHostByokLm.js';
 import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { KODIA_AGENT_PROVIDER_ID, KODIA_AGENT_RESOURCE } from '../../common/kodiaAgentHostLm.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
@@ -24,9 +24,8 @@ import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from 
 import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirmationState, ToolDefinition } from '../../common/state/protocol/state.js';
 import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
-import { projectForWorkingDirectory } from '../mistral/mistralAgentSession.js';
-import { describeMistralToolCall, executeMistralTool, IMistralToolResult, isMutatingTool, MISTRAL_TOOLS, toolDisplayName } from '../mistral/mistralTools.js';
-import { KodiaAgentSession } from './kodiaAgentSession.js';
+import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
+import { describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, isMutatingTool, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
 
 /**
  * The bridge to the Kodia windows that run the Kodia agent's model requests,
@@ -39,14 +38,6 @@ const MAX_TOOL_ROUNDS = 50;
 
 /** What the model receives when the user denies a tool call. */
 const TOOL_DENIED_RESULT = 'The user denied this tool call.';
-
-/** The local tools (shared with the Mistral agent), in the bridge's wire shape. */
-const KODIA_TOOLS: IByokLmTool[] = MISTRAL_TOOLS.map(tool => ({
-	type: 'function',
-	name: tool.function.name,
-	description: tool.function.description,
-	parametersSchema: tool.function.parameters,
-}));
 
 /**
  * A Kodia model's id in the Agents Window: `<provider>/<model>`. Model names
@@ -69,7 +60,7 @@ function instructionsFor(workingDirectory: URI | undefined): string {
 	return lines.join('\n');
 }
 
-function toToolCallResult(name: string, res: IMistralToolResult): ToolCallResult {
+function toToolCallResult(name: string, res: IKodiaToolResult): ToolCallResult {
 	return {
 		success: res.success,
 		pastTenseMessage: res.success ? `Ran ${toolDisplayName(name)}` : `${toolDisplayName(name)} failed`,
@@ -84,8 +75,8 @@ function toToolCallResult(name: string, res: IMistralToolResult): ToolCallResult
  *
  * The agent host cannot reach Kodia's providers, so each model request goes
  * back to a Kodia window, which runs it with Kodia's LLM service
- * ({@link IKodiaLmBridgeRegistry}). The agentic loop and the local tools are
- * the Mistral agent's. Kodia's providers keep no conversation server-side, so
+ * ({@link IKodiaLmBridgeRegistry}). The agentic loop and the local tools
+ * (`kodiaTools.ts`) run here. Kodia's providers keep no conversation server-side, so
  * each chat's history is kept in the backing Agent Host persists for it.
  * Sessions have a single chat (no `multipleChats` capability).
  */
@@ -356,7 +347,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 						break;
 					}
 					const denied = output === TOOL_DENIED_RESULT;
-					const description = describeMistralToolCall(item.name, item.argumentsJson, undefined);
+					const description = describeKodiaToolCall(item.name, item.argumentsJson, undefined);
 					current.responseParts.push({
 						kind: ResponsePartKind.ToolCall,
 						toolCall: {
@@ -489,7 +480,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 					// Registers the call with the host, which is what lets a later
 					// pending_confirmation round-trip through respondToPermissionRequest.
 					fire({ type: ActionType.ChatToolCallStart, turnId, toolCallId: call.callId, toolName: call.name, displayName: toolDisplayName(call.name) });
-					const description = describeMistralToolCall(call.name, call.argumentsJson, session.workingDirectory);
+					const description = describeKodiaToolCall(call.name, call.argumentsJson, session.workingDirectory);
 					if (isMutatingTool(call.name)) {
 						// Mutating tools go through the host's permission flow, which
 						// applies the session's approval settings or asks the user.
@@ -509,7 +500,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 							confirmed: ToolCallConfirmationReason.NotNeeded,
 						});
 					}
-					const res = await executeMistralTool(call.name, call.argumentsJson, toolCtx);
+					const res = await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
 					if (signal.aborted) {
 						return;
 					}
@@ -557,7 +548,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 	 * terminal rules, workspace paths) and otherwise prompt the user; the
 	 * verdict arrives via {@link respondToPermissionRequest}.
 	 */
-	private _requestApproval(session: KodiaAgentSession, call: IByokLmFunctionCallItem, description: ReturnType<typeof describeMistralToolCall>): Promise<boolean> {
+	private _requestApproval(session: KodiaAgentSession, call: IByokLmFunctionCallItem, description: ReturnType<typeof describeKodiaToolCall>): Promise<boolean> {
 		const isShell = call.name === 'run_bash';
 		const state: ToolCallPendingConfirmationState = {
 			toolCallId: call.callId,

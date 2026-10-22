@@ -92,7 +92,6 @@ const responsePartSchema = Adapt.v<PersistedResponsePart, SerializedChatResponse
 				case 'workspaceEdit':
 				case 'externalEdit':
 				case 'disabledClaudeHooks':
-				case 'mistralRateLimit':
 					return a.kind === b.kind;
 
 				default: {

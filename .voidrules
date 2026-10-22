@@ -1,6 +1,6 @@
 This is Kodia, an AI code editor forked from VS Code (by way of Void).
 
-Kodia's own code lives in src/vs/workbench/contrib/void (the React UI is in its browser/react folder) and in src/vs/platform/agentHost/node/mistral. Everything else is VS Code. KODIA_CODEBASE_GUIDE.md explains how the code fits together.
+Kodia's own code lives in src/vs/workbench/contrib/void (the React UI is in its browser/react folder) and in src/vs/platform/agentHost/node/kodia (the Kodia agent). Everything else is VS Code. KODIA_CODEBASE_GUIDE.md explains how the code fits together.
 
 Changing VS Code files outside those folders makes every upstream merge harder: keep such changes minimal, add a "Kodia:" comment explaining why, and say so before making them.
 

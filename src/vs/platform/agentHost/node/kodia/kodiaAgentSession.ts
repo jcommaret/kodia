@@ -4,11 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { basename } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import type { IAgentSessionProjectInfo } from '../../common/agent.js';
 import type { IByokLmInputItem } from '../../common/agentHostByokLm.js';
 import type { ModelSelection } from '../../common/state/protocol/state.js';
-import { projectForWorkingDirectory } from '../mistral/mistralAgentSession.js';
 
 /**
  * The opaque backing Agent Host persists for each Kodia chat
@@ -24,6 +24,10 @@ interface IKodiaChatBacking {
 	readonly workingDirectory?: string;
 	readonly createdAt: number;
 	readonly modifiedAt?: number;
+}
+
+export function projectForWorkingDirectory(workingDirectory: URI | undefined): IAgentSessionProjectInfo | undefined {
+	return workingDirectory ? { uri: workingDirectory, displayName: basename(workingDirectory) } : undefined;
 }
 
 /** One Kodia chat: its history, the model it runs on, and the per-turn abort handle. */

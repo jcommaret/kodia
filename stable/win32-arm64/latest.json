@@ -1,8 +1,8 @@
 {
-  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.6.2/KodiaSetup-arm64-1.141.0-2.6.2.exe",
-  "name": "1.141.0-2.6.2",
-  "version": "f269f234a57975ef2d471d112148d348a5d30761",
+  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.6.3/KodiaSetup-arm64-1.141.0-2.6.3.exe",
+  "name": "1.141.0-2.6.3",
+  "version": "71a4cf765641a0ce97d297b70305c70745082721",
   "productVersion": "1.141.0.0",
-  "timestamp": 1792767166551,
-  "sha256hash": "b7fd1413b0162ae01a264d6b27d108e71c3e82429626ecfca34d31050af18023"
+  "timestamp": 1792780251416,
+  "sha256hash": "6408142560e6606a83b2db229dea3fafd90bb0522351ba30c6e8f4e4c4b3b319"
 }

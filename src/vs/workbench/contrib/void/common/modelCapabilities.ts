@@ -2116,7 +2116,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	'z-ai/glm-5.3': {
 		...mistralModelOptions['zai-glm-5-3'],
 		contextWindow: 1_048_576, // https://openrouter.ai/z-ai/glm-5.3
-		cost: { input: 0.079, cache_read: 0.078, output: 1.40 }, // OpenRouter's price; it moves with the serving providers
+		cost: { input: 0.0699, cache_read: 0.0689, output: 1.40 }, // OpenRouter's price; it moves with the serving providers
 		downloadable: false,
 	},
 	'z-ai/glm-5.2': {
@@ -2126,7 +2126,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	'deepseek/deepseek-v4.1-flash': {
 		...deepseekModelOptions['deepseek-flash'],
 		contextWindow: 1_048_576, // https://openrouter.ai/deepseek/deepseek-v4.1-flash
-		cost: { input: 0.0344, cache_read: 0.0016, output: 0.08 }, // OpenRouter's price; it moves with the serving providers
+		cost: { input: 0.0477, cache_read: 0.000954, output: 0.1908 }, // OpenRouter's price; it moves with the serving providers
 		downloadable: false,
 	},
 	'deepseek/deepseek-v4-pro': {
@@ -2136,7 +2136,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	'qwen/qwen3.8-27b': { // https://openrouter.ai/qwen/qwen3.8-27b
 		...groqModelOptions['qwen/qwen3.8-27b'],
 		contextWindow: 1_000_000,
-		cost: { input: 0.24, output: 2.20 },
+		cost: { input: 0.20, cache_read: 0.09, output: 2.50 },
 		downloadable: false,
 	},
 	'deepseek/deepseek-r1': {

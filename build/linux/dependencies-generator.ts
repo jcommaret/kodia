@@ -89,7 +89,10 @@ export async function getDependencies(packageType: 'deb' | 'rpm', buildDir: stri
 		const failMessage = 'The dependencies list has changed.'
 			+ '\nOld:\n' + referenceGeneratedDeps.join('\n')
 			+ '\nNew:\n' + sortedDependencies.join('\n');
-		if (FAIL_BUILD_FOR_NEW_DEPENDENCIES) {
+		// Kodia: only a dependency missing from VS Code's list fails the build. VS Code's lists also cover the native
+		// modules of its distro (vsda), which Kodia doesn't ship, so Kodia's packages can need less (arm64: libstdc++6 (>= 5.2)).
+		const hasNewDependencies = sortedDependencies.some(dependency => !referenceGeneratedDeps.includes(dependency));
+		if (FAIL_BUILD_FOR_NEW_DEPENDENCIES && hasNewDependencies) {
 			throw new Error(failMessage);
 		} else {
 			console.warn(failMessage);

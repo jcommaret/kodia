@@ -18,6 +18,8 @@ export function generatePackageDeps(files: string[], arch: DebianArchString, chr
 	return dependencies;
 }
 
+let dpkgShlibdepsFetched = false;
+
 // Based on https://source.chromium.org/chromium/chromium/src/+/main:chrome/installer/linux/debian/calculate_package_deps.py.
 function calculatePackageDeps(binaryPath: string, arch: DebianArchString, chromiumSysroot: string, vscodeSysroot: string): Set<string> {
 	try {
@@ -35,9 +37,14 @@ function calculatePackageDeps(binaryPath: string, arch: DebianArchString, chromi
 	});
 	const dpkgShlibdepsUrl = `https://raw.githubusercontent.com/chromium/chromium/${chromiumManifest[0].version}/third_party/dpkg-shlibdeps/dpkg-shlibdeps.pl`;
 	const dpkgShlibdepsScriptLocation = `${tmpdir()}/dpkg-shlibdeps.pl`;
-	const result = spawnSync('curl', [dpkgShlibdepsUrl, '-o', dpkgShlibdepsScriptLocation]);
-	if (result.status !== 0) {
-		throw new Error('Cannot retrieve dpkg-shlibdeps. Stderr:\n' + result.stderr);
+	// Kodia: fetched once instead of for every binary, and an HTTP error fails and is retried: raw.githubusercontent.com
+	// rate-limits GitHub's runners, and curl saved its 429 page as the script
+	if (!dpkgShlibdepsFetched) {
+		const result = spawnSync('curl', ['-fsSL', '--retry', '5', dpkgShlibdepsUrl, '-o', dpkgShlibdepsScriptLocation]);
+		if (result.status !== 0) {
+			throw new Error('Cannot retrieve dpkg-shlibdeps. Stderr:\n' + result.stderr);
+		}
+		dpkgShlibdepsFetched = true;
 	}
 	const cmd = [dpkgShlibdepsScriptLocation, '--ignore-weak-undefined', '--ignore-missing-info'];
 	switch (arch) {

@@ -152,7 +152,8 @@ export async function getVSCodeSysroot(arch: DebianArchString, isMusl: boolean =
 export async function getChromiumSysroot(arch: DebianArchString): Promise<string> {
 	const sysrootJSONUrl = `https://raw.githubusercontent.com/electron/electron/v${getElectronVersion().electronVersion}/script/sysroots.json`;
 	const sysrootDictLocation = `${tmpdir()}/sysroots.json`;
-	const result = spawnSync('curl', [sysrootJSONUrl, '-o', sysrootDictLocation]);
+	// Kodia: an HTTP error fails and is retried, raw.githubusercontent.com rate-limits GitHub's runners
+	const result = spawnSync('curl', ['-fsSL', '--retry', '5', sysrootJSONUrl, '-o', sysrootDictLocation]);
 	if (result.status !== 0) {
 		throw new Error('Cannot retrieve sysroots.json. Stderr:\n' + result.stderr);
 	}

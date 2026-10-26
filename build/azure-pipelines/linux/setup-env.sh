@@ -39,7 +39,11 @@ EOF
 
 if [ "$npm_config_arch" == "x64" ]; then
   # Download clang based on chromium revision used by vscode
-  curl -s https://raw.githubusercontent.com/chromium/chromium/150.0.7871.250/tools/clang/scripts/update.py | python - --output-dir=$PWD/.build/CR_Clang --host-os=linux
+  # Kodia: downloaded first so that an HTTP error fails and is retried: raw.githubusercontent.com rate-limits GitHub's
+  # runners, and python ran its 429 page
+  CLANG_UPDATE_SCRIPT="$(mktemp)"
+  curl -fsSL --retry 5 -o "$CLANG_UPDATE_SCRIPT" https://raw.githubusercontent.com/chromium/chromium/150.0.7871.250/tools/clang/scripts/update.py
+  python - --output-dir=$PWD/.build/CR_Clang --host-os=linux < "$CLANG_UPDATE_SCRIPT"
 
   # Download libcxx headers and objects from upstream electron releases
   DEBUG=libcxx-fetcher \

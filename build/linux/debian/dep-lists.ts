@@ -22,6 +22,8 @@ export const recommendedDeps = [
 	'socat', // agent command sandboxing
 ];
 
+// Kodia: amd64 and arm64 need libc6 (>= 2.29), and arm64 zlib1g: a binary Kodia ships is built against a newer glibc
+// than VS Code's 2.28 sysroot (most likely the tunnel CLI, see kodia-builder's scripts/build_cli.sh).
 export const referenceGeneratedDepsByArch = {
 	'amd64': [
 		'ca-certificates',
@@ -35,6 +37,7 @@ export const referenceGeneratedDepsByArch = {
 		'libc6 (>= 2.2.5)',
 		'libc6 (>= 2.25)',
 		'libc6 (>= 2.28)',
+		'libc6 (>= 2.29)',
 		'libc6 (>= 2.4)',
 		'libcairo2 (>= 1.6.0)',
 		'libcups2 (>= 1.6.0)',
@@ -115,6 +118,7 @@ export const referenceGeneratedDepsByArch = {
 		'libc6 (>= 2.17)',
 		'libc6 (>= 2.25)',
 		'libc6 (>= 2.28)',
+		'libc6 (>= 2.29)',
 		'libcairo2 (>= 1.6.0)',
 		'libcups2 (>= 1.6.0)',
 		'libcurl3-gnutls | libcurl3-nss | libcurl4 | libcurl3',
@@ -128,9 +132,7 @@ export const referenceGeneratedDepsByArch = {
 		'libnss3 (>= 2:3.30)',
 		'libnss3 (>= 3.26)',
 		'libpango-1.0-0 (>= 1.14.0)',
-		'libstdc++6 (>= 4.1.1)',
 		'libstdc++6 (>= 5)',
-		'libstdc++6 (>= 5.2)',
 		'libstdc++6 (>= 6)',
 		'libstdc++6 (>= 9)',
 		'libudev1 (>= 183)',
@@ -144,6 +146,7 @@ export const referenceGeneratedDepsByArch = {
 		'libxkbcommon0 (>= 0.5.0)',
 		'libxkbfile1 (>= 1:1.1.0)',
 		'libxrandr2',
-		'xdg-utils (>= 1.0.2)'
+		'xdg-utils (>= 1.0.2)',
+		'zlib1g (>= 1:1.2.3.4)'
 	]
 };

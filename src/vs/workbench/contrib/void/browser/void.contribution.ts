@@ -81,8 +81,8 @@ import '../common/refreshModelService.js'
 import '../common/mlxService.js'
 import './mlxWorkbenchContrib.js'
 
-// OpenRouter: its free models that can run the agent, detected daily
-import './openRouterFreeModelsContrib.js'
+// the models providers' APIs list that Kodia's catalog doesn't have (OpenRouter's free models), detected daily
+import './providerModelsContrib.js'
 
 // Agents Window: the Kodia agent runs every model shown in Kodia's model dropdown
 import './kodiaAgentHostLmHandler.js'

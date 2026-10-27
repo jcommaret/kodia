@@ -2226,10 +2226,10 @@ const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProvi
 
 // ---------------- exports ----------------
 
-// Kodia: the models detected through a provider's API (OpenRouter's free models), with the capabilities the API gave.
-// They're saved with the provider's models in the settings, which every request carries to the main process: the
-// settings service sets them here in the renderer, and sendLLMMessage in the main process.
-let detectedModelOptions: { [providerName in ProviderName]?: { [modelName: string]: VoidStaticModelInfo } } = {};
+// Kodia: the models detected through a provider's API (OpenRouter's free models, the models missing from the catalog),
+// with the capabilities the API gave. They're saved with the provider's models in the settings, which every request
+// carries to the main process: the settings service sets them here in the renderer, and sendLLMMessage in the main process.
+let detectedModelOptions: { [providerName in ProviderName]?: { [modelName: string]: Partial<VoidStaticModelInfo> } } = {};
 export const setDetectedModelOptions = (settingsOfProvider: SettingsOfProvider) => {
 	const options: typeof detectedModelOptions = {};
 	for (const providerName of Object.keys(settingsOfProvider) as ProviderName[]) {
@@ -2266,10 +2266,11 @@ export const getModelCapabilities = (
 		}
 	}
 
-	// a model detected through the provider's API: what the API says, rather than a guess from its name
+	// a model detected through the provider's API: what the API says, over what its name tells
 	const detected = detectedModelOptions[providerName]?.[modelName];
 	if (detected) {
-		return { ...detected, ...overrides, modelName, recognizedModelName: modelName, isUnrecognizedModel: false };
+		const fromName = modelOptionsFallback(modelName) ?? { ...defaultModelOptions, supportsVision: looksLikeVisionModel(lowercaseModelName) };
+		return { ...fromName, ...detected, ...overrides, modelName, recognizedModelName: modelName, isUnrecognizedModel: false };
 	}
 
 	const result = modelOptionsFallback(modelName)

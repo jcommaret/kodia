@@ -12,7 +12,7 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IMetricsService } from './metricsService.js';
 import { defaultProviderSettings, getModelCapabilities, ModelOverrides, setDetectedModelOptions, VoidStaticModelInfo } from './modelCapabilities.js';
-import { DetectedModel } from './openRouterFreeModels.js';
+import { DetectedModel } from './providerModels.js';
 import { VOID_SETTINGS_STORAGE_KEY } from './storageKeys.js';
 import { isMacintosh } from '../../../../base/common/platform.js';
 import { consolidateSingleAutodetectedProviderModels, dedupeProviderModels, normalizeAutodetectedModelNamesForProvider } from './localSingleModelProviders.js';
@@ -75,7 +75,7 @@ export interface IVoidSettingsService {
 	resetState(): Promise<void>;
 
 	setAutodetectedModels(providerName: ProviderName, modelNames: string[], logging: object): void;
-	// Kodia: the models a provider's API lists (OpenRouter's free models), with their capabilities. New ones are switched off
+	// Kodia: the models a provider's API lists (OpenRouter's free models, the models missing from the catalog), with their capabilities. New ones are switched off
 	setDetectedModels(providerName: ProviderName, models: DetectedModel[]): void;
 	toggleModelHidden(providerName: ProviderName, modelName: string): void;
 	addModel(providerName: ProviderName, modelName: string): void;
@@ -89,7 +89,7 @@ export interface IVoidSettingsService {
 
 
 
-const _modelsWithSwappedInNewModels = (options: { providerName: ProviderName, existingModels: VoidStatefulModelInfo[], models: string[], type: 'autodetected' | 'default', capabilitiesOfModel?: Record<string, VoidStaticModelInfo>, hideNewModels?: boolean }) => {
+const _modelsWithSwappedInNewModels = (options: { providerName: ProviderName, existingModels: VoidStatefulModelInfo[], models: string[], type: 'autodetected' | 'default', capabilitiesOfModel?: Record<string, Partial<VoidStaticModelInfo> | undefined>, hideNewModels?: boolean }) => {
 	const { providerName, existingModels, models, type, capabilitiesOfModel, hideNewModels } = options
 
 	const existingModelsMap: Record<string, VoidStatefulModelInfo> = {}

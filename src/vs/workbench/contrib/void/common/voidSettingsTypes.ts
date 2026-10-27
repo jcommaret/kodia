@@ -38,7 +38,7 @@ export type VoidStatefulModelInfo = { // <-- STATEFUL
 	modelName: string,
 	type: 'default' | 'autodetected' | 'custom';
 	isHidden: boolean, // whether or not the user is hiding it (switched off)
-	detectedCapabilities?: VoidStaticModelInfo, // Kodia: for a model detected through the provider's API (OpenRouter's free models), the capabilities it gave
+	detectedCapabilities?: Partial<VoidStaticModelInfo>, // Kodia: for a model detected through the provider's API, the capabilities it gave
 }
 
 

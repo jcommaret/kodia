@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { VoidStaticModelInfo } from './modelCapabilities.js';
+import { DetectedModel } from './providerModels.js';
 
 // OpenRouter's public list of models, no key needed: https://openrouter.ai/docs/api-reference/list-available-models
 export const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
@@ -19,8 +20,6 @@ export type OpenRouterModel = {
 	expiration_date?: string | null;
 	benchmarks?: { artificial_analysis?: { coding_index?: number | null } | null } | null;
 };
-
-export type DetectedModel = { modelName: string; capabilities: VoidStaticModelInfo };
 
 const MIN_CONTEXT_WINDOW = 32_768; // the agent's system message and tools alone take several thousand tokens
 const MIN_OUTPUT_TOKENS = 16_384; // enough to write a file
@@ -50,7 +49,7 @@ const capabilitiesOf = (model: OpenRouterModel): VoidStaticModelInfo => ({
 // OpenRouter's free models that can run Kodia's agent: chat (text out, with or without images in), tool calling, room
 // for the agent's context and for a file in the output, and not retired within a week. The best at code first, by
 // Artificial Analysis' coding index, when OpenRouter has it.
-export const freeCodingModelsOfOpenRouter = (models: OpenRouterModel[], now: number): DetectedModel[] => {
+export const freeCodingModelsOfOpenRouter = (models: OpenRouterModel[], now: number): (DetectedModel & { capabilities: VoidStaticModelInfo })[] => {
 	const picked = models.filter(model => {
 		if (model.id.startsWith('openrouter/')) return false; // OpenRouter's routers: what they can do depends on the model they pick
 		if (!isFree(model)) return false;

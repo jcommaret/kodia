@@ -6,6 +6,7 @@
 import { SendLLMMessageParams, OnText, OnFinalMessage, OnError } from '../../common/sendLLMMessageTypes.js';
 import { IMetricsService } from '../../common/metricsService.js';
 import { displayInfoOfProviderName } from '../../common/voidSettingsTypes.js';
+import { setDetectedModelOptions } from '../../common/modelCapabilities.js';
 import { sendLLMMessageToProviderImplementation } from './sendLLMMessage.impl.js';
 
 
@@ -35,6 +36,9 @@ export const sendLLMMessage = async ({
 
 
 	const { providerName, modelName } = modelSelection
+
+	// Kodia: the capabilities of the models detected through a provider's API come with the settings
+	setDetectedModelOptions(settingsOfProvider)
 
 	// only captures number of messages and message "shape", no actual code, instructions, prompts, etc
 	const captureLLMEvent = (eventId: string, extras?: object) => {

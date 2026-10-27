@@ -15,13 +15,19 @@ const names = (models: { modelName: string }[]) => models.map(m => m.modelName);
 suite('Kodia - models listed by the providers\' APIs', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('leaves out the catalog\'s models, their snapshots, and legacy names Kodia maps to them', () => {
+	test('leaves out the default model, its snapshots, and legacy names Kodia maps to catalog models', () => {
 		const response = [
-			{ id: 'gpt-6-sol' }, { id: 'gpt-6-sol-2026-09-01' }, { id: 'gpt-4o' }, // in the catalog, a snapshot, a legacy name
+			{ id: 'gpt-6.1-sol' }, { id: 'gpt-6.1-sol-2026-09-29' }, { id: 'gpt-4o' }, // the default, its snapshot, a legacy name
+			{ id: 'gpt-6-sol-2026-09-22' }, // a snapshot of a catalog model: by the catalog's name
 			{ id: 'gpt-7' }, { id: 'gpt-7-2027-01-15' }, // new, and its snapshot
 			{ id: 'gpt-6-chat-2026-10-01' }, // a snapshot with no undated name
 		];
-		assert.deepStrictEqual(names(detectedModelsOfProvider('openAI', response)), ['gpt-6-chat-2026-10-01', 'gpt-7']);
+		assert.deepStrictEqual(names(detectedModelsOfProvider('openAI', response)), ['gpt-6-chat-2026-10-01', 'gpt-6-sol', 'gpt-7']);
+	});
+
+	test('Anthropic\'s dated ids go by the catalog\'s names', () => {
+		const response = [{ id: 'claude-sonnet-5-5-20260928' }, { id: 'claude-opus-5-5-20260922' }, { id: 'claude-opus-5-5' }];
+		assert.deepStrictEqual(names(detectedModelsOfProvider('anthropic', response)), ['claude-opus-5-5']);
 	});
 
 	test('leaves out what isn\'t a chat model', () => {
@@ -83,7 +89,7 @@ suite('Kodia - models listed by the providers\' APIs', () => {
 		const models = detectedModelsOfProvider('mistral', [
 			{ id: 'magistral-large-2611', aliases: ['magistral-large-latest'], capabilities: { completion_chat: true, function_calling: true, vision: true }, max_context_length: 262_144 },
 			{ id: 'magistral-large-latest', aliases: ['magistral-large-2611'], capabilities: { completion_chat: true, function_calling: true, vision: true }, max_context_length: 262_144 },
-			{ id: 'mistral-large-2512', aliases: ['mistral-large-latest'], capabilities: { completion_chat: true } }, // in the catalog through its alias
+			{ id: 'mistral-large-2512', aliases: ['mistral-large-4'], capabilities: { completion_chat: true } }, // the default model, through its alias
 			{ id: 'mistral-embed-2', capabilities: { completion_chat: false } },
 			{ id: 'open-mixtral-8x22b', capabilities: { completion_chat: true }, deprecation: '2026-11-30T12:00:00Z' },
 		]);

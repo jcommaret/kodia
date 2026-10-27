@@ -75,7 +75,8 @@ export const defaultProviderSettings = {
 
 
 
-export const defaultModelsOfProvider = {
+// the models whose capabilities Kodia's catalog has (below); the tests and the weekly model check go through them all
+export const catalogModelsOfProvider = {
 	openAI: [ // https://platform.openai.com/docs/models
 		'gpt-6-astra',
 		'gpt-6.1-sol',
@@ -169,6 +170,28 @@ export const defaultModelsOfProvider = {
 
 
 } as const satisfies Record<ProviderName, string[]>
+
+// Kodia: the one model a provider's section has before its list of models is read, its most recent. The others come
+// from the provider's API (providerModels.ts), switched off, with their capabilities from the catalog
+export const defaultModelsOfProvider = {
+	openAI: ['gpt-6.1-sol'],
+	anthropic: ['claude-sonnet-5-5'],
+	xAI: ['grok-4.7'],
+	gemini: ['gemini-3.8-flash'],
+	deepseek: ['deepseek-flash'],
+	ollama: [],
+	vLLM: [],
+	lmStudio: [],
+	mlx: [],
+	openRouter: ['x-ai/grok-4.7'],
+	groq: ['qwen/qwen3.8-27b'],
+	mistral: ['mistral-large-4'],
+	openAICompatible: [],
+	googleVertex: [],
+	microsoftAzure: [],
+	awsBedrock: [],
+	liteLLM: [],
+} as const satisfies { [providerName in ProviderName]: typeof catalogModelsOfProvider[providerName][number][] }
 
 
 

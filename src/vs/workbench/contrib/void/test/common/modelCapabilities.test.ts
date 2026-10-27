@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { defaultModelsOfProvider, getModelCapabilities, getReservedOutputTokenSpace, ModelOverrides } from '../../common/modelCapabilities.js';
+import { catalogModelsOfProvider, defaultModelsOfProvider, getModelCapabilities, getReservedOutputTokenSpace, ModelOverrides } from '../../common/modelCapabilities.js';
 import { defaultOverridesOfModel, OverridesOfModel, ProviderName } from '../../common/voidSettingsTypes.js';
 
 // the default (empty) overrides, plus one model's
@@ -31,12 +31,12 @@ suite('Kodia - model capabilities', () => {
 		}
 	});
 
-	test('every default model is in the catalog, with consistent prices and media flags', () => {
-		for (const [providerName, modelNames] of Object.entries(defaultModelsOfProvider) as [ProviderName, readonly string[]][]) {
+	test('every catalog model is recognized, with consistent prices and media flags', () => {
+		for (const [providerName, modelNames] of Object.entries(catalogModelsOfProvider) as [ProviderName, readonly string[]][]) {
 			for (const modelName of modelNames) {
 				const capabilities = getModelCapabilities(providerName, modelName, undefined);
 				const label = `${providerName}/${modelName}`;
-				assert.strictEqual(capabilities.isUnrecognizedModel, false, `${label} is a default model but isn't in the catalog`);
+				assert.strictEqual(capabilities.isUnrecognizedModel, false, `${label} is a catalog model but isn't recognized`);
 				if (capabilities.cost.cache_read !== undefined) {
 					assert.ok(capabilities.cost.cache_read <= capabilities.cost.input, `${label}: cache reads cost more than input`);
 				}
@@ -48,8 +48,17 @@ suite('Kodia - model capabilities', () => {
 		}
 	});
 
+	test('each provider has one default model, from the catalog', () => {
+		for (const [providerName, modelNames] of Object.entries(defaultModelsOfProvider) as [ProviderName, readonly string[]][]) {
+			assert.ok(modelNames.length <= 1, `${providerName} has ${modelNames.length} default models`);
+			for (const modelName of modelNames) {
+				assert.ok((catalogModelsOfProvider[providerName] as readonly string[]).includes(modelName), `${providerName}/${modelName} isn't in the catalog`);
+			}
+		}
+	});
+
 	test('Mistral bills prompt-cache hits at 10% of the input price', () => {
-		for (const modelName of defaultModelsOfProvider.mistral) {
+		for (const modelName of catalogModelsOfProvider.mistral) {
 			if (modelName.startsWith('zai-glm')) {
 				continue; // GLM is priced by Z.ai
 			}

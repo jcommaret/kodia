@@ -4,11 +4,11 @@
  *--------------------------------------------------------------------------------------*/
 
 import { canonicalModelNameForProvider } from './localSingleModelProviders.js';
-import { defaultModelsOfProvider, VoidStaticModelInfo } from './modelCapabilities.js';
+import { catalogModelsOfProvider, defaultModelsOfProvider, VoidStaticModelInfo } from './modelCapabilities.js';
 import { ProviderName } from './voidSettingsTypes.js';
 
-// A model a provider's API lists, with the capabilities the API gives (none when it only gives names). Kodia adds the
-// ones its catalog doesn't have to the provider's models, switched off.
+// A model a provider's API lists, with the capabilities the API gives (none when it only gives names). Kodia adds them
+// to the provider's models besides its default one, switched off.
 export type DetectedModel = { modelName: string; capabilities?: Partial<VoidStaticModelInfo> };
 
 // the providers whose model list Kodia reads with the user's API key (OpenRouter's is public, see openRouterFreeModels.ts)
@@ -62,12 +62,11 @@ const definedOnly = (capabilities: Partial<VoidStaticModelInfo>): Partial<VoidSt
 // a snapshot of another model: claude-x-20261001, gpt-x-2026-09-01, gemini-x-001, gpt-4-0613
 const withoutSnapshotSuffix = (modelName: string) => modelName.replace(/-(\d{4}-\d{2}-\d{2}|\d{8}|\d{3,4})$/, '');
 
-// in Kodia's catalog already: by name, as a snapshot of a catalog model, or as a legacy name Kodia maps to one
-const isInCatalog = (providerName: ListableProviderName, modelName: string) => {
+// in the provider's section already: its default model, or a legacy name Kodia maps to a catalog model
+const isDefaultModel = (providerName: ListableProviderName, modelName: string) => {
 	const lower = modelName.toLowerCase();
 	if (canonicalModelNameForProvider(providerName, modelName).toLowerCase() !== lower) return true;
-	const catalog = new Set(defaultModelsOfProvider[providerName].map(m => m.toLowerCase()));
-	return catalog.has(lower) || catalog.has(withoutSnapshotSuffix(lower));
+	return (defaultModelsOfProvider[providerName] as readonly string[]).some(m => m.toLowerCase() === lower);
 };
 
 const listOf = (response: unknown): unknown[] => Array.isArray(response) ? response : [];
@@ -112,7 +111,7 @@ const mistralModels = (models: MistralModel[]): DetectedModel[] => {
 		if (names.some(n => seen.has(n))) continue;
 		names.forEach(n => seen.add(n));
 		if (m.capabilities?.completion_chat === false || m.deprecation || m.archived) continue;
-		if (names.some(n => isInCatalog('mistral', n))) continue;
+		if (names.some(n => isDefaultModel('mistral', n))) continue;
 		detected.push({
 			modelName: m.id,
 			capabilities: definedOnly({
@@ -128,7 +127,7 @@ const mistralModels = (models: MistralModel[]): DetectedModel[] => {
 
 const xAIModels = (models: XAIModel[]): DetectedModel[] => models
 	.filter(m => !m.output_modalities || (m.output_modalities.length === 1 && m.output_modalities[0] === 'text'))
-	.filter(m => !(m.aliases ?? []).some(alias => isInCatalog('xAI', alias)))
+	.filter(m => !(m.aliases ?? []).some(alias => isDefaultModel('xAI', alias)))
 	.map(m => ({
 		modelName: m.id,
 		capabilities: definedOnly({
@@ -156,8 +155,9 @@ const deepseekModels = (models: DeepSeekModel[]): DetectedModel[] => models.map(
 	}),
 }));
 
-// The chat models a provider's API lists that Kodia's catalog doesn't have, from the list the main process fetched
-// (listProviderModels). Snapshots of a model that is listed too are left out.
+// The chat models a provider's API lists besides its default model, from the list the main process fetched
+// (listProviderModels). A snapshot of a catalog model goes by the catalog's name (claude-x-20261001 → claude-x), whose
+// capabilities Kodia has; the snapshots of another listed model are left out.
 export const detectedModelsOfProvider = (providerName: ListableProviderName, response: unknown): DetectedModel[] => {
 	const models = listOf(response).filter((m): m is { id?: unknown; name?: unknown } => typeof m === 'object' && m !== null);
 	const withName = models.filter(m => typeof (providerName === 'gemini' ? m.name : m.id) === 'string');
@@ -171,9 +171,16 @@ export const detectedModelsOfProvider = (providerName: ListableProviderName, res
 								: deepseekModels(withName as DeepSeekModel[]);
 
 	const notChat = notChatModel[providerName];
-	const kept = detected.filter(m => !notChat?.test(m.modelName.toLowerCase()) && !isInCatalog(providerName, m.modelName));
-	const names = new Set(kept.map(m => m.modelName));
-	return kept
-		.filter(m => withoutSnapshotSuffix(m.modelName) === m.modelName || !names.has(withoutSnapshotSuffix(m.modelName)))
+	const catalog = new Map((catalogModelsOfProvider[providerName] as readonly string[]).map(m => [m.toLowerCase(), m]));
+	const kept = new Map<string, DetectedModel>();
+	for (const model of detected) {
+		const lower = model.modelName.toLowerCase();
+		if (notChat?.test(lower)) continue;
+		const modelName = catalog.get(lower) ?? catalog.get(withoutSnapshotSuffix(lower)) ?? model.modelName;
+		if (isDefaultModel(providerName, modelName) || kept.has(modelName)) continue;
+		kept.set(modelName, { ...model, modelName });
+	}
+	return [...kept.values()]
+		.filter(m => withoutSnapshotSuffix(m.modelName) === m.modelName || !kept.has(withoutSnapshotSuffix(m.modelName)))
 		.sort((a, b) => a.modelName.localeCompare(b.modelName));
 };

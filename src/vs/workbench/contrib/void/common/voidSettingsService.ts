@@ -134,8 +134,11 @@ const _stateWithMergedDefaultModels = (state: VoidSettingsState): VoidSettingsSt
 	// recompute default models
 	for (const providerName of providerNames) {
 		const defaultModels = defaultSettingsOfProvider[providerName]?.models ?? []
-		const currentModels = newSettingsOfProvider[providerName]?.models ?? []
 		const defaultModelNames = defaultModels.map(m => m.modelName)
+		// Kodia: a model that is no longer a default stays when the user had switched it on, as a model of their own
+		// (the provider's list of models brings it back as a detected one, see providerModelsContrib.ts)
+		const currentModels = (newSettingsOfProvider[providerName]?.models ?? []).map(m =>
+			m.type === 'default' && !m.isHidden && !defaultModelNames.includes(m.modelName) ? { ...m, type: 'custom' as const } : m)
 		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: currentModels, models: defaultModelNames, type: 'default' })
 		newSettingsOfProvider = {
 			...newSettingsOfProvider,

@@ -3,7 +3,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { FeatureName, ModelSelectionOptions, OverridesOfModel, ProviderName } from './voidSettingsTypes.js';
+import { FeatureName, ModelSelectionOptions, OverridesOfModel, ProviderName, SettingsOfProvider } from './voidSettingsTypes.js';
 import { LLMUsage } from './sendLLMMessageTypes.js';
 
 
@@ -2226,6 +2226,20 @@ const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProvi
 
 // ---------------- exports ----------------
 
+// Kodia: the models detected through a provider's API (OpenRouter's free models), with the capabilities the API gave.
+// They're saved with the provider's models in the settings, which every request carries to the main process: the
+// settings service sets them here in the renderer, and sendLLMMessage in the main process.
+let detectedModelOptions: { [providerName in ProviderName]?: { [modelName: string]: VoidStaticModelInfo } } = {};
+export const setDetectedModelOptions = (settingsOfProvider: SettingsOfProvider) => {
+	const options: typeof detectedModelOptions = {};
+	for (const providerName of Object.keys(settingsOfProvider) as ProviderName[]) {
+		for (const { modelName, detectedCapabilities } of settingsOfProvider[providerName]?.models ?? []) {
+			if (detectedCapabilities) (options[providerName] ??= {})[modelName] = detectedCapabilities;
+		}
+	}
+	detectedModelOptions = options;
+}
+
 // returns the capabilities and the adjusted modelName if it was a fallback
 export const getModelCapabilities = (
 	providerName: ProviderName,
@@ -2250,6 +2264,12 @@ export const getModelCapabilities = (
 			// spread the catalog entry under its own key: the user's spelling may differ in case
 			return { ...modelOptions[modelName_], ...overrides, modelName, recognizedModelName: modelName_, isUnrecognizedModel: false };
 		}
+	}
+
+	// a model detected through the provider's API: what the API says, rather than a guess from its name
+	const detected = detectedModelOptions[providerName]?.[modelName];
+	if (detected) {
+		return { ...detected, ...overrides, modelName, recognizedModelName: modelName, isUnrecognizedModel: false };
 	}
 
 	const result = modelOptionsFallback(modelName)

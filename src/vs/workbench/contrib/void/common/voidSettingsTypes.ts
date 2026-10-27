@@ -4,7 +4,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { defaultModelsOfProvider, defaultProviderSettings, ModelOverrides } from './modelCapabilities.js';
+import { defaultModelsOfProvider, defaultProviderSettings, ModelOverrides, VoidStaticModelInfo } from './modelCapabilities.js';
 import { ToolApprovalType } from './toolsServiceTypes.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
@@ -38,6 +38,7 @@ export type VoidStatefulModelInfo = { // <-- STATEFUL
 	modelName: string,
 	type: 'default' | 'autodetected' | 'custom';
 	isHidden: boolean, // whether or not the user is hiding it (switched off)
+	detectedCapabilities?: VoidStaticModelInfo, // Kodia: for a model detected through the provider's API (OpenRouter's free models), the capabilities it gave
 }
 
 

@@ -16,7 +16,7 @@ You bring the models: Kodia talks directly to the providers you configure, or to
 - **Autocomplete** with fill-in-the-middle models (Codestral and others), with context from your other open files.
 - **Agents window**: long-running agent sessions with the Kodia agent, which runs every model shown in Kodia's model dropdown.
 - **Providers**:
-  - cloud: Anthropic, OpenAI, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter;
+  - cloud: Anthropic, OpenAI, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter (whose free models that can run the agent are listed every day, switched off until you turn them on);
   - cloud platforms: Google Vertex, Azure, AWS Bedrock, LiteLLM;
   - any OpenAI-compatible API.
 - **Local models**: Ollama, LM Studio and vLLM, plus MLX on Apple Silicon.

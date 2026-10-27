@@ -7,7 +7,7 @@ import assert from 'assert';
 import { deepClone } from '../../../../../base/common/objects.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { getModelCapabilities, setDetectedModelOptions } from '../../common/modelCapabilities.js';
-import { detectedModelsOfProvider } from '../../common/providerModels.js';
+import { detectedModelsOfProvider, mostUsedModelNames } from '../../common/providerModels.js';
 import { defaultSettingsOfProvider } from '../../common/voidSettingsTypes.js';
 
 const names = (models: { modelName: string }[]) => models.map(m => m.modelName);
@@ -97,6 +97,16 @@ suite('Kodia - models listed by the providers\' APIs', () => {
 			modelName: 'magistral-large-latest',
 			capabilities: { contextWindow: 262_144, supportsVision: true, specialToolFormat: 'openai-style' },
 		}]);
+	});
+
+	test('ranks a provider\'s models by their use on OpenRouter, matching names', () => {
+		const byUsage = [{ id: 'anthropic/claude-opus-5.5' }, { id: 'someone/claude-haiku-5-5' }, { id: 'anthropic/claude-haiku-5.5' }, { id: 'anthropic/claude-sonnet-5.5-20260928' }, { id: 'qwen/qwen3.8-27b:free' }, { id: 'mistralai/mistral-large-4-0' }];
+		// dots for dashes, snapshots; only Anthropic's own models count for Anthropic
+		assert.deepStrictEqual(mostUsedModelNames('anthropic', ['claude-sonnet-5-5', 'claude-fable-5-1', 'claude-haiku-5-5', 'claude-opus-5-5'], byUsage, 5), ['claude-opus-5-5', 'claude-haiku-5-5', 'claude-sonnet-5-5']);
+		assert.deepStrictEqual(mostUsedModelNames('anthropic', ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5-5'], byUsage, 2), ['claude-opus-5-5', 'claude-haiku-5-5']);
+		// Groq serves other authors' models; Mistral's -0
+		assert.deepStrictEqual(mostUsedModelNames('groq', ['llama-3.3-70b-versatile', 'qwen/qwen3.8-27b'], byUsage, 5), ['qwen/qwen3.8-27b']);
+		assert.deepStrictEqual(mostUsedModelNames('mistral', ['mistral-large-4'], byUsage, 5), ['mistral-large-4']);
 	});
 
 	test('a detected model\'s capabilities go over what its name tells, under the user\'s overrides', () => {

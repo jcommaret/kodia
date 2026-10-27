@@ -75,8 +75,9 @@ export interface IVoidSettingsService {
 	resetState(): Promise<void>;
 
 	setAutodetectedModels(providerName: ProviderName, modelNames: string[], logging: object): void;
-	// Kodia: the models a provider's API lists (OpenRouter's free models, the models missing from the catalog), with their capabilities. New ones are switched off
-	setDetectedModels(providerName: ProviderName, models: DetectedModel[]): void;
+	// Kodia: the models a provider's API lists besides its default one (on OpenRouter, its free and most used models),
+	// with their capabilities. New ones are switched off, but for `shownModelNames` (the most used)
+	setDetectedModels(providerName: ProviderName, models: DetectedModel[], shownModelNames?: readonly string[]): void;
 	toggleModelHidden(providerName: ProviderName, modelName: string): void;
 	addModel(providerName: ProviderName, modelName: string): void;
 	deleteModel(providerName: ProviderName, modelName: string): boolean;
@@ -89,8 +90,8 @@ export interface IVoidSettingsService {
 
 
 
-const _modelsWithSwappedInNewModels = (options: { providerName: ProviderName, existingModels: VoidStatefulModelInfo[], models: string[], type: 'autodetected' | 'default', capabilitiesOfModel?: Record<string, Partial<VoidStaticModelInfo> | undefined>, hideNewModels?: boolean }) => {
-	const { providerName, existingModels, models, type, capabilitiesOfModel, hideNewModels } = options
+const _modelsWithSwappedInNewModels = (options: { providerName: ProviderName, existingModels: VoidStatefulModelInfo[], models: string[], type: 'autodetected' | 'default', capabilitiesOfModel?: Record<string, Partial<VoidStaticModelInfo> | undefined>, hideNewModels?: boolean, shownNewModels?: readonly string[] }) => {
+	const { providerName, existingModels, models, type, capabilitiesOfModel, hideNewModels, shownNewModels } = options
 
 	const existingModelsMap: Record<string, VoidStatefulModelInfo> = {}
 	for (const existingModel of existingModels) {
@@ -100,7 +101,8 @@ const _modelsWithSwappedInNewModels = (options: { providerName: ProviderName, ex
 	const newDefaultModels = models.map((modelName, i) => {
 		const existingModel = existingModelsMap[modelName]
 		const detectedCapabilities = capabilitiesOfModel?.[modelName]
-		return { modelName, type, isHidden: existingModel ? !!existingModel.isHidden : !!hideNewModels, ...detectedCapabilities ? { detectedCapabilities } : {} }
+		const isHidden = existingModel ? !!existingModel.isHidden : !!hideNewModels && !shownNewModels?.includes(modelName)
+		return { modelName, type, isHidden, ...detectedCapabilities ? { detectedCapabilities } : {} }
 	})
 
 	return dedupeProviderModels(providerName, [
@@ -580,10 +582,10 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		}
 	}
 
-	setDetectedModels(providerName: ProviderName, detectedModels: DetectedModel[]) {
+	setDetectedModels(providerName: ProviderName, detectedModels: DetectedModel[], shownModelNames?: readonly string[]) {
 		const { models } = this.state.settingsOfProvider[providerName]
 		const capabilitiesOfModel = Object.fromEntries(detectedModels.map(m => [m.modelName, m.capabilities]))
-		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: detectedModels.map(m => m.modelName), type: 'autodetected', capabilitiesOfModel, hideNewModels: true })
+		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: detectedModels.map(m => m.modelName), type: 'autodetected', capabilitiesOfModel, hideNewModels: true, shownNewModels: shownModelNames })
 		// every window refreshes them: only the first one with a change saves it
 		if (JSON.stringify(newModels) === JSON.stringify(models)) return
 		this.setSettingOfProvider(providerName, 'models', newModels)

@@ -11,7 +11,7 @@ import { ProviderName } from './voidSettingsTypes.js';
 // to the provider's models besides its default one, switched off.
 export type DetectedModel = { modelName: string; capabilities?: Partial<VoidStaticModelInfo> };
 
-// the providers whose model list Kodia reads with the user's API key (OpenRouter's is public, see openRouterFreeModels.ts)
+// the providers whose model list Kodia reads with the user's API key (OpenRouter's is public, see openRouterModels.ts)
 export const listableProviderNames = ['anthropic', 'openAI', 'gemini', 'mistral', 'xAI', 'groq', 'deepseek'] as const satisfies ProviderName[];
 export type ListableProviderName = typeof listableProviderNames[number];
 
@@ -60,7 +60,7 @@ const definedOnly = (capabilities: Partial<VoidStaticModelInfo>): Partial<VoidSt
 };
 
 // a snapshot of another model: claude-x-20261001, gpt-x-2026-09-01, gemini-x-001, gpt-4-0613
-const withoutSnapshotSuffix = (modelName: string) => modelName.replace(/-(\d{4}-\d{2}-\d{2}|\d{8}|\d{3,4})$/, '');
+export const withoutSnapshotSuffix = (modelName: string) => modelName.replace(/-(\d{4}-\d{2}-\d{2}|\d{8}|\d{3,4})$/, '');
 
 // in the provider's section already: its default model, or a legacy name Kodia maps to a catalog model
 const isDefaultModel = (providerName: ListableProviderName, modelName: string) => {
@@ -154,6 +154,29 @@ const deepseekModels = (models: DeepSeekModel[]): DetectedModel[] => models.map(
 		supportsVision: m.input_modalities ? m.input_modalities.includes('image') : undefined,
 	}),
 }));
+
+// the providers' authors on OpenRouter; Groq serves other authors' models
+const openRouterAuthorOf: { [providerName in ListableProviderName]?: string } = { anthropic: 'anthropic', openAI: 'openai', gemini: 'google', xAI: 'x-ai', deepseek: 'deepseek', mistral: 'mistralai' };
+
+// a model's name without what differs between its provider's API and OpenRouter: the author, a variant (:free), dots
+// for dashes (claude-opus-5.5 is claude-opus-5-5), a snapshot, -latest or -0 (mistral-large-4-0)
+const usageKey = (modelName: string) =>
+	withoutSnapshotSuffix(modelName.toLowerCase().replace(/^[^/]+\//, '').replace(/:[a-z-]+$/, '').replace(/\./g, '-')).replace(/-(latest|0)$/, '');
+
+// The provider's models used most on OpenRouter last week, the most used first. `openRouterModelsByUsage` is OpenRouter's
+// list sorted by usage; a model OpenRouter doesn't serve isn't ranked.
+export const mostUsedModelNames = (providerName: ListableProviderName, modelNames: readonly string[], openRouterModelsByUsage: readonly { id: string }[], count: number): string[] => {
+	const author = openRouterAuthorOf[providerName];
+	const rankOf = new Map<string, number>();
+	openRouterModelsByUsage.forEach(({ id }, rank) => {
+		const key = usageKey(id);
+		if ((!author || id.startsWith(`${author}/`)) && !rankOf.has(key)) rankOf.set(key, rank);
+	});
+	return modelNames
+		.filter(modelName => rankOf.has(usageKey(modelName)))
+		.sort((a, b) => (rankOf.get(usageKey(a)) ?? 0) - (rankOf.get(usageKey(b)) ?? 0))
+		.slice(0, count);
+};
 
 // The chat models a provider's API lists besides its default model, from the list the main process fetched
 // (listProviderModels). A snapshot of a catalog model goes by the catalog's name (claude-x-20261001 → claude-x), whose

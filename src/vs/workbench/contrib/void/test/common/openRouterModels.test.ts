@@ -102,7 +102,7 @@ suite('Kodia - OpenRouter\'s most used models', () => {
 
 	const paid = (id: string, changes: Partial<OpenRouterModel> = {}) => model(id, { pricing: { prompt: '0.000003', completion: '0.000015', input_cache_read: '0.0000003' }, ...changes });
 
-	test('the five most used that can run the agent, in order, without the default model', () => {
+	test('the five most used that can run the agent, in order, without the free ones and the default model', () => {
 		const byUsage = [
 			paid('deepseek/deepseek-v5-flash-1101'), paid('deepseek/deepseek-v5-flash'), // a snapshot counts for its model
 			paid('x-ai/grok-4.7'), // Kodia's default OpenRouter model
@@ -110,7 +110,7 @@ suite('Kodia - OpenRouter\'s most used models', () => {
 			paid('a/no-tools', { supported_parameters: ['max_tokens'] }),
 			paid('a/one'), model('a/two:free'), paid('a/three'), paid('a/four'), paid('a/five'),
 		];
-		assert.deepStrictEqual(mostUsedModelsOfOpenRouter(byUsage, now, 5).map(m => m.modelName), ['deepseek/deepseek-v5-flash', 'a/one', 'a/two:free', 'a/three', 'a/four']);
+		assert.deepStrictEqual(mostUsedModelsOfOpenRouter(byUsage, now, 5).map(m => m.modelName), ['deepseek/deepseek-v5-flash', 'a/one', 'a/three', 'a/four', 'a/five']);
 	});
 
 	test('their prices come from OpenRouter, per million tokens', () => {
@@ -118,7 +118,7 @@ suite('Kodia - OpenRouter\'s most used models', () => {
 		assert.deepStrictEqual(capabilities.cost, { input: 3, output: 15, cache_read: 0.3 });
 	});
 
-	test('a model switched on stays while OpenRouter lists it and it can run the agent', () => {
+	test('a selected model stays while OpenRouter lists it and it can run the agent', () => {
 		const models = [paid('a/still'), paid('a/no-tools-now', { supported_parameters: [] })];
 		assert.deepStrictEqual(stillListedModelsOfOpenRouter(models, now, ['a/still', 'a/no-tools-now', 'a/gone']).map(m => m.modelName), ['a/still']);
 	});

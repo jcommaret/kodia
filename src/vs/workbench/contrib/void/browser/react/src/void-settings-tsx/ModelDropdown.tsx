@@ -13,6 +13,9 @@ import { VOID_OPEN_SETTINGS_ACTION_ID, VOID_TOGGLE_SETTINGS_ACTION_ID } from '..
 import { modelFilterOfFeatureName, ModelOption } from '../../../../../../../workbench/contrib/void/common/voidSettingsService.js'
 import { WarningBox } from './WarningBox.js'
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
+import { isFreeOpenRouterModel } from '../../../../../../../workbench/contrib/void/common/openRouterModels.js'
+
+const isFree = (option: ModelOption) => isFreeOpenRouterModel(option.selection.providerName, option.selection.modelName)
 
 const optionsEqual = (m1: ModelOption[], m2: ModelOption[]) => {
 	if (m1.length !== m2.length) return false
@@ -41,6 +44,7 @@ const ModelSelectBox = ({ options, featureName, className }: { options: ModelOpt
 		getOptionDropdownName={(option) => option.name}
 		getOptionDropdownDetail={(option) => displayInfoOfProviderName(option.selection.providerName).title}
 		getOptionsEqual={(a, b) => optionsEqual([a], [b])}
+		hasSeparatorBefore={(option, previousOption) => isFree(previousOption) && !isFree(option)}
 		className={className}
 		matchInputWidth={false}
 	/>
@@ -56,7 +60,9 @@ const MemoizedModelDropdown = ({ featureName, className }: { featureName: Featur
 
 	useEffect(() => {
 		const oldOptions = oldOptionsRef.current
-		const newOptions = settingsState._modelOptions.filter((o) => filter(o.selection, { chatMode: settingsState.globalSettings.chatMode, overridesOfModel: settingsState.overridesOfModel }))
+		const options = settingsState._modelOptions.filter((o) => filter(o.selection, { chatMode: settingsState.globalSettings.chatMode, overridesOfModel: settingsState.overridesOfModel }))
+		// Kodia: OpenRouter's free models first, a line under them
+		const newOptions = [...options.filter(isFree), ...options.filter(o => !isFree(o))]
 
 		if (!optionsEqual(oldOptions, newOptions)) {
 			setMemoizedOptions(newOptions)

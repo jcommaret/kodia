@@ -1218,6 +1218,7 @@ export const VoidCustomDropdownBox = <T extends NonNullable<any>>({
 	getOptionDropdownDetail,
 	getOptionDisplayName,
 	getOptionsEqual,
+	hasSeparatorBefore,
 	className,
 	arrowTouchesText = true,
 	matchInputWidth = false,
@@ -1231,6 +1232,7 @@ export const VoidCustomDropdownBox = <T extends NonNullable<any>>({
 	getOptionDropdownDetail?: (option: T) => string;
 	getOptionDisplayName: (option: T) => string;
 	getOptionsEqual: (a: T, b: T) => boolean;
+	hasSeparatorBefore?: (option: T, previousOption: T) => boolean; // Kodia: a line between two groups of options
 	className?: string;
 	arrowTouchesText?: boolean;
 	matchInputWidth?: boolean;
@@ -1390,14 +1392,15 @@ export const VoidCustomDropdownBox = <T extends NonNullable<any>>({
 					onWheel={(e) => e.stopPropagation()}
 				><div className='overflow-auto max-h-80'>
 
-						{options.map((option) => {
+						{options.map((option, i) => {
 							const thisOptionIsSelected = getOptionsEqual(option, selectedOption);
 							const optionName = getOptionDropdownName(option);
 							const optionDetail = getOptionDropdownDetail?.(option) || '';
 
 							return (
+								<React.Fragment key={optionName}>
+								{i > 0 && hasSeparatorBefore?.(option, options[i - 1]) && <div className='my-1 mx-2 border-t border-void-border-2' />}
 								<div
-									key={optionName}
 									className={`flex items-center px-2 py-1 pr-4 cursor-pointer whitespace-nowrap
 									transition-all duration-100
 									${thisOptionIsSelected ? 'bg-blue-500 text-white/80' : 'hover:bg-blue-500 hover:text-white/80'}
@@ -1425,6 +1428,7 @@ export const VoidCustomDropdownBox = <T extends NonNullable<any>>({
 										<span className='opacity-60'>{optionDetail}</span>
 									</span>
 								</div>
+								</React.Fragment>
 							);
 						})}
 					</div>

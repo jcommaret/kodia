@@ -11,7 +11,7 @@ import { registerSingleton, InstantiationType } from '../../../../platform/insta
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IMetricsService } from './metricsService.js';
-import { defaultProviderSettings, getModelCapabilities, ModelOverrides, setDetectedModelOptions, VoidStaticModelInfo } from './modelCapabilities.js';
+import { defaultModelsOfProvider, defaultProviderSettings, getModelCapabilities, ModelOverrides, setDetectedModelOptions, VoidStaticModelInfo } from './modelCapabilities.js';
 import { DetectedModel } from './providerModels.js';
 import { VOID_SETTINGS_STORAGE_KEY } from './storageKeys.js';
 import { isMacintosh } from '../../../../base/common/platform.js';
@@ -76,7 +76,7 @@ export interface IVoidSettingsService {
 
 	setAutodetectedModels(providerName: ProviderName, modelNames: string[], logging: object): void;
 	// Kodia: the models a provider's API lists besides its default one (on OpenRouter, its free and most used models),
-	// with their capabilities. New ones are switched off, but for `shownModelNames` (the most used)
+	// with their capabilities. New ones are switched off, but for `shownModelNames` (the most used, OpenRouter's free ones)
 	setDetectedModels(providerName: ProviderName, models: DetectedModel[], shownModelNames?: readonly string[]): void;
 	toggleModelHidden(providerName: ProviderName, modelName: string): void;
 	addModel(providerName: ProviderName, modelName: string): void;
@@ -582,8 +582,11 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		}
 	}
 
-	setDetectedModels(providerName: ProviderName, detectedModels: DetectedModel[], shownModelNames?: readonly string[]) {
+	setDetectedModels(providerName: ProviderName, detectedModels_: DetectedModel[], shownModelNames?: readonly string[]) {
 		const { models } = this.state.settingsOfProvider[providerName]
+		// a default model stays a default one (a detected model by its name would replace it)
+		const defaultModelNames: readonly string[] = defaultModelsOfProvider[providerName]
+		const detectedModels = detectedModels_.filter(m => !defaultModelNames.includes(m.modelName))
 		const capabilitiesOfModel = Object.fromEntries(detectedModels.map(m => [m.modelName, m.capabilities]))
 		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: detectedModels.map(m => m.modelName), type: 'autodetected', capabilitiesOfModel, hideNewModels: true, shownNewModels: shownModelNames })
 		// every window refreshes them: only the first one with a change saves it

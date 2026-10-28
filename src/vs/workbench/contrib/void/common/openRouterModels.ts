@@ -5,6 +5,7 @@
 
 import { defaultModelsOfProvider, VoidStaticModelInfo } from './modelCapabilities.js';
 import { DetectedModel, withoutSnapshotSuffix } from './providerModels.js';
+import { ProviderName } from './voidSettingsTypes.js';
 
 // OpenRouter's public list of models, no key needed, the most used last week first (tokens processed):
 // https://openrouter.ai/docs/api/api-reference/models/get-models
@@ -23,6 +24,9 @@ export type OpenRouterModel = {
 };
 
 type DetectedOpenRouterModel = DetectedModel & { capabilities: VoidStaticModelInfo };
+
+// one of OpenRouter's free models: Kodia lists them first, apart from the others
+export const isFreeOpenRouterModel = (providerName: ProviderName, modelName: string) => providerName === 'openRouter' && modelName.endsWith(':free');
 
 const MIN_CONTEXT_WINDOW = 32_768; // the agent's system message and tools alone take several thousand tokens
 const MIN_OUTPUT_TOKENS = 16_384; // enough to write a file
@@ -84,7 +88,7 @@ export const freeCodingModelsOfOpenRouter = (models: OpenRouterModel[], now: num
 	return picked.map(model => ({ modelName: model.id, capabilities: capabilitiesOf(model) }));
 };
 
-// The models OpenRouter's users used most last week that can run the agent, free or not, besides Kodia's default
+// The models OpenRouter's users used most last week that can run the agent, besides the free ones and Kodia's default
 // OpenRouter model. `modelsByUsage` is OpenRouter's list sorted by usage (OPENROUTER_MODELS_BY_USAGE_URL). A snapshot
 // counts for its model when OpenRouter lists that too (deepseek-v4.1-flash-1017 is deepseek-v4.1-flash).
 export const mostUsedModelsOfOpenRouter = (modelsByUsage: OpenRouterModel[], now: number, count: number): DetectedOpenRouterModel[] => {
@@ -93,14 +97,14 @@ export const mostUsedModelsOfOpenRouter = (modelsByUsage: OpenRouterModel[], now
 	for (const model of modelsByUsage) {
 		if (picked.size >= count) break;
 		const named = modelOfId.get(withoutSnapshotSuffix(model.id)) ?? model;
-		if (picked.has(named.id) || (defaultModelsOfProvider.openRouter as readonly string[]).includes(named.id) || !canRunAgent(named, now)) continue;
+		if (picked.has(named.id) || isFree(named) || (defaultModelsOfProvider.openRouter as readonly string[]).includes(named.id) || !canRunAgent(named, now)) continue;
 		picked.set(named.id, { modelName: named.id, capabilities: capabilitiesOf(named) });
 	}
 	return [...picked.values()];
 };
 
-// The models of `modelNames` OpenRouter still lists that can still run the agent, with their capabilities today: the
-// most used models a user switched on stay after they leave the top
+// The models of `modelNames` OpenRouter still lists that can still run the agent, with their capabilities today: a
+// model selected in the chat stays after it leaves the lists
 export const stillListedModelsOfOpenRouter = (models: OpenRouterModel[], now: number, modelNames: readonly string[]): DetectedOpenRouterModel[] => {
 	const modelOfId = new Map(models.map(model => [model.id, model]));
 	return modelNames.flatMap(modelName => {

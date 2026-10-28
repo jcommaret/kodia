@@ -18,6 +18,7 @@ import { IconLoading } from '../sidebar-tsx/SidebarChat.js'
 import { ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js'
 import Severity from '../../../../../../../base/common/severity.js'
 import { getModelCapabilities, modelOverrideKeys, ModelOverrides } from '../../../../common/modelCapabilities.js';
+import { isFreeOpenRouterModel } from '../../../../common/openRouterModels.js';
 import { TransferEditorType } from '../../../extensionTransferTypes.js';
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { useMCPServiceState } from '../util/services.js';
@@ -458,14 +459,20 @@ export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderN
 
 
 			const detailAboutModel = type === 'autodetected' ?
-				<Asterisk size={14} className="inline-block align-text-top brightness-115 stroke-[2] text-[#0e70c0]" data-tooltip-id='void-tooltip' data-tooltip-place='right' data-tooltip-content={providerName === 'openRouter' ? (modelName.endsWith(':free') ? 'Free on OpenRouter (detected daily)' : 'Among OpenRouter\'s most used (checked daily)') : (nonlocalProviderNames as readonly string[]).includes(providerName) ? `In ${providerTitle}'s model list (checked daily)` : 'Detected locally'} />
+				<Asterisk size={14} className="inline-block align-text-top brightness-115 stroke-[2] text-[#0e70c0]" data-tooltip-id='void-tooltip' data-tooltip-place='right' data-tooltip-content={providerName === 'openRouter' ? (modelName.endsWith(':free') ? 'Among OpenRouter\'s best free models for code (checked daily)' : 'Among OpenRouter\'s most used (checked daily)') : (nonlocalProviderNames as readonly string[]).includes(providerName) ? `In ${providerTitle}'s model list (checked daily)` : 'Detected locally'} />
 				: type === 'custom' ?
 					<Asterisk size={14} className="inline-block align-text-top brightness-115 stroke-[2] text-[#0e70c0]" data-tooltip-id='void-tooltip' data-tooltip-place='right' data-tooltip-content='Custom model' />
 					: undefined
 
 			const hasOverrides = !!settingsState.overridesOfModel?.[providerName]?.[modelName]
 
-			return <div key={`${modelName}${providerName}`}
+			// Kodia: a line between OpenRouter's free models and the others
+			const previous = i > 0 ? modelDump[i - 1] : undefined
+			const separator = !isNewProviderName && previous && isFreeOpenRouterModel(previous.providerName, previous.modelName) && !isFreeOpenRouterModel(providerName, modelName)
+				? <div className='my-1 mx-3 border-t border-void-border-2' />
+				: null
+
+			return <React.Fragment key={`${modelName}${providerName}`}>{separator}<div
 				className={`flex items-center justify-between gap-4 hover:bg-black/10 dark:hover:bg-gray-300/10 py-1 px-3 rounded-sm overflow-hidden cursor-default truncate group
 				`}
 			>
@@ -522,7 +529,7 @@ export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderN
 						</button>}
 					</div>
 				</div>
-			</div>
+			</div></React.Fragment>
 		})}
 
 		{/* Add Model Section */}

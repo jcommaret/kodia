@@ -170,12 +170,14 @@ function makeMessage(model: string): Anthropic.Message {
 		stop_reason: 'end_turn',
 		stop_sequence: null,
 		stop_details: null,
+		diagnostics: null,
 		container: null,
 		usage: {
 			input_tokens: 1,
 			output_tokens: 1,
 			cache_creation: null,
 			cache_creation_input_tokens: null,
+			speed: null,
 			cache_read_input_tokens: null,
 			inference_geo: null,
 			server_tool_use: null,
@@ -254,6 +256,7 @@ function makeResultSuccess(sessionId: string): SDKResultSuccess {
 		usage: {
 			cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
 			cache_creation_input_tokens: 0,
+			fallback_credit: null,
 			cache_read_input_tokens: 0,
 			inference_geo: 'unknown',
 			input_tokens: 0,

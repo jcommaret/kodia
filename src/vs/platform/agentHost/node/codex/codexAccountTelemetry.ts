@@ -28,6 +28,10 @@ const chatgptPlanTiers = {
 	edu: 'edu',
 	edu_plus: 'edu',
 	edu_pro: 'edu',
+	// Kodia: plans added in @openai/codex 0.165.0; sci and sci_plus have no public family yet
+	promax: 'pro',
+	sci: 'unknown',
+	sci_plus: 'unknown',
 	unknown: 'unknown',
 } as const satisfies Record<PlanType, NonNullable<ICodexAccountTelemetryContext['chatgptPlanTier']>>;
 

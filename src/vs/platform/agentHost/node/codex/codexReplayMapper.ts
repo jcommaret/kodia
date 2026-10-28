@@ -30,6 +30,7 @@ import {
 	describeFileChange,
 	describeWebSearch,
 	codexCompactionLabels,
+	codexGeneratedImage,
 	codexImageGenerationLabels,
 	fileChangeOutput,
 	mapCodexTurnError,
@@ -376,7 +377,7 @@ function webSearchToolCallPart(item: Extract<ThreadItem, { type: 'webSearch' }>)
 }
 
 function imageGenerationToolCallPart(item: Extract<ThreadItem, { type: 'imageGeneration' }>): ToolCallResponsePart {
-	const success = item.status === 'completed' && item.result.length > 0;
+	const { succeeded: success, data } = codexGeneratedImage(item);
 	const labels = codexImageGenerationLabels(item.status);
 	return {
 		kind: ResponsePartKind.ToolCall,
@@ -390,7 +391,7 @@ function imageGenerationToolCallPart(item: Extract<ThreadItem, { type: 'imageGen
 			confirmed: ToolCallConfirmationReason.NotNeeded,
 			success,
 			pastTenseMessage: success ? labels.pastTenseMessage : labels.failedMessage,
-			content: success ? [{ type: ToolResultContentType.EmbeddedResource, data: item.result, contentType: 'image/png' }] : undefined,
+			content: success && data ? [{ type: ToolResultContentType.EmbeddedResource, data, contentType: 'image/png' }] : undefined,
 			error: success ? undefined : { message: labels.errorMessage },
 		},
 	};

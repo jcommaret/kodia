@@ -843,9 +843,10 @@ const anthropicMessagesWithCacheControl = (messages: AnthropicLLMChatMessage[], 
 	const out = messages.slice() as Anthropic.Messages.MessageParam[]
 	// the latest user/assistant message: a trailing `role: "system"` message (editor context) stays after the breakpoint
 	let lastIdx = out.length - 1
-	while (lastIdx >= 0 && (out[lastIdx].role as string) === 'system') lastIdx -= 1
+	while (lastIdx >= 0 && out[lastIdx].role === 'system') lastIdx -= 1
 	if (lastIdx < 0) return out
 	const last = out[lastIdx]
+	if (last.role === 'system') return out // skipped above: tells TypeScript the message is a user or assistant one
 
 	if (typeof last.content === 'string') {
 		if (last.content) out[lastIdx] = { ...last, content: [{ type: 'text', text: last.content, cache_control: cacheControl }] }

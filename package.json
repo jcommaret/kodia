@@ -173,7 +173,7 @@
 		"ssh2": "^1.16.0",
 		"tas-client": "0.4.6",
 		"tas-client-umd": "0.2.0",
-		"undici": "^7.29.1",
+		"undici": "^7.30.1",
 		"v8-inspect-profiler": "^0.1.1",
 		"vscode-oniguruma": "1.7.0",
 		"vscode-regexpp": "^3.1.0",
@@ -191,7 +191,7 @@
 		"foundry-local-sdk": "2.0.1",
 		"node-addon-api": "^6.0.0",
 		"tar": "^7.5.20",
-		"zod": "^4.4.3"
+		"zod": "^4.6.6"
 	},
 	"devDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.312",
@@ -275,7 +275,7 @@
 		"mocha": "^10.8.2",
 		"mocha-junit-reporter": "^2.2.1",
 		"mocha-multi-reporters": "^1.5.1",
-		"next": "^15.5.27",
+		"next": "^15.5.28",
 		"nodemon": "^3.1.10",
 		"npm-run-all": "^4.1.5",
 		"npm-run-all2": "^8.0.4",

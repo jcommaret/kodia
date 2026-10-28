@@ -175,7 +175,18 @@ export function buildFlatModelItems(options: IBuildModelPickerItemsOptions): IAc
 	const sortedModels = options.models
 		.filter(model => !leadingModels.includes(model))
 		.sort((left, right) => left.metadata.vendor.localeCompare(right.metadata.vendor) || left.metadata.name.localeCompare(right.metadata.name));
-	for (const model of sortedModels) {
+	// Kodia: the models of `leadingModels` first, under their label, then a separator
+	const leading = options.presentation.leadingModels;
+	const firstModels = leading ? sortedModels.filter(leading.matches) : [];
+	if (leading && firstModels.length > 0) {
+		items.push({ kind: ActionListItemKind.Separator, label: leading.label });
+		for (const model of firstModels) {
+			const { action, ariaDescription } = createModelAction(model, options.selectedModelId, options.actions.onSelect);
+			items.push(createModelItem(action, model, options.openerService, undefined, options.presentation.isUBB, ariaDescription, undefined, options.actions.onConfigure));
+		}
+		items.push({ kind: ActionListItemKind.Separator });
+	}
+	for (const model of sortedModels.filter(model => !firstModels.includes(model))) {
 		const { action, ariaDescription } = createModelAction(model, options.selectedModelId, options.actions.onSelect);
 		items.push(createModelItem(action, model, options.openerService, undefined, options.presentation.isUBB, ariaDescription, undefined, options.actions.onConfigure));
 	}

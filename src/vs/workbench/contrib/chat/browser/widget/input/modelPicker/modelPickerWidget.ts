@@ -28,7 +28,7 @@ import { ICommandService } from '../../../../../../../platform/commands/common/c
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { IOpenerService } from '../../../../../../../platform/opener/common/opener.js';
 import { IProductService } from '../../../../../../../platform/product/common/productService.js';
-import { isKodiaProduct } from './kodiaModelPicker.js';
+import { isKodiaFreeModel, isKodiaProduct } from './kodiaModelPicker.js';
 import { ITelemetryService } from '../../../../../../../platform/telemetry/common/telemetry.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../../platform/storage/common/storage.js';
 import { COPILOT_VENDOR_ID, getLanguageModelProviderDisplayName, IModelControlEntry, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService, isUserProvidedModel } from '../../../../common/languageModels.js';
@@ -689,6 +689,8 @@ export class ModelPickerWidget extends Disposable {
 				showManageModelsInSetupRequired: this._configurationService.getValue<boolean>(AgentHostAllowSignedOutWhenUsableSettingId) === true,
 				// Kodia: the flat picker of the Kodia agent ends with "Manage Models..." (see kodiaModelPicker.ts)
 				showManageModelsInFlatList: isKodiaProduct(this._productService),
+				// Kodia: OpenRouter's free models first, apart from the others
+				leadingModels: isKodiaProduct(this._productService) ? { label: localize('chat.modelPicker.kodiaFreeModels', "Free"), matches: isKodiaFreeModel } : undefined,
 				isUBB: !!this._entitlementService.quotas.usageBasedBilling,
 			},
 			actions: {

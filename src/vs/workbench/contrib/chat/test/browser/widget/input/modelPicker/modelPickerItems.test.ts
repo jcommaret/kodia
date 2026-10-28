@@ -145,6 +145,7 @@ function callBuild(
 		setupRequired?: boolean;
 		showManageModelsInSetupRequired?: boolean;
 		showManageModelsInFlatList?: boolean;
+		leadingModels?: { label: string; matches: (model: ILanguageModelChatMetadataAndIdentifier) => boolean };
 		onRequestSetup?: () => void;
 		onSelect?: (model: ILanguageModelChatMetadataAndIdentifier) => void;
 		entitlementService?: IChatEntitlementService;
@@ -178,6 +179,7 @@ function callBuild(
 			showManageModelsInSetupRequired: opts.showManageModelsInSetupRequired ?? false,
 			isUBB: false,
 			showManageModelsInFlatList: opts.showManageModelsInFlatList,
+			leadingModels: opts.leadingModels,
 		},
 		actions: {
 			onSelect,
@@ -332,6 +334,22 @@ suite('buildModelPickerItems', () => {
 		const actions = getActionItems(items);
 		assert.deepStrictEqual(actions.map(a => a.label), ['Gemini 3.8 Flash', 'Manage Models...']);
 		assert.strictEqual(actions[1].item?.id, 'manageModels');
+	});
+
+	test('Kodia: the flat list puts the leading models first, under their label, apart from the others', () => {
+		const models = [
+			createModel('openRouter/anthropic/claude-opus-5.5', 'OpenRouter · anthropic/claude-opus-5.5', 'agent-host-kodia'),
+			createModel('openRouter/google/gemma-4-31b-it:free', 'OpenRouter · google/gemma-4-31b-it:free', 'agent-host-kodia'),
+			createModel('anthropic/claude-sonnet-5-5', 'Anthropic · claude-sonnet-5-5', 'agent-host-kodia'),
+		];
+		const leadingModels = { label: 'Free', matches: (model: ILanguageModelChatMetadataAndIdentifier) => model.metadata.id.endsWith(':free') };
+		const items = callBuild(models, { useGroupedModelPicker: false, showAutoModel: false, leadingModels });
+		assert.deepStrictEqual(getActionLabels(items), ['OpenRouter · google/gemma-4-31b-it:free', 'Anthropic · claude-sonnet-5-5', 'OpenRouter · anthropic/claude-opus-5.5']);
+		assert.strictEqual(items[0].kind, ActionListItemKind.Separator);
+		assert.strictEqual(items[0].label, 'Free');
+		assert.strictEqual(getSeparatorCount(items), 2);
+		// without leading models, nothing changes
+		assert.strictEqual(getSeparatorCount(callBuild(models.filter(m => !m.metadata.id.endsWith(':free')), { useGroupedModelPicker: false, showAutoModel: false, leadingModels })), 0);
 	});
 
 	test('the flat list has no manage models entry outside Kodia', () => {

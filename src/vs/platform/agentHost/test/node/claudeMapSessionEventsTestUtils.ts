@@ -37,6 +37,7 @@ export function makeNonNullableUsage(): SDKResultSuccess['usage'] {
 	return {
 		cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
 		cache_creation_input_tokens: 0,
+		fallback_credit: null,
 		cache_read_input_tokens: 0,
 		inference_geo: 'unknown',
 		input_tokens: 0,
@@ -146,6 +147,7 @@ export function makeMessageStart(messageId: string = 'msg_test'): BetaRawMessage
 			usage: {
 				cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
 				cache_creation_input_tokens: 0,
+				fallback_credit: null,
 				cache_read_input_tokens: 0,
 				inference_geo: 'unknown',
 				input_tokens: 0,
@@ -257,6 +259,7 @@ export function makeAssistantMessage(
 			usage: {
 				cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
 				cache_creation_input_tokens: 0,
+				fallback_credit: null,
 				cache_read_input_tokens: 0,
 				inference_geo: 'unknown',
 				input_tokens: 0,

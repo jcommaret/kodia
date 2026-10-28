@@ -48,7 +48,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnStarted(state, {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_a',
+				id: 'turn_a', rootTurnId: null,
 				items: [{
 					type: 'userMessage',
 					id: 'item_user',
@@ -77,7 +77,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnStarted(state, {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_b',
+				id: 'turn_b', rootTurnId: null,
 				items: [],
 				itemsView: { type: 'full' } as never,
 				status: 'inProgress' as never,
@@ -94,7 +94,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnStarted(createCodexSessionMapState(), {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_delegated',
+				id: 'turn_delegated', rootTurnId: null,
 				items: [{
 					type: 'userMessage',
 					id: 'item_user',
@@ -132,7 +132,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnStarted(createCodexSessionMapState(), {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_c',
+				id: 'turn_c', rootTurnId: null,
 				items: [],
 				itemsView: { type: 'full' } as never,
 				status: 'inProgress' as never,
@@ -405,7 +405,7 @@ suite('codexMapAppServerEvents', () => {
 		};
 		apply(mapTurnStarted(state, {
 			threadId: 'thr_1',
-			turn: { id: 'turn_a', items: [], itemsView: { type: 'full' } as never, status: 'inProgress' as never, error: null, startedAt: null, completedAt: null, durationMs: null },
+			turn: { id: 'turn_a', rootTurnId: null, items: [], itemsView: { type: 'full' } as never, status: 'inProgress' as never, error: null, startedAt: null, completedAt: null, durationMs: null },
 		}, 'prompt'));
 		// Preamble message, then the final-answer message; two distinct items.
 		apply(mapItemStarted(state, { item: { type: 'agentMessage', id: 'm1', text: '', phase: null, memoryCitation: null, delivery: null, questions: null }, threadId: 'thr_1', turnId: 'turn_a', startedAtMs: 0 }));
@@ -1281,7 +1281,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnCompleted(state, {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_a',
+				id: 'turn_a', rootTurnId: null,
 				items: [], itemsView: { type: 'full' } as never,
 				status: 'completed' as never,
 				error: null, startedAt: 1_752_012_321, completedAt: 1_752_012_323.5, durationMs: 2500,
@@ -1315,7 +1315,7 @@ suite('codexMapAppServerEvents', () => {
 		const notification = {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_a',
+				id: 'turn_a', rootTurnId: null,
 				items: [{
 					type: 'commandExecution', id: 'cmd_1', command: 'node -e writeFile()', cwd: '/tmp',
 					processId: null, source: 'agent', status: 'completed', commandActions: [],
@@ -1353,7 +1353,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnCompleted(state, {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_a',
+				id: 'turn_a', rootTurnId: null,
 				items: [{
 					type: 'commandExecution', id: 'cmd_1', command: 'node -e writeFile()', cwd: '/tmp',
 					processId: null, source: 'agent', status: 'completed', commandActions: [],
@@ -1394,7 +1394,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnCompleted(state, {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_a',
+				id: 'turn_a', rootTurnId: null,
 				items: [{ type: 'webSearch', id: 'tool_1', query: 'query', action: { type: 'search', query: 'query' } } as never],
 				itemsView: { type: 'full' } as never,
 				status: 'completed' as never,
@@ -1507,7 +1507,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnCompleted(state, {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_a', items: [], itemsView: { type: 'full' } as never,
+				id: 'turn_a', rootTurnId: null, items: [], itemsView: { type: 'full' } as never,
 				status: 'completed' as never,
 				error: null, startedAt: null, completedAt: null, durationMs: null,
 			},
@@ -1529,7 +1529,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnCompleted(state, {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_a', items: [], itemsView: { type: 'full' } as never,
+				id: 'turn_a', rootTurnId: null, items: [], itemsView: { type: 'full' } as never,
 				status: 'failed' as never,
 				error: { message: 'boom' } as never,
 				startedAt: null, completedAt: null, durationMs: null,
@@ -1546,7 +1546,7 @@ suite('codexMapAppServerEvents', () => {
 		const actions = mapTurnCompleted(state, {
 			threadId: 'thr_1',
 			turn: {
-				id: 'turn_a', items: [], itemsView: { type: 'full' } as never,
+				id: 'turn_a', rootTurnId: null, items: [], itemsView: { type: 'full' } as never,
 				status: 'interrupted' as never,
 				error: null, startedAt: null, completedAt: null, durationMs: null,
 			},

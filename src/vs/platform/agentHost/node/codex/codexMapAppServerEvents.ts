@@ -328,6 +328,15 @@ export function codexCompactionLabels(): { readonly displayName: string; readonl
 	};
 }
 
+/**
+ * Kodia: since @openai/codex 0.165.0 a generated image comes inline (`result`, a base64 PNG) or as a stored file
+ * (`fileId`). Returns the inline image, and whether the generation produced one at all.
+ */
+export function codexGeneratedImage(item: { readonly status: string } & ({ readonly result: string } | { readonly fileId: string })): { readonly succeeded: boolean; readonly data: string | undefined } {
+	const data = 'result' in item && item.result.length > 0 ? item.result : undefined;
+	return { succeeded: item.status === 'completed' && (data !== undefined || 'fileId' in item), data };
+}
+
 export function codexImageGenerationLabels(status?: string): { readonly displayName: string; readonly invocationMessage: string; readonly pastTenseMessage: string; readonly failedMessage: string; readonly errorMessage: string } {
 	return {
 		displayName: localize('codex.imageGeneration.displayName', "Generate image"),
@@ -1161,7 +1170,7 @@ export function mapItemCompleted(
 		}];
 	}
 	if (params.item.type === 'imageGeneration') {
-		const success = params.item.status === 'completed' && params.item.result.length > 0;
+		const { succeeded: success, data } = codexGeneratedImage(params.item);
 		const labels = codexImageGenerationLabels(params.item.status);
 		return [{
 			type: ActionType.ChatToolCallComplete,
@@ -1170,9 +1179,9 @@ export function mapItemCompleted(
 			result: {
 				success,
 				pastTenseMessage: success ? labels.pastTenseMessage : labels.failedMessage,
-				content: success ? [{
+				content: success && data ? [{
 					type: ToolResultContentType.EmbeddedResource,
-					data: params.item.result,
+					data,
 					contentType: 'image/png',
 				}] : undefined,
 				...(success ? {} : { error: { message: labels.errorMessage } }),

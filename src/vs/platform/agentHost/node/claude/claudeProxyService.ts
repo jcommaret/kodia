@@ -290,6 +290,11 @@ export class ClaudeProxyService extends LoopbackProxyServer<IClaudeProxyState, s
 				capabilities: null,
 				max_input_tokens: null,
 				max_tokens: null,
+				// Kodia: required by @anthropic-ai/sdk 1.x's ModelInfo; the Copilot catalog doesn't say
+				deprecated_at: null,
+				lifecycle: 'active',
+				line: null,
+				retires_at: null,
 			});
 		}
 

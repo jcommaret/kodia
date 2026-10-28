@@ -10232,7 +10232,7 @@ suite('ClaudeAgent — Phase 11 customizations', () => {
 		const sentContent = sdk.warmQueries.at(-1)?.produced?.drainedPrompts[0]?.message.content;
 		const sentPrompt = typeof sentContent === 'string'
 			? sentContent
-			: sentContent?.filter(block => block.type === 'text').map(block => block.text).join('\n');
+			: sentContent?.flatMap(block => block.type === 'text' && 'text' in block ? [block.text] : []).join('\n');
 		sdk.sessionMessagesById.set('side-1', [
 			...forkSourceMessages('side-1').slice(0, 2),
 			{ type: 'user', uuid: 'turn-side', session_id: 'side-1', parent_tool_use_id: null, parent_agent_id: null, message: { role: 'user', content: [{ type: 'text', text: 'side question' }] } },
@@ -10347,7 +10347,7 @@ suite('ClaudeAgent — Phase 11 customizations', () => {
 		const sentContent = sdk.warmQueries.at(-1)?.produced?.drainedPrompts[0]?.message.content;
 		const sentPrompt = typeof sentContent === 'string'
 			? sentContent
-			: sentContent?.filter(block => block.type === 'text').map(block => block.text).join('\n');
+			: sentContent?.flatMap(block => block.type === 'text' && 'text' in block ? [block.text] : []).join('\n');
 		sdk.sessionMessagesById.set('side-local-1', [
 			...forkSourceMessages('side-local-1').slice(0, 2),
 			{ type: 'user', uuid: 'turn-side-local', session_id: 'side-local-1', parent_tool_use_id: null, parent_agent_id: null, message: { role: 'user', content: [{ type: 'text', text: 'side question' }] } },

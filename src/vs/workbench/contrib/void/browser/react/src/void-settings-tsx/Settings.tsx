@@ -466,19 +466,27 @@ export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderN
 
 			const hasOverrides = !!settingsState.overridesOfModel?.[providerName]?.[modelName]
 
-			// Kodia: a line between OpenRouter's free models and the others
+			// Kodia: OpenRouter's free models under a "Free" heading, and a line between them and the others
 			const previous = i > 0 ? modelDump[i - 1] : undefined
-			const separator = !isNewProviderName && previous && isFreeOpenRouterModel(previous.providerName, previous.modelName) && !isFreeOpenRouterModel(providerName, modelName)
+			const isFree = isFreeOpenRouterModel(providerName, modelName)
+			const previousIsFree = !isNewProviderName && !!previous && isFreeOpenRouterModel(previous.providerName, previous.modelName)
+			const freeHeading = isFree && !previousIsFree
+				? <div className='flex items-center gap-4 pt-1 px-3'>
+					<span className='w-full max-w-32'>{isNewProviderName ? providerTitle : ''}</span>
+					<span className='text-xs text-void-fg-3'>Free</span>
+				</div>
+				: null
+			const separator = previousIsFree && !isFree
 				? <div className='my-1 mx-3 border-t border-void-border-2' />
 				: null
 
-			return <React.Fragment key={`${modelName}${providerName}`}>{separator}<div
+			return <React.Fragment key={`${modelName}${providerName}`}>{freeHeading}{separator}<div
 				className={`flex items-center justify-between gap-4 hover:bg-black/10 dark:hover:bg-gray-300/10 py-1 px-3 rounded-sm overflow-hidden cursor-default truncate group
 				`}
 			>
 				{/* left part is width:full */}
 				<div className={`flex flex-grow items-center gap-4`}>
-					<span className='w-full max-w-32'>{isNewProviderName ? providerTitle : ''}</span>
+					<span className='w-full max-w-32'>{isNewProviderName && !freeHeading ? providerTitle : ''}</span>
 					<span className='w-fit max-w-[400px] truncate'>{modelName}</span>
 				</div>
 

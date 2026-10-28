@@ -7,7 +7,7 @@ import assert from 'assert';
 import { deepClone } from '../../../../../base/common/objects.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { getModelCapabilities, setDetectedModelOptions } from '../../common/modelCapabilities.js';
-import { freeCodingModelsOfOpenRouter, OpenRouterModel } from '../../common/openRouterFreeModels.js';
+import { freeCodingModelsOfOpenRouter, mostUsedModelsOfOpenRouter, OpenRouterModel, stillListedModelsOfOpenRouter } from '../../common/openRouterModels.js';
 import { defaultOverridesOfModel, defaultSettingsOfProvider } from '../../common/voidSettingsTypes.js';
 
 const now = Date.parse('2026-10-27T12:00:00Z');
@@ -94,5 +94,32 @@ suite('Kodia - OpenRouter\'s free models', () => {
 			setDetectedModelOptions(defaultSettingsOfProvider);
 		}
 		assert.notStrictEqual(getModelCapabilities('openRouter', 'a/vision:free', undefined).contextWindow, 1_000_000);
+	});
+});
+
+suite('Kodia - OpenRouter\'s most used models', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	const paid = (id: string, changes: Partial<OpenRouterModel> = {}) => model(id, { pricing: { prompt: '0.000003', completion: '0.000015', input_cache_read: '0.0000003' }, ...changes });
+
+	test('the five most used that can run the agent, in order, without the default model', () => {
+		const byUsage = [
+			paid('deepseek/deepseek-v5-flash-1101'), paid('deepseek/deepseek-v5-flash'), // a snapshot counts for its model
+			paid('x-ai/grok-4.7'), // Kodia's default OpenRouter model
+			paid('a/image-maker', { architecture: { input_modalities: ['text'], output_modalities: ['image'] } }),
+			paid('a/no-tools', { supported_parameters: ['max_tokens'] }),
+			paid('a/one'), model('a/two:free'), paid('a/three'), paid('a/four'), paid('a/five'),
+		];
+		assert.deepStrictEqual(mostUsedModelsOfOpenRouter(byUsage, now, 5).map(m => m.modelName), ['deepseek/deepseek-v5-flash', 'a/one', 'a/two:free', 'a/three', 'a/four']);
+	});
+
+	test('their prices come from OpenRouter, per million tokens', () => {
+		const [{ capabilities }] = mostUsedModelsOfOpenRouter([paid('a/one')], now, 5);
+		assert.deepStrictEqual(capabilities.cost, { input: 3, output: 15, cache_read: 0.3 });
+	});
+
+	test('a model switched on stays while OpenRouter lists it and it can run the agent', () => {
+		const models = [paid('a/still'), paid('a/no-tools-now', { supported_parameters: [] })];
+		assert.deepStrictEqual(stillListedModelsOfOpenRouter(models, now, ['a/still', 'a/no-tools-now', 'a/gone']).map(m => m.modelName), ['a/still']);
 	});
 });

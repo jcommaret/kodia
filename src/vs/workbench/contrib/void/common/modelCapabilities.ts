@@ -75,7 +75,8 @@ export const defaultProviderSettings = {
 
 
 
-export const defaultModelsOfProvider = {
+// the models whose capabilities Kodia's catalog has (below); the tests and the weekly model check go through them all
+export const catalogModelsOfProvider = {
 	openAI: [ // https://platform.openai.com/docs/models
 		'gpt-6-astra',
 		'gpt-6.1-sol',
@@ -169,6 +170,28 @@ export const defaultModelsOfProvider = {
 
 
 } as const satisfies Record<ProviderName, string[]>
+
+// Kodia: the one model a provider's section has before its list of models is read, its most recent. The others come
+// from the provider's API (providerModels.ts), switched off, with their capabilities from the catalog
+export const defaultModelsOfProvider = {
+	openAI: ['gpt-6.1-sol'],
+	anthropic: ['claude-sonnet-5-5'],
+	xAI: ['grok-4.7'],
+	gemini: ['gemini-3.8-flash'],
+	deepseek: ['deepseek-flash'],
+	ollama: [],
+	vLLM: [],
+	lmStudio: [],
+	mlx: [],
+	openRouter: ['x-ai/grok-4.7'],
+	groq: ['qwen/qwen3.8-27b'],
+	mistral: ['mistral-large-4'],
+	openAICompatible: [],
+	googleVertex: [],
+	microsoftAzure: [],
+	awsBedrock: [],
+	liteLLM: [],
+} as const satisfies { [providerName in ProviderName]: typeof catalogModelsOfProvider[providerName][number][] }
 
 
 
@@ -2226,10 +2249,10 @@ const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProvi
 
 // ---------------- exports ----------------
 
-// Kodia: the models detected through a provider's API (OpenRouter's free models), with the capabilities the API gave.
-// They're saved with the provider's models in the settings, which every request carries to the main process: the
-// settings service sets them here in the renderer, and sendLLMMessage in the main process.
-let detectedModelOptions: { [providerName in ProviderName]?: { [modelName: string]: VoidStaticModelInfo } } = {};
+// Kodia: the models detected through a provider's API (OpenRouter's free models, the models missing from the catalog),
+// with the capabilities the API gave. They're saved with the provider's models in the settings, which every request
+// carries to the main process: the settings service sets them here in the renderer, and sendLLMMessage in the main process.
+let detectedModelOptions: { [providerName in ProviderName]?: { [modelName: string]: Partial<VoidStaticModelInfo> } } = {};
 export const setDetectedModelOptions = (settingsOfProvider: SettingsOfProvider) => {
 	const options: typeof detectedModelOptions = {};
 	for (const providerName of Object.keys(settingsOfProvider) as ProviderName[]) {
@@ -2266,10 +2289,11 @@ export const getModelCapabilities = (
 		}
 	}
 
-	// a model detected through the provider's API: what the API says, rather than a guess from its name
+	// a model detected through the provider's API: what the API says, over what its name tells
 	const detected = detectedModelOptions[providerName]?.[modelName];
 	if (detected) {
-		return { ...detected, ...overrides, modelName, recognizedModelName: modelName, isUnrecognizedModel: false };
+		const fromName = modelOptionsFallback(modelName) ?? { ...defaultModelOptions, supportsVision: looksLikeVisionModel(lowercaseModelName) };
+		return { ...fromName, ...detected, ...overrides, modelName, recognizedModelName: modelName, isUnrecognizedModel: false };
 	}
 
 	const result = modelOptionsFallback(modelName)

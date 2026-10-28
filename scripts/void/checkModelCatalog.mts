@@ -5,9 +5,9 @@
 
 // Compares Kodia's model catalog (src/vs/workbench/contrib/void/common/modelCapabilities.ts) with what the
 // providers publish, so retired models, context windows and prices that drifted show up without a manual review:
-// - OpenRouter's public model list (no key): Kodia's default OpenRouter models must exist there with the same
-//   context window and prices; native default models that OpenRouter also serves are compared for information;
-// - Mistral's model list, when MISTRAL_API_KEY is set: the default Mistral models must exist and not be deprecated.
+// - OpenRouter's public model list (no key): Kodia's catalog OpenRouter models must exist there with the same
+//   context window and prices; native catalog models that OpenRouter also serves are compared for information;
+// - Mistral's model list, when MISTRAL_API_KEY is set: the catalog Mistral models must exist and not be deprecated.
 //
 // Usage: node scripts/void/checkModelCatalog.mts
 // Prints a Markdown report (also to $GITHUB_STEP_SUMMARY) and exits 1 when something needs a look.
@@ -19,7 +19,7 @@ import * as path from 'path';
 type Cost = { input: number; output: number; cache_read?: number };
 type Capabilities = { contextWindow: number; cost: Cost; isUnrecognizedModel: boolean };
 type Catalog = {
-	defaultModelsOfProvider: Record<string, readonly string[]>;
+	catalogModelsOfProvider: Record<string, readonly string[]>;
 	getModelCapabilities: (providerName: string, modelName: string, overrides: undefined) => Capabilities;
 };
 
@@ -85,7 +85,7 @@ async function main() {
 
 	const openRouter = new Map((await fetchJson<{ data: OpenRouterModel[] }>('https://openrouter.ai/api/v1/models')).data.map(m => [m.id, m]));
 
-	for (const [providerName, modelNames] of Object.entries(catalog.defaultModelsOfProvider)) {
+	for (const [providerName, modelNames] of Object.entries(catalog.catalogModelsOfProvider)) {
 		for (const modelName of modelNames) {
 			const ours = catalog.getModelCapabilities(providerName, modelName, undefined);
 			if (providerName === 'openRouter') {
@@ -108,7 +108,7 @@ async function main() {
 	if (mistralKey) {
 		type MistralModel = { id: string; aliases?: string[]; deprecation?: string | null };
 		const models = (await fetchJson<{ data: MistralModel[] }>('https://api.mistral.ai/v1/models', { Authorization: `Bearer ${mistralKey}` })).data;
-		for (const modelName of catalog.defaultModelsOfProvider['mistral'] ?? []) {
+		for (const modelName of catalog.catalogModelsOfProvider['mistral'] ?? []) {
 			const model = models.find(m => m.id === modelName || m.aliases?.includes(modelName));
 			if (!model) {
 				needsLook.push(`mistral/${modelName}: not in Mistral's model list`);

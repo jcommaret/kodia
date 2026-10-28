@@ -12,6 +12,7 @@ import { EventLLMMessageOnTextParams, EventLLMMessageOnErrorParams, EventLLMMess
 import { sendLLMMessage } from './llmMessage/sendLLMMessage.js'
 import { IMetricsService } from '../common/metricsService.js';
 import { sendLLMMessageToProviderImplementation } from './llmMessage/sendLLMMessage.impl.js';
+import { listProviderModels } from './llmMessage/listProviderModels.js';
 
 // NODE IMPLEMENTATION - calls actual sendLLMMessage() and returns listeners to it
 
@@ -79,6 +80,10 @@ export class LLMMessageChannel implements IServerChannel {
 			}
 			else if (command === 'openAICompatibleList') {
 				this._callOpenAICompatibleList(params)
+			}
+			// Kodia: a cloud provider's list of models, with the user's key
+			else if (command === 'listProviderModels') {
+				return await listProviderModels(params.providerName, params.apiKey)
 			}
 			else {
 				throw new Error(`Kodia sendLLM: command "${command}" not recognized.`)

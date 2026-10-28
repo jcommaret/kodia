@@ -5,6 +5,7 @@
 
 import { EventLLMMessageOnTextParams, EventLLMMessageOnErrorParams, EventLLMMessageOnFinalMessageParams, ServiceSendLLMMessageParams, MainSendLLMMessageParams, MainLLMMessageAbortParams, ServiceModelListParams, EventModelListOnSuccessParams, EventModelListOnErrorParams, MainModelListParams, OllamaModelResponse, OpenaiCompatibleModelResponse, } from './sendLLMMessageTypes.js';
 import { ModelSelection } from './voidSettingsTypes.js';
+import { ListableProviderName } from './providerModels.js';
 
 import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
@@ -25,6 +26,8 @@ export interface ILLMMessageService {
 	abort: (requestId: string) => void;
 	ollamaList: (params: ServiceModelListParams<OllamaModelResponse>) => void;
 	openAICompatibleList: (params: ServiceModelListParams<OpenaiCompatibleModelResponse>) => void;
+	// Kodia: a cloud provider's list of models, as its API returns it. Undefined when the provider can't be reached or refuses the key
+	listProviderModels: (providerName: ListableProviderName, apiKey: string) => Promise<unknown[] | undefined>;
 }
 
 
@@ -191,6 +194,11 @@ export class LLMMessageService extends Disposable implements ILLMMessageService 
 			settingsOfProvider,
 			requestId: requestId_,
 		} satisfies MainModelListParams<OpenaiCompatibleModelResponse>)
+	}
+
+	listProviderModels = async (providerName: ListableProviderName, apiKey: string): Promise<unknown[] | undefined> => {
+		const models: unknown = await this.channel.call('listProviderModels', { providerName, apiKey })
+		return Array.isArray(models) ? models : undefined
 	}
 
 	private _clearChannelHooks(requestId: string) {

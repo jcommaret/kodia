@@ -22,7 +22,7 @@ import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGramma
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
-import { KODIA_SITE_URL } from '../../common/kodiaLinks.js';
+import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
 import { createHash } from 'crypto';
 
 const getGoogleApiKey = async () => {
@@ -163,7 +163,7 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 			apiKey: thisConfig.apiKey,
 			// Kodia's app on OpenRouter (rankings, marketplace), in its coding categories — https://openrouter.ai/docs/app-attribution
 			defaultHeaders: {
-				'HTTP-Referer': KODIA_SITE_URL, // the app's identifier; OpenRouter shows this page's icon
+				'HTTP-Referer': KODIA_REPO_URL, // the app's identifier
 				'X-OpenRouter-Title': 'Kodia',
 				'X-OpenRouter-Categories': 'ide-extension,programming-app', // at most 2 per request
 			},

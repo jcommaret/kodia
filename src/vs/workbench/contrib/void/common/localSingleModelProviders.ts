@@ -41,14 +41,6 @@ export const canonicalModelNameForProvider = (providerName: ProviderName, modelN
 		if (lower === 'glm-5.2' || lower === 'glm-5-2' || lower === 'glm-5.2-latest') return 'zai-glm-5-2'
 	}
 
-	if (providerName === 'gemini') {
-		if (lower.includes('preview') || lower.includes('-exp-') || lower.includes('2.0') || lower.includes('1.5')) {
-			if (lower.includes('pro')) return 'gemini-2.5-pro'
-			if (lower.includes('flash-lite') || lower.includes('flash_lite')) return 'gemini-2.5-flash-lite'
-			return 'gemini-2.5-flash'
-		}
-	}
-
 	return modelName
 }
 

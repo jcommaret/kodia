@@ -27,7 +27,8 @@ type AnthropicModel = {
 		thinking?: { supported?: boolean; types?: { adaptive?: { supported?: boolean }; disabled?: { supported?: boolean } } };
 	} | null;
 };
-type OpenAIModel = { id: string };
+// shutdown_date: set once the model is deprecated — https://developers.openai.com/api/docs/deprecations
+type OpenAIModel = { id: string; shutdown_date?: string | null };
 type GeminiModel = { name: string; supportedGenerationMethods?: string[]; inputTokenLimit?: number; outputTokenLimit?: number; thinking?: boolean };
 type MistralModel = {
 	id: string;
@@ -42,13 +43,24 @@ type XAIModel = { id: string; aliases?: string[]; input_modalities?: string[]; o
 type GroqModel = { id: string; active?: boolean; context_window?: number; max_completion_tokens?: number };
 type DeepSeekModel = { id: string; context_window?: number; max_output_tokens?: number; input_modalities?: string[] };
 
-// what isn't a chat model, by name: these lists mix in embeddings, images, audio, moderation...
+// what isn't a chat model, by name: these lists mix in embeddings, images, voice, moderation...
 const notChatModel: { [providerName in ListableProviderName]?: RegExp } = {
 	// besides Kodia's chat completions, OpenAI has models only the Responses API serves (codex, -pro, deep research)
-	openAI: /embedding|whisper|tts|transcribe|dall-e|image|realtime|audio|search|moderation|instruct|computer-use|deep-research|sora|codex|davinci|babbage|-pro\b/,
+	openAI: /embedding|whisper|tts|transcribe|dall-e|image|realtime|audio|live|voice|speech|search|moderation|instruct|computer-use|deep-research|sora|codex|davinci|babbage|-pro\b/,
 	// Gemma on the Gemini API has neither tools nor a system message
-	gemini: /embedding|imagen|veo|tts|image|audio|live|aqa|gemma|robotics|learnlm|computer-use/,
-	groq: /whisper|tts|orpheus|guard|safeguard/,
+	gemini: /embedding|imagen|veo|tts|image|audio|live|voice|aqa|gemma|robotics|learnlm|computer-use/,
+	groq: /whisper|tts|orpheus|voice|speech|guard|safeguard/,
+	// Voxtral is voice, Leanstral writes Lean proofs
+	mistral: /voxtral|leanstral|ocr|embed|moderation|shieldstral|timestral/,
+	xAI: /voice|tts|speech|transcri/,
+};
+
+// what Kodia no longer offers though the API still lists it: Gemini 1 and 2; 3.7 and 3.5 Flash, whose requests Google
+// serves with 3.8 and 3.6 Flash; 3.1 Flash-Lite, deprecated; DeepSeek's retired V4 Flash, served by deepseek-flash.
+// https://ai.google.dev/gemini-api/docs/deprecations, https://api-docs.deepseek.com/quick_start/pricing
+const notOfferedModel: { [providerName in ListableProviderName]?: RegExp } = {
+	gemini: /^gemini-[12]\.|^gemini-3\.[57]-flash(?!-lite)|^gemini-3\.1-flash-lite/,
+	deepseek: /^deepseek-v4-flash/,
 };
 
 const positive = (n: number | null | undefined) => typeof n === 'number' && n > 0 ? n : undefined;
@@ -186,7 +198,7 @@ export const detectedModelsOfProvider = (providerName: ListableProviderName, res
 	const withName = models.filter(m => typeof (providerName === 'gemini' ? m.name : m.id) === 'string');
 	const detected =
 		providerName === 'anthropic' ? anthropicModels(withName as AnthropicModel[])
-			: providerName === 'openAI' ? (withName as OpenAIModel[]).map(m => ({ modelName: m.id }))
+			: providerName === 'openAI' ? (withName as OpenAIModel[]).filter(m => !m.shutdown_date).map(m => ({ modelName: m.id }))
 				: providerName === 'gemini' ? geminiModels(withName as GeminiModel[])
 					: providerName === 'mistral' ? mistralModels(withName as MistralModel[])
 						: providerName === 'xAI' ? xAIModels(withName as XAIModel[])
@@ -194,11 +206,12 @@ export const detectedModelsOfProvider = (providerName: ListableProviderName, res
 								: deepseekModels(withName as DeepSeekModel[]);
 
 	const notChat = notChatModel[providerName];
+	const notOffered = notOfferedModel[providerName];
 	const catalog = new Map((catalogModelsOfProvider[providerName] as readonly string[]).map(m => [m.toLowerCase(), m]));
 	const kept = new Map<string, DetectedModel>();
 	for (const model of detected) {
 		const lower = model.modelName.toLowerCase();
-		if (notChat?.test(lower)) continue;
+		if (notChat?.test(lower) || notOffered?.test(lower)) continue;
 		const modelName = catalog.get(lower) ?? catalog.get(withoutSnapshotSuffix(lower)) ?? model.modelName;
 		if (isDefaultModel(providerName, modelName) || kept.has(modelName)) continue;
 		kept.set(modelName, { ...model, modelName });

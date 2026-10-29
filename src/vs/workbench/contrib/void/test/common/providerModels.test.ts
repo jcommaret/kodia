@@ -49,6 +49,30 @@ suite('Kodia - models listed by the providers\' APIs', () => {
 		assert.deepStrictEqual(names(detectedModelsOfProvider('xAI', xAI)), ['grok-5']);
 	});
 
+	test('leaves out voice models and Leanstral', () => {
+		const openAI = ['gpt-live-1', 'gpt-live-transcribe', 'gpt-voice-2', 'gpt-7'].map(id => ({ id }));
+		assert.deepStrictEqual(names(detectedModelsOfProvider('openAI', openAI)), ['gpt-7']);
+
+		const chat = { completion_chat: true };
+		const mistral = [{ id: 'voxtral-small-latest', capabilities: chat }, { id: 'voxtral-mini-transcribe-3', capabilities: chat }, { id: 'labs-leanstral-2-0', capabilities: chat }, { id: 'magistral-large-latest', capabilities: chat }];
+		assert.deepStrictEqual(names(detectedModelsOfProvider('mistral', mistral)), ['magistral-large-latest']);
+
+		const xAI = [{ id: 'grok-voice-3.0' }, { id: 'grok-5' }];
+		assert.deepStrictEqual(names(detectedModelsOfProvider('xAI', xAI)), ['grok-5']);
+	});
+
+	test('leaves out the models Kodia no longer offers', () => {
+		const gemini = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash-001', 'gemini-1.5-pro', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-4-flash']
+			.map(name => ({ name: `models/${name}`, supportedGenerationMethods: ['generateContent'] }));
+		assert.deepStrictEqual(names(detectedModelsOfProvider('gemini', gemini)), ['gemini-3.1-pro-preview', 'gemini-3.5-flash-lite', 'gemini-4-flash']);
+
+		// OpenAI sets a shutdown date once a model is deprecated
+		const openAI = [{ id: 'gpt-5.4-nano', shutdown_date: '2027-04-01' }, { id: 'gpt-7', shutdown_date: null }];
+		assert.deepStrictEqual(names(detectedModelsOfProvider('openAI', openAI)), ['gpt-7']);
+
+		assert.deepStrictEqual(names(detectedModelsOfProvider('deepseek', [{ id: 'deepseek-v4-flash' }, { id: 'deepseek-v5' }])), ['deepseek-v5']);
+	});
+
 	test('Anthropic: context, output, images, PDFs and adaptive thinking, from the API', () => {
 		const [model, ...rest] = detectedModelsOfProvider('anthropic', [
 			{
@@ -105,7 +129,7 @@ suite('Kodia - models listed by the providers\' APIs', () => {
 		assert.deepStrictEqual(mostUsedModelNames('anthropic', ['claude-sonnet-5-5', 'claude-fable-5-1', 'claude-haiku-5-5', 'claude-opus-5-5'], byUsage, 5), ['claude-opus-5-5', 'claude-haiku-5-5', 'claude-sonnet-5-5']);
 		assert.deepStrictEqual(mostUsedModelNames('anthropic', ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5-5'], byUsage, 2), ['claude-opus-5-5', 'claude-haiku-5-5']);
 		// Groq serves other authors' models; Mistral's -0
-		assert.deepStrictEqual(mostUsedModelNames('groq', ['llama-3.3-70b-versatile', 'qwen/qwen3.8-27b'], byUsage, 5), ['qwen/qwen3.8-27b']);
+		assert.deepStrictEqual(mostUsedModelNames('groq', ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b'], byUsage, 5), ['qwen/qwen3.8-27b']);
 		assert.deepStrictEqual(mostUsedModelNames('mistral', ['mistral-large-4'], byUsage, 5), ['mistral-large-4']);
 	});
 

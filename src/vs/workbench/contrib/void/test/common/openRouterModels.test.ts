@@ -32,6 +32,7 @@ suite('Kodia - OpenRouter\'s free models', () => {
 			model('a/vision:free', { architecture: { input_modalities: ['text', 'image', 'video'], output_modalities: ['text'] } }),
 			model('a/paid', { pricing: { prompt: '0.0000002', completion: '0.000001' } }),
 			model('a/music', { architecture: { input_modalities: ['text', 'image'], output_modalities: ['text', 'audio'] } }),
+			model('mistralai/voxtral-small:free', { architecture: { input_modalities: ['text', 'audio'], output_modalities: ['text'] } }),
 			model('a/no-tools:free', { supported_parameters: ['max_tokens', 'reasoning'] }),
 			model('a/small-output:free', { top_provider: { max_completion_tokens: 8_192 } }),
 			model('a/small-context:free', { context_length: 16_384 }),

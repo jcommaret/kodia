@@ -48,6 +48,35 @@ suite('Kodia - model capabilities', () => {
 		}
 	});
 
+	test('a retired or deprecated model a user still has goes to the provider\'s replacement', () => {
+		const cases: [ProviderName, string, string][] = [
+			['anthropic', 'claude-3-7-sonnet-20250219', 'claude-sonnet-5-5'],
+			['anthropic', 'claude-sonnet-4-5-20250929', 'claude-sonnet-5-5'],
+			['openAI', 'gpt-5.4-nano', 'gpt-6-luna'],
+			['gemini', 'gemini-2.5-pro', 'gemini-3.1-pro-preview'],
+			['gemini', 'gemini-2.5-flash', 'gemini-3.6-flash'],
+			['gemini', 'gemini-2.5-flash-lite', 'gemini-3.5-flash-lite'],
+			['gemini', 'gemini-3.7-flash', 'gemini-3.8-flash'],
+			['gemini', 'gemini-3.5-flash', 'gemini-3.6-flash'],
+			['gemini', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'],
+			['mistral', 'zai-glm-5-2', 'zai-glm-5-3'],
+			['groq', 'qwen/qwen3.6-27b', 'qwen/qwen3.8-27b'],
+			['groq', 'qwen/qwen3-32b', 'qwen/qwen3.8-27b'],
+			['groq', 'llama-3.3-70b-versatile', 'openai/gpt-oss-120b'],
+			['groq', 'llama-3.1-8b-instant', 'openai/gpt-oss-20b'],
+			['deepseek', 'deepseek-v4-flash', 'deepseek-flash'],
+		];
+		for (const [providerName, modelName, replacement] of cases) {
+			const capabilities = getModelCapabilities(providerName, modelName, undefined);
+			assert.strictEqual(capabilities.isUnrecognizedModel, false, `${providerName}/${modelName}`);
+			// the request goes to the replacement, with its capabilities
+			assert.strictEqual(capabilities.modelName, replacement, `${providerName}/${modelName}`);
+			assert.strictEqual(capabilities.recognizedModelName, replacement, `${providerName}/${modelName}`);
+		}
+		// retired with no replacement: unrecognized, so Groq's error says the model is gone
+		assert.strictEqual(getModelCapabilities('groq', 'groq/compound', undefined).isUnrecognizedModel, true);
+	});
+
 	test('each provider has one default model, from the catalog', () => {
 		for (const [providerName, modelNames] of Object.entries(defaultModelsOfProvider) as [ProviderName, readonly string[]][]) {
 			assert.ok(modelNames.length <= 1, `${providerName} has ${modelNames.length} default models`);
@@ -95,8 +124,9 @@ suite('Kodia - model capabilities', () => {
 			['openRouter', 'anthropic/claude-opus-9', true],
 			['openRouter', 'google/gemini-4-pro', true],
 			['openRouter', 'meta-llama/llama-3.3-70b-instruct', false],
+			// retired, served by deepseek-flash, which reads images
 			['deepseek', 'deepseek-v4-flash-vision-exp', true],
-			['deepseek', 'deepseek-v4-flash', false],
+			['deepseek', 'deepseek-v4-flash', true],
 		];
 		for (const [providerName, modelName, expected] of cases) {
 			assert.strictEqual(!!getModelCapabilities(providerName, modelName, undefined).supportsVision, expected, `${providerName}/${modelName}`);

@@ -38,6 +38,9 @@ jobs:
       # npm ci fails when a package-lock.json is out of sync with its package.json
       - name: Install dependencies
         run: npm ci
+        env:
+          # @vscode/ripgrep's postinstall calls the GitHub API, which rate-limits anonymous runners (403)
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Lint Kodia (errors only)
         run: npx eslint --quiet src/vs/workbench/contrib/void --ignore-pattern '**/react/src2/**' --ignore-pattern '**/react/out/**'

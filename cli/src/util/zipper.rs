@@ -24,7 +24,7 @@ fn should_skip_first_segment(archive: &mut ZipArchive<File>) -> bool {
 			.by_index_raw(0)
 			.expect("expected not to have an empty archive");
 
-		// Kodia: zip 2 returns an owned PathBuf, kept in a binding so the first segment can borrow it
+		// Kodia: since zip 2, enclosed_name() returns an owned PathBuf, kept in a binding so the first segment can borrow it
 		let path = file.enclosed_name().expect("expected to have path");
 
 		path.iter()
@@ -73,8 +73,9 @@ where
 				// their single segment has been stripped. Only directory entries
 				// are skipped; non-directory entries with an empty relative path
 				// fall through to `safe_extract_join`, which rejects them.
+				// Kodia: zip 9's name() fails only on names enclosed_name() already rejected
 				if relative.as_os_str().is_empty()
-					&& (file.is_dir() || file.name().ends_with('/'))
+					&& (file.is_dir() || file.name().is_ok_and(|name| name.ends_with('/')))
 				{
 					continue;
 				}
@@ -83,7 +84,8 @@ where
 			None => continue,
 		};
 
-		if file.is_dir() || file.name().ends_with('/') {
+		// Kodia: see above for name()
+		if file.is_dir() || file.name().is_ok_and(|name| name.ends_with('/')) {
 			fs::create_dir_all(&outpath)
 				.map_err(|e| wrap(e, format!("could not create dir for {}", outpath.display())))?;
 			ensure_canonical_within_root(&canonical_root, &outpath)?;
@@ -134,7 +136,7 @@ where
 				format!(
 					"unable to open file to write {} (from {:?})",
 					outpath.display(),
-					// Kodia: zip 2 returns an owned PathBuf, so the name is copied out of the closure
+					// Kodia: since zip 2, enclosed_name() returns an owned PathBuf, so the name is copied out of the closure
 					file.enclosed_name()
 						.map(|p| p.to_string_lossy().into_owned()),
 				),
@@ -152,7 +154,7 @@ where
 	Ok(())
 }
 
-// Kodia: zip 2's ZipFile is generic over the archive's reader
+// Kodia: since zip 2, ZipFile is generic over the archive's reader
 #[cfg(unix)]
 fn apply_permissions(file: &ZipFile<'_, File>, outpath: &Path) -> Result<(), WrappedError> {
 	use std::os::unix::fs::PermissionsExt;

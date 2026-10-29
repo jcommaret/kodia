@@ -161,9 +161,11 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 		return new OpenAI({
 			baseURL: 'https://openrouter.ai/api/v1',
 			apiKey: thisConfig.apiKey,
+			// Kodia's app on OpenRouter (rankings, marketplace), in its coding categories — https://openrouter.ai/docs/app-attribution
 			defaultHeaders: {
-				'HTTP-Referer': KODIA_REPO_URL, // Optional, for including your app on openrouter.ai rankings.
-				'X-Title': 'Kodia', // Optional. Shows in rankings on openrouter.ai.
+				'HTTP-Referer': KODIA_REPO_URL, // the app's identifier
+				'X-OpenRouter-Title': 'Kodia',
+				'X-OpenRouter-Categories': 'ide-extension,programming-app', // at most 2 per request
 			},
 			...commonPayloadOpts,
 		})

@@ -24,14 +24,13 @@ fn should_skip_first_segment(archive: &mut ZipArchive<File>) -> bool {
 			.by_index_raw(0)
 			.expect("expected not to have an empty archive");
 
-		let path = file
-			.enclosed_name()
-			.expect("expected to have path")
-			.iter()
-			.next()
-			.expect("expected to have non-empty name");
+		// Kodia: zip 2 returns an owned PathBuf, kept in a binding so the first segment can borrow it
+		let path = file.enclosed_name().expect("expected to have path");
 
-		path.to_owned()
+		path.iter()
+			.next()
+			.expect("expected to have non-empty name")
+			.to_owned()
 	};
 
 	for i in 1..archive.len() {
@@ -135,7 +134,9 @@ where
 				format!(
 					"unable to open file to write {} (from {:?})",
 					outpath.display(),
-					file.enclosed_name().map(|p| p.to_string_lossy()),
+					// Kodia: zip 2 returns an owned PathBuf, so the name is copied out of the closure
+					file.enclosed_name()
+						.map(|p| p.to_string_lossy().into_owned()),
 				),
 			)
 		})?;
@@ -151,8 +152,9 @@ where
 	Ok(())
 }
 
+// Kodia: zip 2's ZipFile is generic over the archive's reader
 #[cfg(unix)]
-fn apply_permissions(file: &ZipFile, outpath: &Path) -> Result<(), WrappedError> {
+fn apply_permissions(file: &ZipFile<'_, File>, outpath: &Path) -> Result<(), WrappedError> {
 	use std::os::unix::fs::PermissionsExt;
 
 	if let Some(mode) = file.unix_mode() {
@@ -168,6 +170,6 @@ fn apply_permissions(file: &ZipFile, outpath: &Path) -> Result<(), WrappedError>
 }
 
 #[cfg(windows)]
-fn apply_permissions(_file: &ZipFile, _outpath: &Path) -> Result<(), WrappedError> {
+fn apply_permissions(_file: &ZipFile<'_, File>, _outpath: &Path) -> Result<(), WrappedError> {
 	Ok(())
 }

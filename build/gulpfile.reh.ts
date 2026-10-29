@@ -31,7 +31,7 @@ import log from 'fancy-log';
 import { runEsbuildBundle, getBootstrapEntryPointsForTarget } from './lib/esbuild.ts';
 import { fetchUrls } from './lib/fetch.ts';
 import { downloadFeedPackage } from './lib/azureFeed.ts';
-import { ensureCopilotPlatformPackage, getCopilotExcludeFilter, getCopilotRuntimePrebuildFiles, getCopilotTgrepExcludeFilter, getMxcExcludeFilter, getRipgrepExcludeFilter } from './lib/copilot.ts';
+import { getCopilotExcludeFilter, getCopilotTgrepExcludeFilter, getMxcExcludeFilter, getRipgrepExcludeFilter } from './lib/copilot.ts';
 import { readAgentSdkResults } from './agent-sdk/common.ts';
 
 
@@ -377,9 +377,10 @@ function packageTask(type: string, platform: string, arch: string, sourceFolderN
 			.pipe(filter(['**', '!**/package-lock.json', '!**/*.{js,css}.map']))
 			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, '.moduleignore')))
 			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, `.moduleignore.${process.platform}`)));
-		ensureCopilotPlatformPackage(platform, arch, 'remote/node_modules');
-		const copilotRuntimePrebuilds = gulp.src(getCopilotRuntimePrebuildFiles(platform, arch, 'remote/node_modules'), { base: 'remote', dot: true, allowEmpty: true });
-		const deps = es.merge(cleanedDeps, copilotRuntimePrebuilds)
+		// Kodia: no Copilot agent (agentHostServerMain.ts does not register it), so the Copilot SDK
+		// runtime is not packaged: .moduleignore strips @github/copilot-sdk, and its platform package
+		// is no longer re-added here.
+		const deps = cleanedDeps
 			.pipe(filter(getCopilotExcludeFilter(platform, arch)))
 			.pipe(filter(getCopilotTgrepExcludeFilter(platform, arch)))
 			.pipe(filter(getRipgrepExcludeFilter(platform, arch)))

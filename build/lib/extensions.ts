@@ -317,6 +317,10 @@ const nativeExtensions = [
 
 export const excludedExtensions = [
 	'copilot',
+	// Kodia: no built-in feature signs in with Microsoft (product.json has no configurationSync,
+	// editSessions or tunnelApplicationConfig), so the extension and its MSAL broker are not shipped.
+	// The folder stays so upstream merges do not conflict.
+	'microsoft-authentication',
 	'vscode-api-tests',
 	'vscode-colorize-tests',
 	'vscode-colorize-perf-tests',

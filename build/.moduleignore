@@ -276,3 +276,8 @@ koffi/**
 # in websocket's browser.js inside a try/catch with a globalThis fallback,
 # so it is unnecessary in the browsers/runtimes VS Code supports.
 es5-ext/**
+
+# Kodia: no Copilot agent ships (agentHostMain.ts registers only the Kodia agent), so the
+# Copilot SDK is not packaged either; gulpfile.vscode.ts and gulpfile.reh.ts no longer
+# re-add its platform package. It stays a dependency because tsc -p src needs its types.
+@github/copilot-sdk/**

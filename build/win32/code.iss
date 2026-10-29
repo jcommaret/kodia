@@ -113,6 +113,9 @@ Source: "appx\{#AppxPackageDll}"; DestDir: "{code:GetDestDir}\{#VersionedResourc
 Name: "{group}\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; AppUserModelID: "{#AppUserId}"; Check: ShouldUpdateShortcut(ExpandConstant('{group}\{#NameLong}.lnk'))
 Name: "{autodesktop}\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; Tasks: desktopicon; AppUserModelID: "{#AppUserId}"; Check: ShouldUpdateShortcut(ExpandConstant('{autodesktop}\{#NameLong}.lnk'))
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; Tasks: quicklaunchicon; AppUserModelID: "{#AppUserId}"; Check: ShouldUpdateShortcut(ExpandConstant('{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#NameLong}.lnk'))
+; Kodia: shortcuts of the previous install replaced by RemoveLegacyInstall, with the new AppUserModelID
+Name: "{autodesktop}\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; AppUserModelID: "{#AppUserId}"; Check: ShouldRestoreLegacyDesktopShortcut
+Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; AppUserModelID: "{#AppUserId}"; Check: IsLegacyTaskbarPin(ExpandConstant('{userappdata}\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\{#NameLong}.lnk'))
 
 [Run]
 Filename: "{app}\{#ExeBasename}.exe"; Parameters: "{code:GetRelaunchArgs}"; Description: "{cm:LaunchProgram,{#NameLong}}"; Tasks: runcode; Flags: nowait postinstall; Check: ShouldRunAfterUpdate; AfterInstall: DeleteRelaunchArgsFile
@@ -1356,9 +1359,43 @@ begin
     DeleteFile(ArgsFile);
 end;
 
-function IsBackgroundUpdate(): Boolean;
+// Kodia: up to 2.6.4, Kodia was installed under Void's AppId and its app held Void's mutex, see FindLegacyInstall
+#if Quality == "stable"
+  #if "user" == InstallTarget
+    #if "arm64" == Arch
+      #define LegacyAppId "{F6C87466-BC82-4A8F-B0FF-18CA366BA4D8}"
+    #else
+      #define LegacyAppId "{8BED5DC1-6C55-46E6-9FE6-18F7E6F7C7F1}"
+    #endif
+  #else
+    #if "arm64" == Arch
+      #define LegacyAppId "{0668DD58-2BDE-4101-8CDA-40252DF8875D}"
+    #else
+      #define LegacyAppId "{9D394D01-1728-45A7-B997-A6C82C5452C3}"
+    #endif
+  #endif
+#endif
+#define LegacyAppMutex "void"
+
+var
+  // Kodia: uninstall entry of the previous Kodia install to replace, '' if there is none
+  LegacyRootKey: Integer;
+  LegacyUninstallKey: String;
+  LegacyAppDir: String;
+  LegacyDesktopShortcut: Boolean;
+  LegacyInstallRemoved: Boolean;
+  SeededUninstallKey: String;
+
+// Kodia: VS Code started this setup to update itself
+function IsUpdateRequested(): Boolean;
 begin
   Result := ExpandConstant('{param:update|false}') <> 'false';
+end;
+
+function IsBackgroundUpdate(): Boolean;
+begin
+  // Kodia: once RemoveLegacyInstall has removed the previous install, an update installs in place like a normal setup
+  Result := IsUpdateRequested() and not LegacyInstallRemoved;
 end;
 
 function IsNotBackgroundUpdate(): Boolean;
@@ -1371,6 +1408,200 @@ begin
   Result := '{#VersionedResourcesFolder}' <> '';
 end;
 
+// Kodia: copies a value Inno reads from this AppId's uninstall key to reuse the previous install's settings
+procedure CopyLegacyValue(Name: String);
+var
+  Value: String;
+begin
+  if RegQueryStringValue(LegacyRootKey, LegacyUninstallKey, Name, Value) then
+    RegWriteStringValue(HKA64, SeededUninstallKey, Name, Value);
+end;
+
+// Kodia: Kodia used Void's AppId up to 2.6.4. Finds that install, unless the entry is Void's own, so that
+// RemoveLegacyInstall replaces it with this one, under Kodia's AppId, as for an upgrade: same folder, Start menu
+// group and tasks.
+procedure FindLegacyInstall();
+var
+  Key, DisplayName: String;
+begin
+#ifdef LegacyAppId
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#LegacyAppId}_is1';
+  if RegKeyExists(HKA64, Key) then
+    LegacyRootKey := HKA64
+  else if RegKeyExists(HKA32, Key) then
+    LegacyRootKey := HKA32
+  else
+    exit;
+
+  RegQueryStringValue(LegacyRootKey, Key, 'DisplayName', DisplayName);
+  if Pos('kodia', Lowercase(DisplayName)) <> 1 then begin
+    Log('Leaving the install of ' + DisplayName + ' under ' + Key + ' alone');
+    exit;
+  end;
+
+  LegacyUninstallKey := Key;
+  RegQueryStringValue(LegacyRootKey, Key, 'Inno Setup: App Path', LegacyAppDir);
+  Log('Found the previous Kodia install to replace in ' + LegacyAppDir);
+
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + copy('{#AppId}', 2, 38) + '_is1';
+  if not RegKeyExists(HKA64, Key) then begin
+    SeededUninstallKey := Key;
+    CopyLegacyValue('Inno Setup: App Path');
+    CopyLegacyValue('Inno Setup: Icon Group');
+    CopyLegacyValue('Inno Setup: Selected Tasks');
+    CopyLegacyValue('Inno Setup: Deselected Tasks');
+  end;
+#endif
+end;
+
+// Kodia: counts the running processes whose executable is under PathPrefix and named FileName (either may be empty),
+// stopping them if Kill is set
+function CountProcesses(PathPrefix, FileName: String; Kill: Boolean): Integer;
+var
+  Locator, Services, Processes, Process: Variant;
+  I, Count, ProcessId, ResultCode: Integer;
+  Path: String;
+begin
+  Result := 0;
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Services := Locator.ConnectServer('.', 'root\CIMV2');
+    Processes := Services.ExecQuery('SELECT ProcessId, ExecutablePath FROM Win32_Process');
+    Count := Processes.Count;
+    for I := 0 to Count - 1 do begin
+      Process := Processes.ItemIndex(I);
+      if not VarIsNull(Process.ExecutablePath) then begin
+        Path := Process.ExecutablePath;
+        if ((PathPrefix = '') or (Pos(Lowercase(PathPrefix), Lowercase(Path)) = 1))
+          and ((FileName = '') or (CompareText(ExtractFileName(Path), FileName) = 0)) then begin
+          Result := Result + 1;
+          if Kill then begin
+            ProcessId := Process.ProcessId;
+            Log('Stopping ' + Path + ' (' + IntToStr(ProcessId) + ')');
+            Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /PID ' + IntToStr(ProcessId), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+          end;
+        end;
+      end;
+    end;
+  except
+    Log('Unable to list processes: ' + GetExceptionMessage());
+  end;
+end;
+
+// Kodia: waits up to Seconds for those processes to exit, then stops them if Kill is set
+procedure WaitForProcesses(PathPrefix, FileName: String; Seconds: Integer; Kill: Boolean);
+var
+  WaitCounter: Integer;
+begin
+  WaitCounter := Seconds * 2;
+  while (WaitCounter > 0) and (CountProcesses(PathPrefix, FileName, False) > 0) do begin
+    Sleep(500);
+    WaitCounter := WaitCounter - 1;
+  end;
+  if Kill and (CountProcesses(PathPrefix, FileName, True) > 0) then
+    Sleep(1000);
+end;
+
+// Kodia: removes the previous Kodia install found by FindLegacyInstall before this one goes in its folder: left as a
+// second entry in Apps & features, uninstalling it would delete this install's files. Called from PrepareToInstall,
+// returning why Setup must stop, or for a background update from CurStepChanged(ssInstall), where Abort exits quietly
+// (the app runs it /verysilent, without /suppressmsgboxes).
+function RemoveLegacyInstall(): String;
+var
+  Uninstaller: String;
+  ResultCode: Integer;
+begin
+  Result := '';
+
+  if IsBackgroundUpdate() then begin
+    // The running app waits for its -ready mutex to offer a restart. This update can't be staged next to the
+    // previous install, whose uninstaller would delete it, so signal ready now and install once the app has quit.
+    CreateMutex('{#AppMutex}-ready');
+    CreateMutex('{#LegacyAppMutex}-ready');
+    Log('Waiting for the application to quit before replacing the previous Kodia install');
+    while CheckForMutexes('{#AppMutex},{#LegacyAppMutex}') do begin
+      if FileExists(ExpandConstant('{param:cancel}')) then begin
+        Log('Cancel file detected, aborting background update.');
+        Abort;
+      end;
+      Sleep(1000);
+    end;
+    if FileExists(ExpandConstant('{param:sessionend}')) then begin
+      Log('OS session is ending, aborting background update.');
+      Abort;
+    end;
+  end else begin
+    // As AppMutex does for the new mutex. Not in AppMutex, which this install's uninstaller would keep checking.
+    while CheckForMutexes('{#LegacyAppMutex}') do
+      if SuppressibleMsgBox(FmtMessage(SetupMessage(msgSetupAppRunningError), ['{#NameLong}']), mbError, MB_OKCANCEL, IDCANCEL) <> IDOK then begin
+        Result := 'Close {#NameLong} and run Setup again.';
+        exit;
+      end;
+  end;
+
+  // The application releases its mutex before all of its processes are gone
+  WaitForProcesses(AddBackslash(LegacyAppDir), '', 10, True);
+  LegacyDesktopShortcut := FileExists(ExpandConstant('{autodesktop}\{#NameLong}.lnk'));
+
+  if RegQueryStringValue(LegacyRootKey, LegacyUninstallKey, 'UninstallString', Uninstaller) then
+    Uninstaller := RemoveQuotes(Uninstaller);
+  if (Uninstaller <> '') and FileExists(Uninstaller) then begin
+    Log('Uninstalling the previous Kodia install with ' + Uninstaller);
+    Exec(Uninstaller, '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('The previous Kodia uninstaller exited with code ' + IntToStr(ResultCode));
+    // Its second phase, a temporary copy, keeps going after this one exits and removes {app}\bin from PATH again
+    WaitForProcesses('', '_unins.tmp', 10, False);
+  end;
+
+  if RegKeyExists(LegacyRootKey, LegacyUninstallKey) then begin
+    // This install takes over the files: an entry left behind would delete them when uninstalled
+    Log('The previous Kodia install is still registered, removing its uninstall entry');
+    RegDeleteKeyIncludingSubkeys(LegacyRootKey, LegacyUninstallKey);
+    if Uninstaller <> '' then begin
+      DeleteFile(Uninstaller);
+      DeleteFile(ChangeFileExt(Uninstaller, '.dat'));
+      DeleteFile(ChangeFileExt(Uninstaller, '.msg'));
+    end;
+  end;
+
+  LegacyInstallRemoved := True;
+end;
+
+// Kodia: RemoveLegacyInstall deletes the previous install's desktop shortcut, which an update does not recreate
+// (/mergetasks=!desktopicon)
+function ShouldRestoreLegacyDesktopShortcut(): Boolean;
+begin
+  Result := LegacyDesktopShortcut and not FileExists(ExpandConstant('{autodesktop}\{#NameLong}.lnk'));
+end;
+
+// Kodia: whether Path pins the previous install's application to the taskbar. The pin keeps the AppUserModelID it
+// was created with, so the application's windows would show apart from it.
+function IsLegacyTaskbarPin(Path: String): Boolean;
+var
+  Shell, Shortcut: Variant;
+  Target: String;
+begin
+  Result := False;
+  if LegacyInstallRemoved and FileExists(Path) then begin
+    try
+      Shell := CreateOleObject('WScript.Shell');
+      Shortcut := Shell.CreateShortcut(Path);
+      Target := Shortcut.TargetPath;
+      Result := CompareText(Target, AddBackslash(LegacyAppDir) + '{#ExeBasename}.exe') = 0;
+    except
+      Log('Unable to read the taskbar pin ' + Path + ': ' + GetExceptionMessage());
+    end;
+  end;
+end;
+
+// Kodia: drops the settings FindLegacyInstall copied if Setup stopped before replacing the previous install
+procedure DeinitializeSetup();
+begin
+  if (SeededUninstallKey <> '') and not LegacyInstallRemoved
+    and not RegValueExists(HKA64, SeededUninstallKey, 'UninstallString') then
+    RegDeleteKeyIncludingSubkeys(HKA64, SeededUninstallKey);
+end;
+
 // Don't allow installing conflicting architectures
 function InitializeSetup(): Boolean;
 var
@@ -1379,6 +1610,12 @@ var
   AltArch: String;
 begin
   Result := True;
+
+  // Kodia
+  FindLegacyInstall();
+  if (LegacyUninstallKey <> '') and IsBackgroundUpdate() then
+    // The previous install's application checks it to tell whether its update is still running
+    CreateMutex('{#LegacyAppMutex}-updating');
 
   #if "user" == InstallTarget
     if not WizardSilent() and IsAdmin() then begin
@@ -1511,6 +1748,10 @@ begin
      Result := '{#NameShort} is still running a tunnel process. Please stop the tunnel before installing.'
   else
   	Result := '';
+
+  // Kodia
+  if (Result = '') and (LegacyUninstallKey <> '') and IsNotBackgroundUpdate() then
+    Result := RemoveLegacyInstall();
 end;
 
 // VS Code will create a flag file before the update starts (/update=C:\foo\bar)
@@ -1541,7 +1782,9 @@ end;
 
 function ShouldRunAfterUpdate(): Boolean;
 begin
-  if IsBackgroundUpdate() then
+  // Kodia: IsBackgroundUpdate() is False once the previous install is replaced, the lock file still tells whether the
+  // application quit on its own
+  if IsUpdateRequested() then
     Result := not LockFileExists()
   else
     Result := True;
@@ -1810,6 +2053,10 @@ var
   UpdateResultCode: Integer;
 	StartServiceResultCode: Integer;
 begin
+  // Kodia
+  if (CurStep = ssInstall) and (LegacyUninstallKey <> '') and IsBackgroundUpdate() then
+    RemoveLegacyInstall();
+
   if CurStep = ssPostInstall then
   begin
     LogContextMenuInstallState();

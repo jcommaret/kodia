@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- Kodia's page on GitHub Pages (served from docs/). OpenRouter shows this page's icon for Kodia: Kodia sends its URL as HTTP-Referer. -->
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Kodia</title>
+	<meta name="description" content="Kodia is an open-source AI code editor. You bring the models.">
+	<link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+	<link rel="icon" type="image/png" sizes="256x256" href="icon.png">
+	<link rel="apple-touch-icon" href="icon.png">
+	<meta property="og:title" content="Kodia">
+	<meta property="og:description" content="An open-source AI code editor. You bring the models.">
+	<meta property="og:image" content="https://jcommaret.github.io/kodia/icon.png">
+	<style>
+		:root {
+			color-scheme: dark;
+			--bg: #000000;
+			--fg: #eceef2;
+			--muted: #a2a8b4;
+			--line: #2a2d34;
+			--button-bg: #eceef2;
+			--button-fg: #000000;
+		}
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			min-height: 100vh;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			padding: 48px 16px;
+			background: var(--bg);
+			color: var(--fg);
+			font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+			text-align: center;
+		}
+		main { max-width: 560px; }
+		img { width: 128px; height: 128px; }
+		h1 { margin: 16px 0 8px; font-size: 40px; letter-spacing: -0.02em; }
+		p { margin: 0 0 12px; color: var(--muted); }
+		.links { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 28px; }
+		a { color: inherit; }
+		.button {
+			display: inline-block;
+			padding: 10px 20px;
+			border-radius: 8px;
+			border: 1px solid var(--line);
+			text-decoration: none;
+			font-weight: 600;
+		}
+		.button.primary { background: var(--button-bg); color: var(--button-fg); border-color: var(--button-bg); }
+	</style>
+</head>
+<body>
+	<main>
+		<img src="icon.png" alt="">
+		<h1>Kodia</h1>
+		<p>An open-source AI code editor.</p>
+		<p>You bring the models: Kodia talks directly to the providers you configure, or to models running on your machine.</p>
+		<div class="links">
+			<a class="button primary" href="https://github.com/jcommaret/kodia/releases/latest">Download</a>
+			<a class="button" href="https://github.com/jcommaret/kodia">Source on GitHub</a>
+		</div>
+	</main>
+</body>
+</html>

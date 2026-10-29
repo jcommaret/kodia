@@ -10,3 +10,6 @@ export const KODIA_REPO_URL = `https://github.com/${KODIA_REPO}`;
 export const KODIA_RELEASES_URL = `${KODIA_REPO_URL}/releases/latest`;
 export const KODIA_ISSUES_URL = `${KODIA_REPO_URL}/issues`;
 export const KODIA_LATEST_RELEASE_API_URL = `https://api.github.com/repos/${KODIA_REPO}/releases/latest`;
+
+// Kodia's page, published by GitHub Pages from docs/: its icon is Kodia's, where the repository's is GitHub's
+export const KODIA_SITE_URL = 'https://jcommaret.github.io/kodia/';

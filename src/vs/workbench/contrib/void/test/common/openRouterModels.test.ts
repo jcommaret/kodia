@@ -43,6 +43,17 @@ suite('Kodia - OpenRouter\'s free models', () => {
 		assert.deepStrictEqual(freeCodingModelsOfOpenRouter(models, now).map(m => m.modelName), ['a/chat:free', 'a/vision:free']);
 	});
 
+	test('leaves out the free models Kodia can\'t use, not their paid versions', () => {
+		const models = [
+			model('thinkingmachines/inkling:free'), // only for agentic harnesses
+			model('google/gemma-4-31b-it:free'), // rate-limited by its one provider
+			model('a/chat:free'),
+		];
+		assert.deepStrictEqual(freeCodingModelsOfOpenRouter(models, now).map(m => m.modelName), ['a/chat:free']);
+		const paid = { pricing: { prompt: '0.000001', completion: '0.000004' } };
+		assert.deepStrictEqual(stillListedModelsOfOpenRouter([model('thinkingmachines/inkling', paid), model('thinkingmachines/inkling:free')], now, ['thinkingmachines/inkling', 'thinkingmachines/inkling:free']).map(m => m.modelName), ['thinkingmachines/inkling']);
+	});
+
 	test('a model retired later than in a week stays', () => {
 		assert.strictEqual(freeCodingModelsOfOpenRouter([model('a/later:free', { expiration_date: '2026-12-31' })], now).length, 1);
 	});

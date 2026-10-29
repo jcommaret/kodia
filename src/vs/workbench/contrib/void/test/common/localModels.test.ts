@@ -19,4 +19,8 @@ suite('Kodia - autodetected model names', () => {
 		assert.strictEqual(canonicalModelNameForProvider('anthropic', 'claude-sonnet-4-5-20250929'), 'claude-sonnet-4-5');
 		assert.strictEqual(canonicalModelNameForProvider('anthropic', 'claude-sonnet-5-5'), 'claude-sonnet-5-5');
 	});
+
+	test('a Gemini preview keeps its name', () => {
+		assert.strictEqual(canonicalModelNameForProvider('gemini', 'gemini-3.1-pro-preview'), 'gemini-3.1-pro-preview');
+	});
 });

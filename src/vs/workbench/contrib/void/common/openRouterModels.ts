@@ -65,10 +65,16 @@ const capabilitiesOf = (model: OpenRouterModel): VoidStaticModelInfo => {
 	};
 };
 
-// a model that can run Kodia's agent: chat (text out, with or without images in), tool calling, room for the agent's
-// context and for a file in the output, and not retired within a week
+// free models Kodia can't use, which OpenRouter's list doesn't tell: Inkling's is only for the apps OpenRouter lists as
+// agentic harnesses (a 403), Gemma's only provider, Google AI Studio, rate-limits it (a 429). Their paid versions work.
+const unusableFreeModel = /^thinkingmachines\/|^google\/gemma-/;
+
+// a model that can run Kodia's agent: chat (text out, with or without images in), not a voice model, tool calling,
+// room for the agent's context and for a file in the output, and not retired within a week
 const canRunAgent = (model: OpenRouterModel, now: number) => {
 	if (model.id.startsWith('openrouter/')) return false; // OpenRouter's routers: what they can do depends on the model they pick
+	if (/voxtral|whisper|audio|voice|speech|tts|transcri|realtime/.test(model.id)) return false;
+	if (isFree(model) && unusableFreeModel.test(model.id)) return false;
 	const { input_modalities = [], output_modalities = [] } = model.architecture ?? {};
 	if (!input_modalities.includes('text') || output_modalities.length !== 1 || output_modalities[0] !== 'text') return false;
 	if (!model.supported_parameters?.includes('tools')) return false;

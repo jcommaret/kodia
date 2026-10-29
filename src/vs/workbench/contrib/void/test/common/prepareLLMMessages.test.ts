@@ -22,7 +22,7 @@ suite('prepareLLMMessages', () => {
 			simpleMessages: [{ role: 'user', content: 'Fix the build' }],
 			systemMessage: 'You are a coding agent.',
 			aiInstructions: 'Answer in French.',
-			modelSelection: { providerName: 'anthropic', modelName: 'claude-sonnet-4-5' },
+			modelSelection: { providerName: 'anthropic', modelName: 'claude-sonnet-4-6' },
 			featureName: 'Chat',
 			...settings(),
 		});
@@ -40,7 +40,7 @@ suite('prepareLLMMessages', () => {
 			],
 			systemMessage: 'You are a coding agent.',
 			aiInstructions: '',
-			modelSelection: { providerName: 'gemini', modelName: 'gemini-2.5-flash' },
+			modelSelection: { providerName: 'gemini', modelName: 'gemini-3.8-flash' },
 			featureName: 'Chat',
 			...settings(),
 		});

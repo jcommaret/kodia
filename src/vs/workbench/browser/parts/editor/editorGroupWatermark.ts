@@ -29,9 +29,13 @@ import { OpenRecentAction } from '../../actions/windowActions.js';
 import { splitRecentLabel } from '../../../../base/common/labels.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 
+import { KODIA_OPEN_SETTINGS_COMMAND_ID } from '../../../../platform/windows/common/kodiaWindows.js';
+
 /* eslint-disable */ // Kodia
 import { VOID_CTRL_K_ACTION_ID, VOID_CTRL_L_ACTION_ID } from '../../../contrib/void/browser/actionIDs.js';
 import { VIEWLET_ID as REMOTE_EXPLORER_VIEWLET_ID } from '../../../contrib/remote/browser/remoteExplorer.js';
+import { IVoidSettingsService } from '../../../contrib/void/common/voidSettingsService.js';
+import { isFeatureNameDisabled } from '../../../contrib/void/common/voidSettingsTypes.js';
 /* eslint-enable */
 
 // interface WatermarkEntry {
@@ -113,6 +117,7 @@ export class EditorGroupWatermark extends Disposable {
 		@ILabelService private readonly labelService: ILabelService,
 		@IViewsService private readonly viewsService: IViewsService,
 		@IFileService private readonly fileService: IFileService, // Kodia: tells git worktrees apart in the recent folders
+		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService, // Kodia: whether a Chat model is set up
 	) {
 		super();
 
@@ -164,6 +169,16 @@ export class EditorGroupWatermark extends Disposable {
 			this.render();
 		}));
 
+		// Kodia: the welcome screen says whether a Chat model is set up; other settings changes don't concern it
+		let hasChatModel = this.hasChatModel();
+		this._register(this.voidSettingsService.onDidChangeState(() => {
+			if (this.hasChatModel() === hasChatModel) {
+				return;
+			}
+			hasChatModel = !hasChatModel;
+			this.render();
+		}));
+
 		// const allEntriesWhenClauses = [...noFolderEntries, ...folderEntries].filter(entry => entry.when !== undefined).map(entry => entry.when!);
 		// const allKeys = new Set<string>();
 		// allEntriesWhenClauses.forEach(when => when.keys().forEach(key => allKeys.add(key)));
@@ -190,6 +205,7 @@ export class EditorGroupWatermark extends Disposable {
 			// Kodia - if the workbench is empty, show the welcome screen (its recent folders are resolved before clearing, like the list above)
 			const isEmptyWorkbench = this.contextService.getWorkbenchState() === WorkbenchState.EMPTY;
 			const recentFolders = isEmptyWorkbench ? await this.resolveRecentFolders(recentlyOpened) : [];
+			await this.voidSettingsService.waitForInitState; // Kodia: the saved models, not the defaults, before saying none is set up
 
 			clearNode(voidIconBox);
 
@@ -203,26 +219,7 @@ export class EditorGroupWatermark extends Disposable {
 			else {
 
 				// show them Kodia keybindings
-				const keys = this.keybindingService.lookupKeybinding(VOID_CTRL_L_ACTION_ID);
-				const dl = append(voidIconBox, $('dl'));
-				const dt = append(dl, $('dt'));
-				dt.textContent = 'Chat'
-				const dd = append(dl, $('dd'));
-				const label = new KeybindingLabel(dd, OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles });
-				if (keys)
-					label.set(keys);
-				this.currentDisposables.add(label);
-
-
-				const keys2 = this.keybindingService.lookupKeybinding(VOID_CTRL_K_ACTION_ID);
-				const dl2 = append(voidIconBox, $('dl'));
-				const dt2 = append(dl2, $('dt'));
-				dt2.textContent = 'Quick Edit'
-				const dd2 = append(dl2, $('dd'));
-				const label2 = new KeybindingLabel(dd2, OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles });
-				if (keys2)
-					label2.set(keys2);
-				this.currentDisposables.add(label2);
+				this.renderShortcuts(voidIconBox);
 
 				// const keys3 = this.keybindingService.lookupKeybinding('workbench.action.openGlobalKeybindings');
 				// const button3 = append(recentsBox, $('button'));
@@ -248,6 +245,25 @@ export class EditorGroupWatermark extends Disposable {
 		this.transientDisposables.add(this.keybindingService.onDidUpdateKeybindings(update));
 	}
 
+	// Kodia: the Chat and Quick Edit keybindings
+	private renderShortcuts(container: HTMLElement): void {
+		for (const [name, actionId] of [['Chat', VOID_CTRL_L_ACTION_ID], ['Quick Edit', VOID_CTRL_K_ACTION_ID]]) {
+			const dl = append(container, $('dl'));
+			append(dl, $('dt', undefined, name));
+			const label = new KeybindingLabel(append(dl, $('dd')), OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles });
+			const keys = this.keybindingService.lookupKeybinding(actionId);
+			if (keys) {
+				label.set(keys);
+			}
+			this.currentDisposables.add(label);
+		}
+	}
+
+	// Kodia: whether the chat has a model to use (a provider set up and a model selected)
+	private hasChatModel(): boolean {
+		return !isFeatureNameDisabled('Chat', this.voidSettingsService.state);
+	}
+
 	// Kodia: the empty window's welcome screen (Open Folder, Open SSH, then the most recent folders)
 	private renderWelcome(container: HTMLElement, recentFolders: IWelcomeRecentFolder[]): void {
 		const actions = append(container, $('.kodia-welcome-actions'));
@@ -261,6 +277,18 @@ export class EditorGroupWatermark extends Disposable {
 		openSSHButton.label = `$(remote-explorer) ${localize('kodia.watermark.openSSH', "Open SSH")}`;
 		this.currentDisposables.add(openSSHButton);
 		this.currentDisposables.add(openSSHButton.onDidClick(() => this.viewsService.openViewContainer(REMOTE_EXPLORER_VIEWLET_ID)));
+
+		// what Kodia's AI needs: a model to set up, or the shortcuts to use it once one is
+		const ai = append(container, $('.kodia-welcome-ai'));
+		if (this.hasChatModel()) {
+			this.renderShortcuts(ai);
+		}
+		else {
+			const setup = append(ai, $('.kodia-welcome-ai-setup'));
+			append(setup, $('span', undefined, localize('kodia.watermark.noModel', "No AI model set up yet.")));
+			const setupLink = append(setup, $('button.kodia-welcome-link', { type: 'button' }, localize('kodia.watermark.setUpModel', "Set up a model")));
+			this.currentDisposables.add(addDisposableListener(setupLink, EventType.CLICK, () => this.commandService.executeCommand(KODIA_OPEN_SETTINGS_COMMAND_ID)));
+		}
 
 		if (recentFolders.length === 0) {
 			return;

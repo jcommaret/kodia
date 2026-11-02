@@ -216,6 +216,21 @@
 	line-height: 18px;
 }
 
+/* under the buttons: a link to set up a model, or the Chat / Quick Edit shortcuts once one is set up */
+.monaco-workbench .editor-group-watermark .kodia-welcome-ai {
+	margin-top: 24px;
+	padding: 0 8px;
+}
+
+.monaco-workbench .editor-group-watermark .kodia-welcome-ai-setup {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 6px;
+	font-size: var(--vscode-fontSize-label1);
+	color: var(--vscode-descriptionForeground);
+}
+
 .monaco-workbench .editor-group-watermark .kodia-welcome-recent {
 	margin-top: 32px;
 }
@@ -238,7 +253,8 @@
 	color: var(--vscode-descriptionForeground);
 }
 
-.monaco-workbench .editor-group-watermark .kodia-welcome-recent-more {
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-more,
+.monaco-workbench .editor-group-watermark .kodia-welcome-link {
 	padding: 0;
 	border: none;
 	background: none;
@@ -248,7 +264,8 @@
 	cursor: pointer;
 }
 
-.monaco-workbench .editor-group-watermark .kodia-welcome-recent-more:hover {
+.monaco-workbench .editor-group-watermark .kodia-welcome-recent-more:hover,
+.monaco-workbench .editor-group-watermark .kodia-welcome-link:hover {
 	color: var(--vscode-textLink-activeForeground);
 	text-decoration: underline;
 }

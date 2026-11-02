@@ -659,8 +659,35 @@ export const MlxSetupInstructions = () => {
 	</div>
 }
 
+type LocalServerInfo = { id: string, title: string, description: string, instructions?: React.ReactNode, autoSetup?: React.ReactNode, providerNames: readonly ProviderName[] }
+
+// The servers Kodia detects on the user's computer, in the settings and the onboarding (MLX runs on macOS only)
+export const localServers: readonly LocalServerInfo[] = [
+	{
+		id: 'ollama',
+		title: 'Ollama',
+		description: 'Runs open models on your computer.',
+		instructions: <OllamaSetupInstructions sayWeAutoDetect={true} />,
+		providerNames: ollamaProviderNames,
+	},
+	...(os === 'mac' ? [{
+		id: 'mlx',
+		title: 'MLX',
+		description: `Apple's framework for running models on Apple silicon, served by mlx_lm.server.`,
+		autoSetup: <AutoSetupMlxToggle />,
+		instructions: <MlxSetupInstructions />,
+		providerNames: mlxProviderNames,
+	}] : []),
+	{
+		id: 'other',
+		title: 'vLLM and LM Studio',
+		description: 'OpenAI-compatible servers running on your computer.',
+		providerNames: otherLocalProviderNames,
+	},
+]
+
 // A server on the user's computer: how to set it up, its endpoint, and a refresh of its models
-const LocalServer = ({ title, description, instructions, autoSetup, providerNames }: { title: string, description: string, instructions?: React.ReactNode, autoSetup?: React.ReactNode, providerNames: readonly ProviderName[] }) => {
+export const LocalServer = ({ server: { title, description, instructions, autoSetup, providerNames } }: { server: LocalServerInfo }) => {
 	return <div className='flex flex-col gap-2'>
 		<h4 className='text-root font-medium'>{title}</h4>
 		<div className='text-sm text-void-fg-3'>{description}</div>
@@ -694,24 +721,7 @@ export const ModelsSection = () => {
 		</SettingGroup>
 
 		<SettingGroup title='Local servers' description='Models running on your computer: free, and your code stays on your machine.'>
-			<LocalServer
-				title='Ollama'
-				description='Runs open models on your computer.'
-				instructions={<OllamaSetupInstructions sayWeAutoDetect={true} />}
-				providerNames={ollamaProviderNames}
-			/>
-			{os === 'mac' && <LocalServer
-				title='MLX'
-				description={`Apple's framework for running models on Apple silicon, served by mlx_lm.server.`}
-				autoSetup={<AutoSetupMlxToggle />}
-				instructions={<MlxSetupInstructions />}
-				providerNames={mlxProviderNames}
-			/>}
-			<LocalServer
-				title='vLLM and LM Studio'
-				description='OpenAI-compatible servers running on your computer.'
-				providerNames={otherLocalProviderNames}
-			/>
+			{localServers.map(server => <LocalServer key={server.id} server={server} />)}
 		</SettingGroup>
 	</SettingsSection>
 }

@@ -3,17 +3,19 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAccessor, useIsDark, useSettingsState } from '../util/services.js';
-import { Brain, Check, ChevronRight, DollarSign, ExternalLink, Lock, X } from 'lucide-react';
-import { displayInfoOfProviderName, ProviderName, providerNames, localProviderNames, ollamaProviderNames, mlxProviderNames, otherLocalProviderNames, featureNames, FeatureName, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';
-import { os } from '../../../../common/helpers/systemInfo.js';
-import { OllamaSetupInstructions, MlxSetupInstructions, SettingsForProvider, ModelDump } from '../void-settings-tsx/ModelsSettings.js';
+import { Check, ChevronRight } from 'lucide-react';
+import { displayInfoOfProviderName, ProviderName, nonlocalProviderNames, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';
+import { SettingsForProvider, ModelDump, LocalServer, localServers } from '../void-settings-tsx/ModelsSettings.js';
 import { OneClickSwitchButton } from '../void-settings-tsx/GeneralSettings.js';
+import { SettingGroup } from '../void-settings-tsx/SettingsControls.js';
+import { VoidCustomDropdownBox } from '../util/inputs.js';
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js';
+import { IWorkbenchColorTheme } from '../../../../../../../workbench/services/themes/common/workbenchThemeService.js';
+import { FileAccess } from '../../../../../../../base/common/network.js';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
 import { isLinux } from '../../../../../../../base/common/platform.js';
-import { KODIA_ISSUES_URL } from '../../../../common/kodiaLinks.js';
 
 const OVERRIDE_VALUE = false
 
@@ -41,29 +43,27 @@ export const VoidOnboarding = () => {
 	)
 }
 
-const VoidIcon = () => {
-	const accessor = useAccessor()
-	const themeService = accessor.get('IThemeService')
+// Kodia's cube, the logo of the empty window's welcome screen
+const cubeURL = FileAccess.asBrowserUri('vs/workbench/browser/parts/editor/media/void_cube_noshadow.png').toString(true)
 
-	const divRef = useRef<HTMLDivElement | null>(null)
+const VoidIcon = () => {
+	const themeService = useAccessor().get('IThemeService')
+	const [isDark, setIsDark] = useState(true)
 
 	useEffect(() => {
-		// void icon style
 		const updateTheme = () => {
 			const theme = themeService.getColorTheme().type
-			const isDark = theme === ColorScheme.DARK || theme === ColorScheme.HIGH_CONTRAST_DARK
-			if (divRef.current) {
-				divRef.current.style.maxWidth = '220px'
-				divRef.current.style.opacity = '50%'
-				divRef.current.style.filter = isDark ? '' : 'invert(1)' //brightness(.5)
-			}
+			setIsDark(theme === ColorScheme.DARK || theme === ColorScheme.HIGH_CONTRAST_DARK)
 		}
 		updateTheme()
 		const d = themeService.onDidColorThemeChange(updateTheme)
 		return () => d.dispose()
-	}, [])
+	}, [themeService])
 
-	return <div ref={divRef} className='@@void-void-icon' />
+	return <div
+		className='w-[200px] max-w-full aspect-square'
+		style={{ backgroundImage: `url('${cubeURL}')`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', opacity: 0.5, filter: isDark ? '' : 'invert(1)' }}
+	/>
 }
 
 const FADE_DURATION_MS = 2000
@@ -91,596 +91,255 @@ const FadeIn = ({ children, className, delayMs = 0, durationMs, ...props }: { ch
 	)
 }
 
-// Onboarding
-
-// =============================================
-//  New AddProvidersPage Component and helpers
-// =============================================
-
-const tabNames = ['Free', 'Paid', 'Local'] as const;
-
-type TabName = typeof tabNames[number] | 'Cloud/Other';
-
-type LocalSubTab = 'ollama' | 'mlx' | 'other';
-
-const localSubTabLabels: Record<LocalSubTab, string> = {
-	ollama: 'Ollama',
-	mlx: 'MLX',
-	other: 'Other',
-};
-
-const providerNamesOfLocalSubTab: Record<LocalSubTab, ProviderName[]> = {
-	ollama: [...ollamaProviderNames],
-	mlx: [...mlxProviderNames],
-	other: [...otherLocalProviderNames],
-};
-
-// Data for cloud providers tab
-const cloudProviders: ProviderName[] = ['googleVertex', 'liteLLM', 'microsoftAzure', 'awsBedrock', 'openAICompatible'];
-
-// Data structures for provider tabs
-const providerNamesOfTab: Record<TabName, ProviderName[]> = {
-	Free: ['gemini', 'openRouter'],
-	Local: localProviderNames,
-	Paid: providerNames.filter(pn => !(['gemini', 'openRouter', ...localProviderNames, ...cloudProviders] as string[]).includes(pn)) as ProviderName[],
-	'Cloud/Other': cloudProviders,
-};
-
-const descriptionOfTab: Record<TabName, string> = {
-	Free: `Providers with a 100% free tier. Add as many as you'd like!`,
-	Paid: `Connect directly with any provider (bring your own key).`,
-	Local: `Active providers should appear automatically. Add as many as you'd like! `,
-	'Cloud/Other': `Add as many as you'd like! Reach out for custom configuration requests.`,
-};
-
-
-const featureNameMap: { display: string, featureName: FeatureName }[] = [
-	{ display: 'Chat', featureName: 'Chat' },
-	{ display: 'Quick Edit', featureName: 'Ctrl+K' },
-	{ display: 'Autocomplete', featureName: 'Autocomplete' },
-	{ display: 'Fast Apply', featureName: 'Apply' },
-	{ display: 'Source Control', featureName: 'SCM' },
-];
-
-const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setPageIndex: (index: number) => void }) => {
-	const [currentTab, setCurrentTab] = useState<TabName>('Free');
-	const [localSubTab, setLocalSubTab] = useState<LocalSubTab>('ollama');
-	const settingsState = useSettingsState();
-	const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-	// Clear error message after 5 seconds
-	useEffect(() => {
-		let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-		if (errorMessage) {
-			timeoutId = setTimeout(() => {
-				setErrorMessage(null);
-			}, 5000);
-		}
-
-		// Cleanup function to clear the timeout if component unmounts or error changes
-		return () => {
-			if (timeoutId) {
-				clearTimeout(timeoutId);
-			}
-		};
-	}, [errorMessage]);
-
-	return (<div className="flex flex-col md:flex-row w-full h-[80vh] gap-6 max-w-[900px] mx-auto relative">
-		{/* Left Column */}
-		<div className="md:w-1/4 w-full flex flex-col gap-6 p-6 border-none border-void-border-2 h-full overflow-y-auto">
-			{/* Tab Selector */}
-			<div className="flex md:flex-col gap-2">
-				{[...tabNames, 'Cloud/Other'].map(tab => (
-					<button
-						key={tab}
-						className={`py-2 px-4 rounded-md text-left ${currentTab === tab
-							? 'bg-[#0e70c0]/80 text-white font-medium shadow-sm'
-							: 'bg-void-bg-2 hover:bg-void-bg-2/80 text-void-fg-1'
-							} transition-all duration-200`}
-						onClick={() => {
-							setCurrentTab(tab as TabName);
-							setErrorMessage(null); // Reset error message when changing tabs
-						}}
-					>
-						{tab}
-					</button>
-				))}
-			</div>
-
-			{/* Feature Checklist */}
-			<div className="flex flex-col gap-1 mt-4 text-sm opacity-80">
-				{featureNameMap.map(({ display, featureName }) => {
-					const hasModel = settingsState.modelSelectionOfFeature[featureName] !== null;
-					return (
-						<div key={featureName} className="flex items-center gap-2">
-							{hasModel ? (
-								<Check className="w-4 h-4 text-emerald-500" />
-							) : (
-								<div className="w-3 h-3 rounded-full flex items-center justify-center">
-									<div className="w-1 h-1 rounded-full bg-white/70"></div>
-								</div>
-							)}
-							<span>{display}</span>
-						</div>
-					);
-				})}
-			</div>
-		</div>
-
-		{/* Right Column */}
-		<div className="flex-1 flex flex-col items-center justify-start p-6 h-full overflow-y-auto">
-			<div className="text-5xl mb-2 text-center w-full">Add a Provider</div>
-
-			<div className="w-full max-w-xl mt-4 mb-10">
-				<div className="text-4xl font-light my-4 w-full">{currentTab}</div>
-				<div className="text-sm opacity-80 text-void-fg-3 my-4 w-full">{descriptionOfTab[currentTab]}</div>
-			</div>
-
-			{currentTab === 'Local' && (
-				<div className="flex gap-2 mb-6 w-full max-w-xl flex-wrap">
-					{(os === 'mac' ? (['ollama', 'mlx', 'other'] as const) : (['ollama', 'other'] as const)).map(sub => (
-						<button
-							key={sub}
-							className={`py-1.5 px-3 rounded-md text-sm ${localSubTab === sub
-								? 'bg-[#0e70c0]/80 text-white'
-								: 'bg-void-bg-2 hover:bg-void-bg-2/80 text-void-fg-1'
-								}`}
-							onClick={() => setLocalSubTab(sub)}
-						>
-							{localSubTabLabels[sub]}
-						</button>
-					))}
-				</div>
-			)}
-
-			{(currentTab === 'Local' ? providerNamesOfLocalSubTab[localSubTab] : providerNamesOfTab[currentTab]).map((providerName) => (
-				<div key={providerName} className="w-full max-w-xl mb-10">
-					<div className="text-xl mb-2">
-						Add {displayInfoOfProviderName(providerName).title}
-						{providerName === 'gemini' && (
-							<span
-								data-tooltip-id="void-tooltip-provider-info"
-								data-tooltip-content="Gemini 2.5 Pro offers 25 free messages a day, and Gemini 2.5 Flash offers 500. We recommend using models down the line as you run out of free credits."
-								data-tooltip-place="right"
-								className="ml-1 text-xs align-top text-blue-400"
-							>*</span>
-						)}
-						{providerName === 'openRouter' && (
-							<span
-								data-tooltip-id="void-tooltip-provider-info"
-								data-tooltip-content="OpenRouter offers 50 free messages a day, and 1000 if you deposit $10. Only applies to models labeled ':free'."
-								data-tooltip-place="right"
-								className="ml-1 text-xs align-top text-blue-400"
-							>*</span>
-						)}
-					</div>
-					<div>
-						<SettingsForProvider providerName={providerName} showProviderTitle={false} showProviderSuggestions={true} />
-
-					</div>
-					{providerName === 'ollama' && <OllamaSetupInstructions />}
-					{providerName === 'mlx' && os === 'mac' && <MlxSetupInstructions />}
-				</div>
-			))}
-
-			{(currentTab === 'Local' || currentTab === 'Cloud/Other') && (
-				<div className="w-full max-w-xl mt-8 bg-void-bg-2/50 rounded-lg p-6 border border-void-border-4">
-					<div className="flex items-center gap-2 mb-4">
-						<div className="text-xl font-medium">Models</div>
-					</div>
-
-					{currentTab === 'Local' && (
-						<div className="text-sm opacity-80 text-void-fg-3 my-4 w-full">Local models should be detected automatically. You can add custom models below.</div>
-					)}
-
-					{currentTab === 'Local' && <ModelDump filteredProviders={[...providerNamesOfLocalSubTab[localSubTab]]} />}
-					{currentTab === 'Cloud/Other' && <ModelDump filteredProviders={cloudProviders} />}
-				</div>
-			)}
-
-
-
-			{/* Navigation buttons in right column */}
-			<div className="flex flex-col items-end w-full mt-auto pt-8">
-				{errorMessage && (
-					<div className="text-amber-400 mb-2 text-sm opacity-80 transition-opacity duration-300">{errorMessage}</div>
-				)}
-				<div className="flex items-center gap-2">
-					<PreviousButton onClick={() => setPageIndex(pageIndex - 1)} />
-					<NextButton
-						onClick={() => {
-							const isDisabled = isFeatureNameDisabled('Chat', settingsState)
-
-							if (!isDisabled) {
-								setPageIndex(pageIndex + 1);
-								setErrorMessage(null);
-							} else {
-								// Show error message
-								setErrorMessage("Please set up at least one Chat model before moving on.");
-							}
-						}}
-					/>
-				</div>
-			</div>
-		</div>
-	</div>);
-};
-// =============================================
-// 	OnboardingPage
-// 		title:
-// 			div
-// 				"Welcome to Kodia"
-// 			image
-// 		content:<></>
-// 		title
-// 		content
-// 		prev/next
-
-// 	OnboardingPage
-// 		title:
-// 			div
-// 				"How would you like to use Kodia?"
-// 		content:
-// 			ModelQuestionContent
-// 				|
-// 					div
-// 						"I want to:"
-// 					div
-// 						"Use the smartest models"
-// 						"Keep my data fully private"
-// 						"Save money"
-// 						"I don't know"
-// 				| div
-// 					| div
-// 						"We recommend using "
-// 						"Set API"
-// 					| div
-// 						""
-// 					| div
-//
-// 		title
-// 		content
-// 		prev/next
-//
-// 	OnboardingPage
-// 		title
-// 		content
-// 		prev/next
-
-const NextButton = ({ onClick, ...props }: { onClick: () => void } & React.ButtonHTMLAttributes<HTMLButtonElement>) => {
-
-	// Create a new props object without the disabled attribute
-	const { disabled, ...buttonProps } = props;
-
-	return (
-		<button
-			onClick={disabled ? undefined : onClick}
-			onDoubleClick={onClick}
-			className={`px-6 py-2 bg-zinc-100 ${disabled
-				? 'bg-zinc-100/40 cursor-not-allowed'
-				: 'hover:bg-zinc-100'
-				} rounded text-black duration-600 transition-all
-			`}
-			{...disabled && {
-				'data-tooltip-id': 'void-tooltip',
-				"data-tooltip-content": 'Please enter all required fields or choose another provider', // (double-click to proceed anyway, can come back in Settings)
-				"data-tooltip-place": 'top',
-			}}
-			{...buttonProps}
-		>
-			Next
-		</button>
-	)
-}
-
-const PreviousButton = ({ onClick, ...props }: { onClick: () => void } & React.ButtonHTMLAttributes<HTMLButtonElement>) => {
-	return (
-		<button
-			onClick={onClick}
-			className="px-6 py-2 rounded text-void-fg-3 opacity-80 hover:brightness-115 duration-600 transition-all"
-			{...props}
-		>
-			Back
-		</button>
-	)
-}
-
-
-
-const OnboardingPageShell = ({ top, bottom, content, hasMaxWidth = true, className = '', }: {
-	top?: React.ReactNode,
-	bottom?: React.ReactNode,
-	content?: React.ReactNode,
-	hasMaxWidth?: boolean,
-	className?: string,
-}) => {
-	return (
-		<div className={`h-[80vh] text-lg flex flex-col gap-4 w-full mx-auto ${hasMaxWidth ? 'max-w-[600px]' : ''} ${className}`}>
-			{top && <FadeIn className='w-full mb-auto pt-16'>{top}</FadeIn>}
-			{content && <FadeIn className='w-full my-auto'>{content}</FadeIn>}
-			{bottom && <div className='w-full pb-8'>{bottom}</div>}
-		</div>
-	)
-}
-
-const OllamaDownloadOrRemoveModelButton = ({ modelName, isModelInstalled, sizeGb }: { modelName: string, isModelInstalled: boolean, sizeGb: number | false | 'not-known' }) => {
-	// for now just link to the ollama download page
-	return <a
-		href={`https://ollama.com/library/${modelName}`}
-		target="_blank"
-		rel="noopener noreferrer"
-		className="flex items-center justify-center text-void-fg-2 hover:text-void-fg-1"
-	>
-		<ExternalLink className="w-3.5 h-3.5" />
-	</a>
-
-}
-
-
-const YesNoText = ({ val }: { val: boolean | null }) => {
-
-	return <div
-		className={
-			val === true ? "text text-emerald-500"
-				: val === false ? 'text-rose-600'
-					: "text text-amber-300"
-		}
-	>
-		{
-			val === true ? "Yes"
-				: val === false ? 'No'
-					: "Yes*"
-		}
-	</div>
-
-}
-
-
-
-const abbreviateNumber = (num: number): string => {
-	if (num >= 1000000) {
-		// For millions
-		return Math.floor(num / 1000000) + 'M';
-	} else if (num >= 1000) {
-		// For thousands
-		return Math.floor(num / 1000) + 'K';
-	} else {
-		// For numbers less than 1000
-		return num.toString();
-	}
-}
-
-
-
-
-
-const PrimaryActionButton = ({ children, className, ringSize, ...props }: { children: React.ReactNode, ringSize?: undefined | 'xl' | 'screen' } & React.ButtonHTMLAttributes<HTMLButtonElement>) => {
-
-
+const PrimaryActionButton = ({ children, className, ...props }: { children: React.ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) => {
 	return (
 		<button
 			type='button'
 			className={`
-				flex items-center justify-center
-
-				text-white dark:text-black
-				bg-black/90 dark:bg-white/90
-
-				${ringSize === 'xl' ? `
-					gap-2 px-16 py-8
-					transition-all duration-300 ease-in-out
-					`
-					: ringSize === 'screen' ? `
-					gap-2 px-16 py-8
-					transition-all duration-1000 ease-in-out
-					`: ringSize === undefined ? `
-					gap-1 px-4 py-2
-					transition-all duration-300 ease-in-out
-				`: ''}
-
-				rounded-lg
-				group
-				${className}
+				flex items-center justify-center gap-1 px-4 py-2
+				text-white dark:text-black bg-black/90 dark:bg-white/90
+				rounded-lg group transition-all duration-300 ease-in-out
+				disabled:opacity-40 disabled:cursor-not-allowed
+				${className ?? ''}
 			`}
 			{...props}
 		>
 			{children}
-			<ChevronRight
-				className={`
-					transition-all duration-300 ease-in-out
-
-					transform
-					group-hover:translate-x-1
-					group-active:translate-x-1
-				`}
-			/>
+			<ChevronRight className='transition-all duration-300 ease-in-out transform group-hover:translate-x-1 group-active:translate-x-1' />
 		</button>
 	)
 }
 
+const TextButton = ({ children, ...props }: { children: React.ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) => {
+	return <button type='button' className='px-4 py-2 rounded text-void-fg-3 hover:brightness-125 transition-all' {...props}>{children}</button>
+}
 
-type WantToUseOption = 'smart' | 'private' | 'cheap' | 'all'
+// Buttons to pick one option among a few, with a check on the ones already set up
+const Choices = <T extends string>({ options, selected, onSelect, labelOf, isDone }: { options: readonly T[], selected: T, onSelect: (option: T) => void, labelOf: (option: T) => string, isDone?: (option: T) => boolean }) => {
+	return <div className='flex flex-wrap gap-2'>
+		{options.map(option => <button
+			key={option}
+			type='button'
+			onClick={() => onSelect(option)}
+			className={`flex items-center gap-1 py-1 px-3 rounded-md text-root transition-all duration-200 ${option === selected
+				? 'bg-[#0e70c0]/80 text-white'
+				: 'bg-void-bg-2 hover:bg-void-bg-2/80 text-void-fg-1'}`}
+		>
+			{isDone?.(option) && <Check className='size-3' />}
+			{labelOf(option)}
+		</button>)}
+	</div>
+}
+
+
+// Onboarding: a welcome page, then each setup step in the same layout
+
+const steps = ['model', 'import'] as const
+type StepName = typeof steps[number]
+
+// A setup step: where it is in the onboarding, what it's for, then its content, and the buttons always at the bottom
+const OnboardingStep = ({ stepName, title, description, children, footerLeft, footerRight }: { stepName: StepName, title: string, description: string, children: React.ReactNode, footerLeft: React.ReactNode, footerRight: React.ReactNode }) => {
+	return <div className='flex flex-col w-full max-w-[720px] h-[85vh] mx-auto px-6'>
+		<header className='pt-10 pb-6'>
+			<div className='text-sm text-void-fg-3 uppercase tracking-wide'>{`Step ${steps.indexOf(stepName) + 1} of ${steps.length}`}</div>
+			<h1 className='text-4xl font-light mt-2'>{title}</h1>
+			<div className='text-root text-void-fg-3 mt-2'>{description}</div>
+		</header>
+		<div className='flex-1 overflow-y-auto pr-2 flex flex-col gap-8'>
+			{children}
+		</div>
+		<footer className='flex items-center justify-between gap-4 pt-6 pb-8'>
+			<div>{footerLeft}</div>
+			<div className='flex items-center gap-2'>{footerRight}</div>
+		</footer>
+	</div>
+}
+
+// The model the chat uses, or what to do to get one
+const ChatModelStatus = () => {
+	const settingsState = useSettingsState()
+	const selection = settingsState.modelSelectionOfFeature['Chat']
+	if (isFeatureNameDisabled('Chat', settingsState) || !selection) {
+		return <div className='text-root text-void-fg-3'>No model yet: add a provider&apos;s API key, or start a server on your computer.</div>
+	}
+	return <div className='flex items-center gap-2 text-root text-void-fg-2'>
+		<Check className='size-4 text-emerald-500 shrink-0' />
+		<span>Chat model: <span className='text-void-fg-1'>{selection.modelName}</span> ({displayInfoOfProviderName(selection.providerName).title}). Kodia&apos;s other features use a model too: change any of them later in Settings, under Features.</span>
+	</div>
+}
+
+type ModelSource = 'cloud' | 'local'
+
+// A provider with an API key, or a server on the user's computer, as in Settings › Models
+const ChooseModel = () => {
+	const settingsState = useSettingsState()
+	const chatProviderName = settingsState.modelSelectionOfFeature['Chat']?.providerName
+
+	// start where the chat model comes from, if there's one already (a local server Kodia detected...)
+	const chatLocalServer = localServers.find(s => chatProviderName && s.providerNames.includes(chatProviderName))
+	const [source, setSource] = useState<ModelSource>(chatLocalServer ? 'local' : 'cloud')
+	const [cloudProviderName, setCloudProviderName] = useState<ProviderName>(!chatLocalServer && chatProviderName ? chatProviderName : 'anthropic')
+	const [localServerId, setLocalServerId] = useState(chatLocalServer?.id ?? localServers[0].id)
+
+	// a provider with its API key in; a server once Kodia found one of its models (its endpoint is filled in from the start)
+	const isSetUp = (providerName: ProviderName) => !!settingsState.settingsOfProvider[providerName]._didFillInProviderSettings
+	const isRunning = (providerName: ProviderName) => settingsState.settingsOfProvider[providerName].models.length > 0
+	const localServer = localServers.find(s => s.id === localServerId) ?? localServers[0]
+
+	return <>
+		<ChatModelStatus />
+
+		<Choices<ModelSource>
+			options={['cloud', 'local']}
+			selected={source}
+			onSelect={setSource}
+			labelOf={s => s === 'cloud' ? 'A provider (API key)' : 'A server on your computer'}
+		/>
+
+		{source === 'cloud' ? <>
+			<SettingGroup title='Provider'>
+				<Choices
+					options={nonlocalProviderNames}
+					selected={cloudProviderName}
+					onSelect={setCloudProviderName}
+					labelOf={p => displayInfoOfProviderName(p).title}
+					isDone={isSetUp}
+				/>
+				<SettingsForProvider providerName={cloudProviderName} showProviderTitle={false} showProviderSuggestions={true} />
+			</SettingGroup>
+			<SettingGroup title='Models' description={`The models that are on appear in Kodia's model menus.`}>
+				<ModelDump filteredProviders={[cloudProviderName]} />
+			</SettingGroup>
+		</> : <>
+			<SettingGroup title='Server'>
+				<Choices
+					options={localServers.map(s => s.id)}
+					selected={localServer.id}
+					onSelect={setLocalServerId}
+					labelOf={id => localServers.find(s => s.id === id)?.title ?? id}
+					isDone={id => !!localServers.find(s => s.id === id)?.providerNames.some(isRunning)}
+				/>
+				<LocalServer server={localServer} />
+			</SettingGroup>
+			<SettingGroup title='Models' description='Kodia detects the models of a running server. You can also add one by its name.'>
+				<ModelDump filteredProviders={[...localServer.providerNames]} />
+			</SettingGroup>
+		</>}
+	</>
+}
+
+const ThemeDropdown = () => {
+	const themeService = useAccessor().get('IWorkbenchThemeService')
+	const [themes, setThemes] = useState<IWorkbenchColorTheme[]>([])
+	const [currentId, setCurrentId] = useState(() => themeService.getColorTheme().id)
+
+	useEffect(() => {
+		themeService.getColorThemes().then(setThemes)
+		const d = themeService.onDidColorThemeChange(theme => setCurrentId(theme.id))
+		return () => d.dispose()
+	}, [themeService])
+
+	const current = themes.find(t => t.id === currentId)
+	if (!current) return null
+
+	return <VoidCustomDropdownBox
+		className='text-root text-void-fg-2 bg-void-bg-1 border border-void-border-1 rounded py-1 px-2 w-fit'
+		options={themes}
+		selectedOption={current}
+		onChangeOption={(theme) => { themeService.setColorTheme(theme, 'auto') }}
+		getOptionDisplayName={(theme) => theme.label}
+		getOptionDropdownName={(theme) => theme.label}
+		getOptionsEqual={(a, b) => a.id === b.id}
+	/>
+}
+
+const ImportSetup = () => {
+	return <>
+		<SettingGroup title='Transfer from another editor' description='Copy your editor settings into Kodia.'>
+			<div className='flex flex-col gap-2 max-w-xs'>
+				<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="VS Code" />
+				<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="Cursor" />
+				<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="Windsurf" />
+			</div>
+		</SettingGroup>
+		<SettingGroup title='Theme'>
+			<ErrorBoundary>
+				<ThemeDropdown />
+			</ErrorBoundary>
+		</SettingGroup>
+	</>
+}
 
 const VoidOnboardingContent = () => {
-
-
 	const accessor = useAccessor()
 	const voidSettingsService = accessor.get('IVoidSettingsService')
 	const voidMetricsService = accessor.get('IMetricsService')
-
 	const voidSettingsState = useSettingsState()
 
-	const [pageIndex, setPageIndex] = useState(0)
+	// the welcome page, then each step
+	const [stepName, setStepName] = useState<StepName | 'welcome'>('welcome')
 
-
-	// page 1 state
-	const [wantToUseOption, setWantToUseOption] = useState<WantToUseOption>('smart')
-
-	// Replace the single selectedProviderName with four separate states
-	// page 2 state - each tab gets its own state
-	const [selectedIntelligentProvider, setSelectedIntelligentProvider] = useState<ProviderName>('anthropic');
-	const [selectedPrivateProvider, setSelectedPrivateProvider] = useState<ProviderName>('ollama');
-	const [selectedAffordableProvider, setSelectedAffordableProvider] = useState<ProviderName>('gemini');
-	const [selectedAllProvider, setSelectedAllProvider] = useState<ProviderName>('anthropic');
-
-	// Helper function to get the current selected provider based on active tab
-	const getSelectedProvider = (): ProviderName => {
-		switch (wantToUseOption) {
-			case 'smart': return selectedIntelligentProvider;
-			case 'private': return selectedPrivateProvider;
-			case 'cheap': return selectedAffordableProvider;
-			case 'all': return selectedAllProvider;
-		}
-	}
-
-	// Helper function to set the selected provider for the current tab
-	const setSelectedProvider = (provider: ProviderName) => {
-		switch (wantToUseOption) {
-			case 'smart': setSelectedIntelligentProvider(provider); break;
-			case 'private': setSelectedPrivateProvider(provider); break;
-			case 'cheap': setSelectedAffordableProvider(provider); break;
-			case 'all': setSelectedAllProvider(provider); break;
-		}
-	}
-
-	const providerNamesOfWantToUseOption: { [wantToUseOption in WantToUseOption]: ProviderName[] } = {
-		smart: ['anthropic', 'openAI', 'gemini', 'openRouter'],
-		private: ['ollama', 'vLLM', 'openAICompatible', 'lmStudio', 'mlx'],
-		cheap: ['gemini', 'deepseek', 'openRouter', 'ollama', 'vLLM', 'mlx'],
-		all: providerNames,
-	}
-
-
-	const selectedProviderName = getSelectedProvider();
-	const didFillInProviderSettings = selectedProviderName && voidSettingsState.settingsOfProvider[selectedProviderName]._didFillInProviderSettings
-	const isApiKeyLongEnoughIfApiKeyExists = selectedProviderName && voidSettingsState.settingsOfProvider[selectedProviderName].apiKey ? voidSettingsState.settingsOfProvider[selectedProviderName].apiKey.length > 15 : true
-	const isAtLeastOneModel = selectedProviderName && voidSettingsState.settingsOfProvider[selectedProviderName].models.length >= 1
-
-	const didFillInSelectedProviderSettings = !!(didFillInProviderSettings && isApiKeyLongEnoughIfApiKeyExists && isAtLeastOneModel)
-
-	const prevAndNextButtons = <div className="max-w-[600px] w-full mx-auto flex flex-col items-end">
-		<div className="flex items-center gap-2">
-			<PreviousButton
-				onClick={() => { setPageIndex(pageIndex - 1) }}
-			/>
-			<NextButton
-				onClick={() => { setPageIndex(pageIndex + 1) }}
-			/>
-		</div>
-	</div>
-
-
-	const lastPagePrevAndNextButtons = <div className="max-w-[600px] w-full mx-auto flex flex-col items-end">
-		<div className="flex items-center gap-2">
-			<PreviousButton
-				onClick={() => { setPageIndex(pageIndex - 1) }}
-			/>
-			<PrimaryActionButton
-				onClick={() => {
-					voidSettingsService.setGlobalSetting('isOnboardingComplete', true);
-					voidMetricsService.capture('Completed Onboarding', { selectedProviderName, wantToUseOption })
-				}}
-				ringSize={voidSettingsState.globalSettings.isOnboardingComplete ? 'screen' : undefined}
-			>Enter Kodia</PrimaryActionButton>
-		</div>
-	</div>
-
-
-	// cannot be md
-	const basicDescOfWantToUseOption: { [wantToUseOption in WantToUseOption]: string } = {
-		smart: "Models with the best performance on benchmarks.",
-		private: "Host on your computer or local network for full data privacy.",
-		cheap: "Free and affordable options.",
-		all: "",
-	}
-
-	// can be md
-	const detailedDescOfWantToUseOption: { [wantToUseOption in WantToUseOption]: string } = {
-		smart: "Most intelligent and best for agent mode.",
-		private: `Private-hosted so your data never leaves your computer or network. [Open an issue](${KODIA_ISSUES_URL}) if you need help setting it up.`,
-		cheap: "Use great deals like Gemini 2.5 Pro, or self-host with Ollama, vLLM, or MLX on Apple Silicon.",
-		all: "",
-	}
-
-	// Modified: initialize separate provider states on initial render instead of watching wantToUseOption changes
-	useEffect(() => {
-		if (selectedIntelligentProvider === undefined) {
-			setSelectedIntelligentProvider(providerNamesOfWantToUseOption['smart'][0]);
-		}
-		if (selectedPrivateProvider === undefined) {
-			setSelectedPrivateProvider(providerNamesOfWantToUseOption['private'][0]);
-		}
-		if (selectedAffordableProvider === undefined) {
-			setSelectedAffordableProvider(providerNamesOfWantToUseOption['cheap'][0]);
-		}
-		if (selectedAllProvider === undefined) {
-			setSelectedAllProvider(providerNamesOfWantToUseOption['all'][0]);
-		}
-	}, []);
-
-	// reset the page to page 0 if the user redos onboarding
+	// back to the welcome page when the user shows the onboarding again
 	useEffect(() => {
 		if (!voidSettingsState.globalSettings.isOnboardingComplete) {
-			setPageIndex(0)
+			setStepName('welcome')
 		}
-	}, [setPageIndex, voidSettingsState.globalSettings.isOnboardingComplete])
+	}, [voidSettingsState.globalSettings.isOnboardingComplete])
 
+	const finish = ({ skipped }: { skipped: boolean }) => {
+		voidSettingsService.setGlobalSetting('isOnboardingComplete', true)
+		voidMetricsService.capture('Completed Onboarding', { skipped, chatProviderName: voidSettingsState.modelSelectionOfFeature['Chat']?.providerName ?? null })
+	}
+	const setUpLater = <TextButton onClick={() => finish({ skipped: true })}>Set up later</TextButton>
+	const hasChatModel = !isFeatureNameDisabled('Chat', voidSettingsState)
 
-	const contentOfIdx: { [pageIndex: number]: React.ReactNode } = {
-		0: <OnboardingPageShell
-			content={
-				<div className='flex flex-col items-center gap-8'>
-					<div className="text-5xl font-light text-center">Welcome to Kodia</div>
-
-					{/* Slice of Kodia image */}
-					<div className='max-w-md w-full h-[30vh] mx-auto flex items-center justify-center'>
-						{!isLinux && <VoidIcon />}
-					</div>
-
-
-					<FadeIn
-						delayMs={1000}
-					>
-						<PrimaryActionButton
-							onClick={() => { setPageIndex(1) }}
-						>
-							Get Started
-						</PrimaryActionButton>
-					</FadeIn>
-
-				</div>
-			}
-		/>,
-
-		1: <OnboardingPageShell hasMaxWidth={false}
-			content={
-				<AddProvidersPage pageIndex={pageIndex} setPageIndex={setPageIndex} />
-			}
-		/>,
-		2: <OnboardingPageShell
-
-			content={
-				<div>
-					<div className="text-5xl font-light text-center">Settings and Themes</div>
-
-					<div className="mt-8 text-center flex flex-col items-center gap-4 w-full max-w-md mx-auto">
-						<h4 className="text-void-fg-3 mb-4">Transfer your settings from an existing editor?</h4>
-						<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="VS Code" />
-						<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="Cursor" />
-						<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="Windsurf" />
-					</div>
-				</div>
-			}
-			bottom={lastPagePrevAndNextButtons}
-		/>,
+	let content: React.ReactNode
+	if (stepName === 'welcome') {
+		content = <div className='flex flex-col items-center gap-8 px-6'>
+			<FadeIn className='flex flex-col items-center gap-8'>
+				<div className='text-5xl font-light text-center'>Welcome to Kodia</div>
+				{!isLinux && <VoidIcon />}
+				<div className='text-root text-void-fg-3 text-center'>Set up an AI model and bring your editor settings: it takes a minute.</div>
+			</FadeIn>
+			<FadeIn delayMs={1000} className='flex flex-col items-center gap-2'>
+				<PrimaryActionButton onClick={() => setStepName('model')}>Get Started</PrimaryActionButton>
+				{setUpLater}
+			</FadeIn>
+		</div>
+	}
+	else if (stepName === 'model') {
+		content = <OnboardingStep
+			stepName='model'
+			title='Choose a model'
+			description={`Kodia's AI features need a model: from a provider, with your API key, or from a server running on your computer.`}
+			footerLeft={setUpLater}
+			footerRight={<>
+				{!hasChatModel && <span className='text-sm text-void-fg-3'>Add a model to continue</span>}
+				<TextButton onClick={() => setStepName('welcome')}>Back</TextButton>
+				<PrimaryActionButton disabled={!hasChatModel} onClick={() => setStepName('import')}>Next</PrimaryActionButton>
+			</>}
+		>
+			<ChooseModel />
+		</OnboardingStep>
+	}
+	else {
+		content = <OnboardingStep
+			stepName='import'
+			title='Import your setup'
+			description='Bring your settings from another editor, and pick a theme. You can change all of this later in the settings.'
+			footerLeft={null}
+			footerRight={<>
+				<TextButton onClick={() => setStepName('model')}>Back</TextButton>
+				<PrimaryActionButton onClick={() => finish({ skipped: false })}>Enter Kodia</PrimaryActionButton>
+			</>}
+		>
+			<ImportSetup />
+		</OnboardingStep>
 	}
 
-
-	return <div key={pageIndex} className="w-full h-[80vh] text-left mx-auto flex flex-col items-center justify-center">
+	return <div key={stepName} className="w-full h-full text-left flex flex-col items-center justify-center">
 		<ErrorBoundary>
-			{contentOfIdx[pageIndex]}
+			{content}
 		</ErrorBoundary>
 	</div>
-
 }

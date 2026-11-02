@@ -18,6 +18,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { EndOfLinePreference } from '../../../../editor/common/model.js';
 import { IMCPService } from '../common/mcpService.js';
 import { IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
+import { joinUserInstructions } from '../common/instructionsFrameworks.js';
 
 import { ChatMedia, CLEARED_TOOL_RESULT, prepareMessages, prepareSimpleLLMMessages, SimpleLLMMessage } from '../common/prepareLLMMessages.js';
 
@@ -80,16 +81,18 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		return this.projectMemoryService.getMemory()
 	}
 
-	// The user's own instructions: from settings and the project's rules files
+	// The user's own instructions: from settings (with the frameworks they turned on) and the project's rules files
 	private _getGuidelines(): string {
-		const globalAIInstructions = this.voidSettingsService.state.globalSettings.aiInstructions;
+		const { aiInstructions, instructionsFrameworks } = this.voidSettingsService.state.globalSettings;
+		const globalAIInstructions = joinUserInstructions(aiInstructions, instructionsFrameworks);
 		const rulesFileContent = this._getProjectRulesFileContents();
 		return [globalAIInstructions, rulesFileContent].filter(s => !!s).join('\n\n')
 	}
 
 	// Get combined AI instructions from settings, the project's rules files, and saved project memory
-	private _getCombinedAIInstructions(rulesFileNames?: readonly string[]): string {
-		const globalAIInstructions = this.voidSettingsService.state.globalSettings.aiInstructions;
+	private _getCombinedAIInstructions(rulesFileNames?: readonly string[], withFrameworks = true): string {
+		const { aiInstructions, instructionsFrameworks } = this.voidSettingsService.state.globalSettings;
+		const globalAIInstructions = withFrameworks ? joinUserInstructions(aiInstructions, instructionsFrameworks) : aiInstructions;
 		const rulesFileContent = this._getProjectRulesFileContents(rulesFileNames);
 		const projectMemory = this._getProjectMemory();
 
@@ -300,9 +303,9 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 	// --- FIM ---
 
 	prepareFIMMessage: IConvertToLLMMessageService['prepareFIMMessage'] = ({ messages }) => {
-		// Get combined AI instructions with the provided aiInstructions as the base. Only Kodia's own rules file:
-		// autocomplete sends them with every keystroke, and other agents' files (AGENTS.md, ...) are often long
-		const combinedInstructions = this._getCombinedAIInstructions(['.voidrules']);
+		// Get combined AI instructions with the provided aiInstructions as the base. Only Kodia's own rules file, and no
+		// frameworks: autocomplete sends them with every keystroke, and other agents' files (AGENTS.md, ...) are often long
+		const combinedInstructions = this._getCombinedAIInstructions(['.voidrules'], false);
 
 		let prefix = `\
 ${!combinedInstructions ? '' : `\

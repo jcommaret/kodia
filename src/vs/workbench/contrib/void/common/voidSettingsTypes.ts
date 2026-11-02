@@ -6,6 +6,7 @@
 
 import { defaultModelsOfProvider, defaultProviderSettings, ModelOverrides, VoidStaticModelInfo } from './modelCapabilities.js';
 import { ToolApprovalType } from './toolsServiceTypes.js';
+import { InstructionsFramework } from './instructionsFrameworks.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
 
@@ -461,6 +462,7 @@ export type GlobalSettings = {
 	/** macOS only: install `mlx-lm` via pip and start mlx_lm.server */
 	autoSetupMlx: boolean;
 	aiInstructions: string;
+	instructionsFrameworks: InstructionsFramework[];
 	enableAutocomplete: boolean;
 	syncApplyToChat: boolean;
 	syncSCMToChat: boolean;
@@ -479,6 +481,7 @@ export const defaultGlobalSettings: GlobalSettings = {
 	autoRefreshModels: true,
 	autoSetupMlx: true,
 	aiInstructions: '',
+	instructionsFrameworks: [],
 	enableAutocomplete: false,
 	syncApplyToChat: true,
 	syncSCMToChat: true,

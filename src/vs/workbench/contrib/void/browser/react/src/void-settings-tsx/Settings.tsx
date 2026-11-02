@@ -24,6 +24,8 @@ import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { useMCPServiceState } from '../util/services.js';
 import { OPT_OUT_KEY } from '../../../../common/storageKeys.js';
 import { PROJECT_MEMORY_FILE_PATH } from '../../../../common/projectMemoryService.js';
+import { builtinInstructionsFrameworks, downloadInstructionsFramework, InstructionsFramework } from '../../../../common/instructionsFrameworks.js';
+import { generateUuid } from '../../../../../../../base/common/uuid.js';
 import { StorageScope, StorageTarget } from '../../../../../../../platform/storage/common/storage.js';
 
 type Tab =
@@ -824,6 +826,194 @@ export const AIInstructionsBox = () => {
 	/>
 }
 
+// Kodia's frameworks (downloaded when turned on), then the user's: downloaded from a link, or written here
+const InstructionsFrameworks = () => {
+	const accessor = useAccessor()
+	const voidSettingsService = accessor.get('IVoidSettingsService')
+	const requestService = accessor.get('IRequestService')
+	const frameworks = useSettingsState().globalSettings.instructionsFrameworks
+
+	const [downloadingId, setDownloadingId] = useState<string | null>(null)
+	const [errorOfId, setErrorOfId] = useState<{ [id: string]: string | undefined }>({})
+	const [editingId, setEditingId] = useState<string | null>(null)
+	const [editorKey, setEditorKey] = useState(0) // remounts the text box when a download replaces the text
+
+	const [isAddOpen, setIsAddOpen] = useState(false)
+	const [newName, setNewName] = useState('')
+	const [newURL, setNewURL] = useState('')
+	const [addError, setAddError] = useState('')
+	const [isAdding, setIsAdding] = useState(false)
+
+	// from the latest settings, not this render's: they may have changed during a download
+	const saveFramework = (framework: InstructionsFramework) => {
+		const current = voidSettingsService.state.globalSettings.instructionsFrameworks
+		const exists = current.some(f => f.id === framework.id)
+		voidSettingsService.setGlobalSetting('instructionsFrameworks', exists ? current.map(f => f.id === framework.id ? framework : f) : [...current, framework])
+	}
+	const changeFramework = (id: string, change: Partial<InstructionsFramework>) => {
+		const current = voidSettingsService.state.globalSettings.instructionsFrameworks
+		voidSettingsService.setGlobalSetting('instructionsFrameworks', current.map(f => f.id === id ? { ...f, ...change } : f))
+	}
+
+	// (again) the framework's text; a new framework is turned on
+	const download = async ({ id, name, sourceURL }: { id: string, name: string, sourceURL: string }) => {
+		setDownloadingId(id)
+		setErrorOfId(errors => ({ ...errors, [id]: undefined }))
+		try {
+			const content = await downloadInstructionsFramework(requestService, sourceURL)
+			const isOn = voidSettingsService.state.globalSettings.instructionsFrameworks.find(f => f.id === id)?.isOn ?? true
+			saveFramework({ id, name, sourceURL, content, isOn })
+			setEditorKey(k => k + 1)
+		}
+		catch (e) {
+			setErrorOfId(errors => ({ ...errors, [id]: e instanceof Error ? e.message : `${e}` }))
+		}
+		finally {
+			setDownloadingId(null)
+		}
+	}
+
+	const onAdd = async () => {
+		const id = generateUuid()
+		const name = newName.trim()
+		const sourceURL = newURL.trim()
+		setIsAdding(true)
+		setAddError('')
+		try {
+			const content = sourceURL ? await downloadInstructionsFramework(requestService, sourceURL) : ''
+			saveFramework({ id, name, sourceURL, content, isOn: true })
+			if (!sourceURL) setEditingId(id) // to write it
+			setIsAddOpen(false)
+			setNewName('')
+			setNewURL('')
+		}
+		catch (e) {
+			setAddError(e instanceof Error ? e.message : `${e}`)
+		}
+		finally {
+			setIsAdding(false)
+		}
+	}
+
+	const rows = [
+		...builtinInstructionsFrameworks.map(({ id, name, group, description, homepage, sourceURL }) =>
+			({ id, name, group, description, homepage, sourceURL, isBuiltin: true, framework: frameworks.find(f => f.id === id) })),
+		...frameworks.filter(f => !builtinInstructionsFrameworks.some(b => b.id === f.id)).map(f =>
+			({ id: f.id, name: f.name, group: 'Added by you', description: f.sourceURL ? undefined : 'Written in Kodia.', homepage: f.sourceURL, sourceURL: f.sourceURL, isBuiltin: false, framework: f })),
+	]
+
+	return <div>
+		{rows.map(({ id, name, group, description, homepage, sourceURL, isBuiltin, framework }, i) => {
+			const isDownloading = downloadingId === id
+			const error = errorOfId[id]
+			return <React.Fragment key={id}>{group !== rows[i - 1]?.group && <div className='text-xs text-void-fg-3 uppercase tracking-wide mt-4 mb-1'>{group}</div>}<div className='border border-void-border-2 bg-void-bg-1 py-3 px-4 rounded-sm my-2 group'>
+				<div className='flex items-center justify-between gap-4'>
+					<div className='flex flex-col gap-1 min-w-0'>
+						<div className='text-sm font-medium text-void-fg-1'>{name}</div>
+						{description && <div className='text-xs text-void-fg-3'>{description}</div>}
+						{homepage && <div className='text-xs text-void-fg-3 truncate select-text'>
+							<ChatMarkdownRender string={`[${homepage.replace(/^https?:\/\//, '')}](${homepage})`} chatMessageLocation={undefined} />
+						</div>}
+					</div>
+
+					<div className='flex items-center gap-3 shrink-0'>
+						{framework && <button
+							className='text-xs text-void-fg-3 hover:brightness-110'
+							onClick={() => setEditingId(editingId === id ? null : id)}
+						>
+							{editingId === id ? 'Hide' : 'Edit'}
+						</button>}
+						{framework && sourceURL && <button
+							disabled={isDownloading}
+							onClick={() => download({ id, name, sourceURL })}
+							data-tooltip-id='void-tooltip'
+							data-tooltip-place='top'
+							data-tooltip-content='Download it again (replaces your edits)'
+						>
+							{isDownloading ? <Loader2 className='size-3 animate-spin text-void-fg-3' /> : <RefreshCw className='size-3 text-void-fg-3' />}
+						</button>}
+						{!framework && isDownloading && <Loader2 className='size-3 animate-spin text-void-fg-3' />}
+						<VoidSwitch
+							size='xs'
+							value={!!framework?.isOn}
+							disabled={isDownloading}
+							onChange={(isOn) => {
+								// Kodia's frameworks are downloaded the first time they're turned on
+								if (!framework) download({ id, name, sourceURL })
+								else changeFramework(id, { isOn })
+							}}
+						/>
+						{!isBuiltin && <button
+							onClick={() => {
+								const current = voidSettingsService.state.globalSettings.instructionsFrameworks
+								voidSettingsService.setGlobalSetting('instructionsFrameworks', current.filter(f => f.id !== id))
+							}}
+							data-tooltip-id='void-tooltip'
+							data-tooltip-place='top'
+							data-tooltip-content='Delete'
+							className='opacity-0 group-hover:opacity-100 transition-opacity'
+						>
+							<X size={12} className='text-void-fg-3' />
+						</button>}
+					</div>
+				</div>
+
+				{error && <WarningBox className='mt-2' text={error} />}
+
+				{framework && editingId === id && <VoidInputBox2
+					key={`${id}-${editorKey}`}
+					className='min-h-[81px] max-h-[400px] p-3 rounded-sm mt-3'
+					initValue={framework.content}
+					placeholder='The instructions to give the AI.'
+					multiline
+					onChangeText={(content) => changeFramework(id, { content })}
+				/>}
+			</div></React.Fragment>
+		})}
+
+		{isAddOpen ? <div className='mt-4'>
+			<form className='flex items-center gap-2' onSubmit={(e) => { e.preventDefault(); if (newName.trim() && !isAdding) onAdd() }}>
+				<VoidSimpleInputBox
+					value={newName}
+					compact={true}
+					onChangeValue={setNewName}
+					placeholder='Name'
+					className='max-w-40'
+				/>
+				<VoidSimpleInputBox
+					value={newURL}
+					compact={true}
+					onChangeValue={setNewURL}
+					placeholder='GitHub or raw file link (empty to write it)'
+				/>
+				<AddButton type='submit' disabled={!newName.trim() || isAdding} text={isAdding ? <Loader2 className='size-4 animate-spin' /> : 'Add'} />
+				<button
+					type='button'
+					onClick={() => {
+						setIsAddOpen(false)
+						setAddError('')
+						setNewName('')
+						setNewURL('')
+					}}
+					className='text-void-fg-4'
+				>
+					<X className='size-4' />
+				</button>
+			</form>
+			{addError && <WarningBox className='mt-2' text={addError} />}
+		</div>
+			: <div
+				className='text-void-fg-4 flex flex-nowrap text-nowrap items-center hover:brightness-110 cursor-pointer mt-4'
+				onClick={() => setIsAddOpen(true)}
+			>
+				<div className='flex items-center gap-1'>
+					<Plus size={16} />
+					<span>Add a framework or instructions</span>
+				</div>
+			</div>}
+	</div>
+}
+
 const FastApplyMethodDropdown = () => {
 	const accessor = useAccessor()
 	const voidSettingsService = accessor.get('IVoidSettingsService')
@@ -1603,6 +1793,16 @@ Kodia also reads \`.voidrules\`, \`AGENTS.md\`, \`CLAUDE.md\`, \`.cursorrules\` 
 									<ErrorBoundary>
 										<AIInstructionsBox />
 									</ErrorBoundary>
+									{/* Frameworks */}
+									<div className='mt-6'>
+										<h4 className={`text-base`}>Frameworks</h4>
+										<div className='text-void-fg-3 text-xs mt-1 mb-2'>
+											{`Ready-made guidelines added to these instructions while they're on. Kodia downloads a framework when you turn it on or add it, then keeps its text: edit it, or download it again to update it.`}
+										</div>
+										<ErrorBoundary>
+											<InstructionsFrameworks />
+										</ErrorBoundary>
+									</div>
 									{/* --- Disable System Message Toggle --- */}
 									<div className='my-4'>
 										<ErrorBoundary>

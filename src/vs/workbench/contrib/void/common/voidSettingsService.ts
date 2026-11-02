@@ -343,6 +343,8 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			if (readS.globalSettings.autoSetupMlx === undefined) {
 				readS.globalSettings.autoSetupMlx = isMacintosh;
 			}
+
+			if (!Array.isArray(readS.globalSettings.instructionsFrameworks)) readS.globalSettings.instructionsFrameworks = []
 		}
 		catch (e) {
 			readS = defaultState()

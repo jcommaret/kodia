@@ -7,7 +7,7 @@ import { IWorkspaceContextService } from '../../../../platform/workspace/common/
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ChatMessage, StagingSelectionItem } from '../common/chatThreadServiceTypes.js';
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities, anthropicModelFeatures } from '../common/modelCapabilities.js';
-import { chat_systemMessage, chat_filesOverview, chat_workspaceContext, joinProjectRules, PROJECT_RULES_FILE_NAMES, summarizedThreadMessage } from '../common/prompt/prompts.js';
+import { chat_systemMessage, chat_filesOverview, chat_skills, chat_workspaceContext, joinProjectRules, PROJECT_RULES_FILE_NAMES, summarizedThreadMessage } from '../common/prompt/prompts.js';
 import { LLMChatMessage, LLMFIMMessage } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, modelSelectionsEqual } from '../common/voidSettingsTypes.js';
@@ -19,6 +19,9 @@ import { EndOfLinePreference } from '../../../../editor/common/model.js';
 import { IMCPService } from '../common/mcpService.js';
 import { IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
 import { joinUserInstructions } from '../common/instructionsFrameworks.js';
+import { skillsOfPrompt } from '../common/agentSkills.js';
+import { IPromptsService } from '../../chat/common/promptSyntax/service/promptsService.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 
 import { ChatMedia, CLEARED_TOOL_RESULT, prepareMessages, prepareSimpleLLMMessages, SimpleLLMMessage } from '../common/prepareLLMMessages.js';
 
@@ -52,6 +55,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		@IVoidModelService private readonly voidModelService: IVoidModelService,
 		@IMCPService private readonly mcpService: IMCPService,
 		@IProjectMemoryService private readonly projectMemoryService: IProjectMemoryService,
+		@IPromptsService private readonly promptsService: IPromptsService,
 	) {
 		super()
 	}
@@ -81,6 +85,16 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		return this.projectMemoryService.getMemory()
 	}
 
+	// The agent skills (SKILL.md) of the workspace and the user's home, found and kept up to date by the chat's prompts service
+	private async _getSkills() {
+		try {
+			return skillsOfPrompt(await this.promptsService.findAgentSkills(CancellationToken.None))
+		}
+		catch (e) {
+			return []
+		}
+	}
+
 	// The user's own instructions: from settings (with the frameworks they turned on) and the project's rules files
 	private _getGuidelines(): string {
 		const { aiInstructions, instructionsFrameworks } = this.voidSettingsService.state.globalSettings;
@@ -106,7 +120,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 
 	// The chat system prompt, from the most stable part to the most changing one, so that a provider's
 	// prompt cache keeps the longest possible prefix:
-	//   static instructions -> the user's guidelines -> project memory (the agent writes it) -> file tree (changes when files are created)
+	//   static instructions -> the user's guidelines -> skills (change when one is installed) -> project memory (the agent writes it) -> file tree (changes when files are created)
 	private _generateChatSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean) => {
 		const sections: string[] = []
 
@@ -119,6 +133,12 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 
 		const guidelines = this._getGuidelines()
 		if (guidelines) sections.push(`GUIDELINES (from the user's settings and the project's rules files):\n${guidelines}`)
+
+		// the agent loads a skill with read_file, which only these modes have
+		if (!disableSystemMessage && (chatMode === 'agent' || chatMode === 'gather')) {
+			const skills = await this._getSkills()
+			if (skills.length > 0) sections.push(chat_skills(skills))
+		}
 
 		await this.projectMemoryService.whenReady
 		const projectMemory = this._getProjectMemory()

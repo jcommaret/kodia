@@ -32,7 +32,7 @@ import { IsRunningType } from '../../../chatThreadService.js';
 import { builtinToolNames, isABuiltinToolName, MAX_FILE_CHARS_PAGE } from '../../../../common/prompt/prompts.js';
 import { RawToolCallObj } from '../../../../common/sendLLMMessageTypes.js';
 import ErrorBoundary from './ErrorBoundary.js';
-import { ToolApprovalTypeSwitch } from '../void-settings-tsx/Settings.js';
+import { ToolApprovalTypeSwitch } from '../void-settings-tsx/AgentSettings.js';
 
 import { persistentTerminalNameOfId } from '../../../terminalToolService.js';
 import { removeMCPToolNamePrefix } from '../../../../common/mcpServiceTypes.js';

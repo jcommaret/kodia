@@ -510,7 +510,42 @@ export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderN
 
 // providers
 
-const ProviderSetting = ({ providerName, settingName, subTextMd }: { providerName: ProviderName, settingName: SettingName, subTextMd: React.ReactNode }) => {
+// Whether a provider can be used: a cloud provider once its fields are filled in, a local server while it answers
+// Kodia's polling. A poll first sets 'refreshing': the last answer stays shown meanwhile.
+const ProviderStatus = ({ providerName }: { providerName: ProviderName }) => {
+	const settingsState = useSettingsState()
+	const refreshModelState = useRefreshModelState()
+	const lastAnswerRef = useRef<'finished' | 'error' | null>(null)
+	const providerSettings = settingsState.settingsOfProvider[providerName]
+
+	let isOk: boolean
+	let label: string
+	if ((refreshableProviderNames as readonly ProviderName[]).includes(providerName)) {
+		const { state } = refreshModelState[providerName as RefreshableProviderName]
+		if (state === 'finished' || state === 'error') lastAnswerRef.current = state
+		const answer = state === 'refreshing' ? lastAnswerRef.current : state
+		const modelCount = providerSettings.models.filter(m => m.type === 'autodetected').length
+		isOk = answer === 'finished'
+		label = answer === 'finished' ? `Running · ${modelCount} model${modelCount === 1 ? '' : 's'}`
+			: answer === 'error' ? 'Not running'
+				: answer === 'init' ? 'Not checked'
+					: 'Checking...'
+	}
+	else {
+		const needsAPIKey = customSettingNamesOfProvider(providerName).includes('apiKey')
+		isOk = !!providerSettings._didFillInProviderSettings
+		label = isOk ? 'Set up'
+			: needsAPIKey && !(providerSettings as { apiKey?: string }).apiKey ? 'API key missing'
+				: 'Not set up'
+	}
+
+	return <span className='inline-flex items-center gap-1.5 text-sm text-void-fg-3 shrink-0'>
+		<span className={`size-1.5 rounded-full ${isOk ? 'bg-green-500' : 'bg-void-fg-4'}`} />
+		{label}
+	</span>
+}
+
+const ProviderSetting =({ providerName, settingName, subTextMd }: { providerName: ProviderName, settingName: SettingName, subTextMd: React.ReactNode }) => {
 
 	const { title: settingTitle, placeholder, isPasswordField } = displayInfoOfSettingName(providerName, settingName)
 
@@ -564,6 +599,7 @@ export const SettingsForProvider = ({ providerName, showProviderTitle, showProvi
 
 		<div className='flex items-center w-full gap-4'>
 			{showProviderTitle && <h4 className='text-root font-medium truncate'>{providerTitle}</h4>}
+			{showProviderTitle && <ProviderStatus providerName={providerName} />}
 
 			{/* enable provider switch */}
 			{/* <VoidSwitch
@@ -689,7 +725,10 @@ export const localServers: readonly LocalServerInfo[] = [
 // A server on the user's computer: how to set it up, its endpoint, and a refresh of its models
 export const LocalServer = ({ server: { title, description, instructions, autoSetup, providerNames } }: { server: LocalServerInfo }) => {
 	return <div className='flex flex-col gap-2'>
-		<h4 className='text-root font-medium'>{title}</h4>
+		<div className='flex items-center gap-4'>
+			<h4 className='text-root font-medium'>{title}</h4>
+			{providerNames.length === 1 && <ProviderStatus providerName={providerNames[0]} />}
+		</div>
 		<div className='text-sm text-void-fg-3'>{description}</div>
 		{autoSetup}
 		{instructions}

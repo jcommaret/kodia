@@ -3,7 +3,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react'
 import { GlobalSettingName, GlobalSettings } from '../../../../common/voidSettingsTypes.js'
 import { VoidButtonBgDarken, VoidSwitch } from '../util/inputs.js'
@@ -22,7 +22,12 @@ export const SettingsSection = ({ title, description, children }: { title: strin
 	</section>
 }
 
+// While the settings are searched: the titles of the groups that match (undefined: no search, every group shows)
+export const SettingsSearchContext = createContext<ReadonlySet<string> | undefined>(undefined)
+
 export const SettingGroup = ({ title, description, children }: { title: string, description?: React.ReactNode, children: React.ReactNode }) => {
+	const matchingGroups = useContext(SettingsSearchContext)
+	if (matchingGroups && !matchingGroups.has(title)) return null
 	return <div>
 		<h3 className='text-lg font-medium'>{title}</h3>
 		{description && <div className='text-sm text-void-fg-3 mt-1'>{description}</div>}

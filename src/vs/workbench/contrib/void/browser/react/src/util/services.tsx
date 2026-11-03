@@ -57,6 +57,7 @@ import { IProjectMemoryService } from '../../../../common/projectMemoryService.j
 import { OPT_OUT_KEY } from '../../../../common/storageKeys.js'
 import { IRequestService } from '../../../../../../../platform/request/common/request.js'
 import { IWorkbenchThemeService } from '../../../../../../../workbench/services/themes/common/workbenchThemeService.js'
+import { IPromptsService } from '../../../../../../../workbench/contrib/chat/common/promptSyntax/service/promptsService.js'
 
 
 // normally to do this you'd use a useEffect that calls .onDidChangeState(), but useEffect mounts too late and misses initial state changes
@@ -234,6 +235,7 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IProjectMemoryService: accessor.get(IProjectMemoryService),
 		IRequestService: accessor.get(IRequestService),
 		IWorkbenchThemeService: accessor.get(IWorkbenchThemeService),
+		IPromptsService: accessor.get(IPromptsService),
 
 	} as const
 	return reactAccessor

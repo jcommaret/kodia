@@ -13,7 +13,114 @@ import { WarningBox } from './WarningBox.js'
 import { PROJECT_MEMORY_FILE_PATH } from '../../../../common/projectMemoryService.js';
 import { builtinInstructionsFrameworks, downloadInstructionsFramework, InstructionsFramework } from '../../../../common/instructionsFrameworks.js';
 import { generateUuid } from '../../../../../../../base/common/uuid.js';
+import { URI } from '../../../../../../../base/common/uri.js';
+import { CancellationToken } from '../../../../../../../base/common/cancellation.js';
+import { PROJECT_RULES_FILE_NAMES } from '../../../../common/prompt/prompts.js';
+import { SkillOfPrompt, skillsOfPrompt } from '../../../../common/agentSkills.js';
 import { AddButton, AddRowButton, ConfirmButton, GlobalSettingSwitch, SettingGroup, SettingsSection } from './SettingsControls.js'
+
+type RulesFile = { uri: URI, path: string, sentAs: 'sent' | 'empty' | { sameAs: string } }
+
+// The rules files at the root of the workspace folders, as Kodia sends them (joinProjectRules):
+// an empty file and a file with the same content as an earlier one (a symlink, a copy) aren't sent
+const useProjectRulesFiles = () => {
+	const accessor = useAccessor()
+	const fileService = accessor.get('IFileService')
+	const workspaceContextService = accessor.get('IWorkspaceContextService')
+	const [files, setFiles] = useState<RulesFile[]>([])
+
+	useEffect(() => {
+		let isDisposed = false
+		const candidates = () => {
+			const folders = workspaceContextService.getWorkspace().folders
+			return folders.flatMap(folder => PROJECT_RULES_FILE_NAMES.map(fileName => ({
+				uri: URI.joinPath(folder.uri, fileName),
+				path: folders.length > 1 ? `${folder.name}/${fileName}` : fileName,
+			})))
+		}
+		const update = async () => {
+			const found: RulesFile[] = []
+			const pathOfContent = new Map<string, string>()
+			for (const { uri, path } of candidates()) {
+				const content = await fileService.readFile(uri).then(f => f.value.toString().trim(), () => undefined)
+				if (content === undefined) continue
+				const sameAs = pathOfContent.get(content)
+				found.push({ uri, path, sentAs: !content ? 'empty' : sameAs ? { sameAs } : 'sent' })
+				if (content && !sameAs) pathOfContent.set(content, path)
+			}
+			if (!isDisposed) setFiles(found)
+		}
+		update()
+		const d1 = fileService.onDidFilesChange(e => { if (candidates().some(({ uri }) => e.affects(uri))) update() })
+		const d2 = workspaceContextService.onDidChangeWorkspaceFolders(() => update())
+		return () => { isDisposed = true; d1.dispose(); d2.dispose() }
+	}, [fileService, workspaceContextService])
+
+	return files
+}
+
+const RulesFiles = () => {
+	const accessor = useAccessor()
+	const commandService = accessor.get('ICommandService')
+	const hasFolder = accessor.get('IWorkspaceContextService').getWorkspace().folders.length > 0
+	const files = useProjectRulesFiles()
+
+	if (files.length === 0) {
+		return <div className='text-sm text-void-fg-3'>{hasFolder ? 'No rules file in this workspace.' : 'Open a folder: Kodia reads these files at its root.'}</div>
+	}
+	return <div className='flex flex-col gap-1'>
+		{files.map(({ uri, path, sentAs }) => <div key={uri.toString()} className='flex items-center gap-3'>
+			<button type='button' className='text-root text-void-fg-1 underline hover:brightness-125' onClick={() => commandService.executeCommand('vscode.open', uri)}>{path}</button>
+			<span className='text-sm text-void-fg-3'>
+				{sentAs === 'sent' ? 'Sent with every request' : sentAs === 'empty' ? 'Empty: not sent' : `Same content as ${sentAs.sameAs}: not sent twice`}
+			</span>
+		</div>)}
+	</div>
+}
+
+// The skills the chat lists (the same filter: a description, and not only for the user to run), kept up to date
+const useAgentSkills = () => {
+	const promptsService = useAccessor().get('IPromptsService')
+	const [skills, setSkills] = useState<SkillOfPrompt[] | 'off' | 'loading'>('loading')
+
+	useEffect(() => {
+		let isDisposed = false
+		const update = () => promptsService.findAgentSkills(CancellationToken.None).then(
+			found => { if (!isDisposed) setSkills(found === undefined ? 'off' : skillsOfPrompt(found)) },
+			() => { if (!isDisposed) setSkills([]) },
+		)
+		update()
+		const d = promptsService.onDidChangeSkills(() => update())
+		return () => { isDisposed = true; d.dispose() }
+	}, [promptsService])
+
+	return skills
+}
+
+const Skills = () => {
+	const commandService = useAccessor().get('ICommandService')
+	const skills = useAgentSkills()
+	const openFoldersSetting = () => commandService.executeCommand('workbench.action.openSettings', 'chat.agentSkillsLocations')
+
+	return <>
+		{skills === 'loading' ? <div className='text-sm text-void-fg-3'>Looking for skills...</div>
+			: skills === 'off' ? <div className='text-sm text-void-fg-3'>Skills are turned off (the chat.useAgentSkills setting).</div>
+				: skills.length === 0 ? <div className='text-sm text-void-fg-3'>No skill found.</div>
+					: <div className='flex flex-col gap-2 max-h-[400px] overflow-y-auto pr-2'>
+						{skills.map(({ name, description, path }) => <div key={path} className='border border-void-border-2 bg-void-bg-1 py-2 px-3 rounded-sm'>
+							<div className='flex items-center justify-between gap-4'>
+								<div className='text-root font-medium text-void-fg-1 truncate'>{name}</div>
+								<button type='button' className='text-sm text-void-fg-3 hover:brightness-125 shrink-0' onClick={() => commandService.executeCommand('vscode.open', URI.file(path))}>Open</button>
+							</div>
+							<div className='text-sm text-void-fg-3 mt-1 line-clamp-2'>{description}</div>
+							<div className='text-xs text-void-fg-4 mt-1 truncate select-text' title={path}>{path}</div>
+						</div>)}
+					</div>}
+		<div>
+			<VoidButtonBgDarken className='px-4 py-1' onClick={openFoldersSetting}>Choose Skill Folders</VoidButtonBgDarken>
+		</div>
+	</>
+}
 
 const AIInstructionsBox = () => {
 	const accessor = useAccessor()
@@ -282,15 +389,27 @@ const ProjectMemory = () => {
 
 export const InstructionsSection = () => {
 	return <SettingsSection title='Instructions & Context' description='What Kodia tells the AI besides your messages: your instructions, the guidelines you turned on, and what the agent remembers about the project.'>
-		<SettingGroup title='Instructions' description={<ChatMarkdownRender inPTag={true} string={`Sent with every request. Kodia also reads \`.voidrules\`, \`AGENTS.md\`, \`CLAUDE.md\`, \`.cursorrules\` and \`.windsurfrules\` at the root of your workspace.`} chatMessageLocation={undefined} />}>
+		<SettingGroup title='Instructions' description='Your instructions, sent with every request.'>
 			<ErrorBoundary>
 				<AIInstructionsBox />
+			</ErrorBoundary>
+		</SettingGroup>
+
+		<SettingGroup title='Rules files' description={<ChatMarkdownRender inPTag={true} string={`The project's instructions: Kodia reads \`.voidrules\`, \`AGENTS.md\`, \`CLAUDE.md\`, \`.cursorrules\` and \`.windsurfrules\` at the root of your workspace, and sends them with every request.`} chatMessageLocation={undefined} />}>
+			<ErrorBoundary>
+				<RulesFiles />
 			</ErrorBoundary>
 		</SettingGroup>
 
 		<SettingGroup title='Frameworks' description={`Ready-made guidelines added to your instructions while they're on. Kodia downloads a framework when you turn it on or add it, then keeps its text: edit it, or download it again to update it.`}>
 			<ErrorBoundary>
 				<InstructionsFrameworks />
+			</ErrorBoundary>
+		</SettingGroup>
+
+		<SettingGroup title='Skills' description={<ChatMarkdownRender inPTag={true} string={`Instructions for specific tasks, each in a folder with a \`SKILL.md\` (in \`.kodia/skills\`, \`.claude/skills\` or \`.agents/skills\` of your workspace, or \`~/.claude/skills\`, \`~/.agents/skills\`). In Agent and Gather modes, the chat gets each skill's name and description, and the agent reads a skill when a task matches it.`} chatMessageLocation={undefined} />}>
+			<ErrorBoundary>
+				<Skills />
 			</ErrorBoundary>
 		</SettingGroup>
 

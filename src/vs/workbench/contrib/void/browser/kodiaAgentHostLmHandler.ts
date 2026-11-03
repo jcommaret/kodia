@@ -12,6 +12,7 @@ import { IKodiaAgentHostLmHandler } from '../../../../platform/agentHost/common/
 import { toInternalTool, toOutput, toSimpleMessages, toUsage } from '../common/kodiaAgentHostLmMessages.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { toolsXMLSystemPrompt } from '../common/prompt/prompts.js';
+import { joinUserInstructions } from '../common/instructionsFrameworks.js';
 import { IMlxService } from '../common/mlxService.js';
 import { prepareSimpleLLMMessages } from '../common/prepareLLMMessages.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
@@ -69,7 +70,7 @@ class KodiaAgentHostLmHandler extends Disposable implements IAgentHostByokLmHand
 			simpleMessages: toSimpleMessages(request.input),
 			systemMessage,
 			// The agent works on its session's folder, not on an editor window's workspace, whose rules and memory don't apply.
-			aiInstructions: globalSettings.aiInstructions,
+			aiInstructions: joinUserInstructions(globalSettings.aiInstructions, globalSettings.instructionsFrameworks),
 			modelSelection,
 			featureName: 'Chat',
 			overridesOfModel,

@@ -98,3 +98,6 @@ import '../common/voidModelService.js'
 
 // project memory (.kodia/memory.md)
 import '../common/projectMemoryService.js'
+
+// agent skills: .kodia/skills next to the chat's skill folders
+import '../common/agentSkills.js'

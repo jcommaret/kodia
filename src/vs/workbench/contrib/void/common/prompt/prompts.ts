@@ -628,6 +628,26 @@ ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)
 
 }
 
+// sent with every request: past this, the remaining skills are listed by name and file only
+const MAX_SKILL_DESCRIPTIONS_CHARS = 20_000
+
+// The agent skills (SKILL.md files) the agent can load: their name and description only, it reads a skill's file when a task matches it
+export const chat_skills = (skills: readonly { name: string, description: string, path: string }[]) => {
+	let descriptionsChars = 0
+	const entries = skills.map(({ name, description, path }) => {
+		descriptionsChars += description.length
+		return descriptionsChars <= MAX_SKILL_DESCRIPTIONS_CHARS
+			? `<skill>\n<name>${name}</name>\n<description>${description}</description>\n<file>${path}</file>\n</skill>`
+			: `<skill>\n<name>${name}</name>\n<file>${path}</file>\n</skill>`
+	})
+	return `SKILLS (instructions for specific kinds of tasks, from SKILL.md files in the workspace and the user's home):
+When the user's request matches a skill's description, read the skill's file with read_file before you start the task, and follow it. \
+A skill can refer to other files in its folder, by paths relative to that folder: read them when the skill tells you to.
+<skills>
+${entries.join('\n')}
+</skills>`
+}
+
 // last in the system prompt: it changes whenever a file is created or deleted
 export const chat_filesOverview = (directoryStr: string) => `Here is an overview of the user's file system:
 <files_overview>

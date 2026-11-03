@@ -342,7 +342,7 @@
     "@types/ssh2-streams": "0.1.12"
   },
   "dependencies": {
-    "glob": "^13.0.6",
+    "glob": "^14.0.2",
     "simple-socks": "git+https://github.com/jeanp413/simple-socks#main",
     "socks": "^2.8.9",
     "@jeanp413/ssh-config": "^4.3.1",

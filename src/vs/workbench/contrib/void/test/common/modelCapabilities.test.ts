@@ -25,6 +25,9 @@ suite('Kodia - model capabilities', () => {
 			['openAI', 'gpt-6-sol', 'gpt-6-sol'],
 			['mistral', 'mistral-large-4-0', 'mistral-large-4'],
 			['mistral', 'Mistral-Large-4', 'mistral-large-4'],
+			// fable-5-2 must not be taken for fable-5, nor haiku-5-5 for another Claude
+			['liteLLM', 'anthropic/claude-fable-5-2', 'claude-fable-5-2'],
+			['liteLLM', 'anthropic/claude-haiku-5-5', 'claude-haiku-5-5'],
 		];
 		for (const [providerName, modelName, expected] of cases) {
 			assert.strictEqual(getModelCapabilities(providerName, modelName, undefined).recognizedModelName, expected, `${providerName}/${modelName}`);
@@ -93,7 +96,7 @@ suite('Kodia - model capabilities', () => {
 			}
 			const { cost } = getModelCapabilities('mistral', modelName, undefined);
 			assert.ok(cost.cache_read !== undefined, `mistral/${modelName} has no cache_read price`);
-			// published prices are rounded to the cent (Large 4: $0.07 for an input of $0.68)
+			// published prices are rounded to the cent
 			assert.ok(Math.abs(cost.cache_read - cost.input / 10) <= 0.005, `mistral/${modelName}: cache_read should be about input / 10`);
 		}
 	});

@@ -90,11 +90,13 @@ export const catalogModelsOfProvider = {
 		'gpt-5.4-mini',
 	],
 	anthropic: [ // https://docs.anthropic.com/en/docs/about-claude/models/overview
+		'claude-fable-5-2',
 		'claude-fable-5-1',
 		'claude-opus-5-5',
 		'claude-opus-5',
 		'claude-sonnet-5-5',
 		'claude-sonnet-5',
+		'claude-haiku-5-5',
 		'claude-haiku-4-5',
 		'claude-fable-5',
 		'claude-opus-4-8',
@@ -489,6 +491,7 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 	}
 	if (lower.includes('gemini')) return toFallback(geminiModelOptions, 'gemini-3.8-flash')
 
+	if (lower.includes('fable-5-2') || lower.includes('fable-5.2') || lower.includes('fable5.2')) return toFallback(anthropicModelOptions, 'claude-fable-5-2')
 	if (lower.includes('fable-5-1') || lower.includes('fable-5.1') || lower.includes('fable5.1')) return toFallback(anthropicModelOptions, 'claude-fable-5-1')
 	if (lower.includes('mythos-5-1') || lower.includes('mythos-5.1') || lower.includes('mythos5.1')) return toFallback(anthropicModelOptions, 'claude-mythos-5-1')
 	if (lower.includes('claude-3-7') || lower.includes('claude-3.7')) return toFallback(anthropicModelOptions, 'claude-sonnet-5-5')
@@ -501,6 +504,7 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 	if (lower.includes('sonnet-5') || lower.includes('sonnet5')) return toFallback(anthropicModelOptions, 'claude-sonnet-5')
 	if (lower.includes('opus-4-7') || lower.includes('opus-4.7')) return toFallback(anthropicModelOptions, 'claude-opus-4-7')
 	if (lower.includes('sonnet-4-6') || lower.includes('sonnet-4.6')) return toFallback(anthropicModelOptions, 'claude-sonnet-4-6')
+	if (lower.includes('haiku-5-5') || lower.includes('haiku-5.5') || lower.includes('haiku5.5')) return toFallback(anthropicModelOptions, 'claude-haiku-5-5')
 	if (lower.includes('haiku-4-5') || lower.includes('haiku-4.5')) return toFallback(anthropicModelOptions, 'claude-haiku-4-5')
 	if (lower.includes('opus-4-6') || lower.includes('opus-4.6')) return toFallback(anthropicModelOptions, 'claude-opus-4-6')
 	if (lower.includes('sonnet-4-5') || lower.includes('sonnet-4.5')) return toFallback(anthropicModelOptions, 'claude-sonnet-5-5')
@@ -616,16 +620,28 @@ const anthropicAdaptiveThinkingCapabilities_noXHigh = {
 // Claude API features only some models accept: sending them to the others is a 400. Keyed by catalog name.
 export const anthropicModelFeatures = {
 	// `thinking.display` defaults to "omitted" on these: without "summarized", the reasoning comes back empty
-	summarizedThinkingDisplay: new Set(['claude-fable-5-1', 'claude-mythos-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-5-5', 'claude-sonnet-5']),
+	summarizedThinkingDisplay: new Set(['claude-fable-5-2', 'claude-fable-5-1', 'claude-mythos-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-5-5']),
 	// These check that nothing before a replayed thinking block changed (system prompt, tools, earlier messages);
-	// accounts created since 2026-08-31 get a 400 otherwise. `drop_block` makes the API drop those blocks instead.
-	// https://platform.claude.com/docs/en/build-with-claude/extended-thinking
-	thinkingBlockBinding: new Set(['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5']),
+	// accounts created since 2026-08-31 get a 400 otherwise, and every account on Fable 5.2. `drop_block` makes the
+	// API drop those blocks instead. https://platform.claude.com/docs/en/build-with-claude/extended-thinking
+	thinkingBlockBinding: new Set(['claude-fable-5-2', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']),
 	// These accept `role: "system"` messages inside `messages`, after the cached history
-	midConversationSystemMessages: new Set(['claude-fable-5-1', 'claude-mythos-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5']),
+	midConversationSystemMessages: new Set(['claude-fable-5-2', 'claude-fable-5-1', 'claude-mythos-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-haiku-5-5']),
 } as const
 
 const anthropicModelOptions = {
+	'claude-fable-5-2': { // https://platform.claude.com/docs/en/about-claude/models/overview — Fable 5.1's API, cheaper
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 128_000,
+		cost: { input: 8.00, cache_read: 0.20, cache_write: 10.00, output: 40.00 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true,
+		supportsPDF: true,
+		specialToolFormat: 'anthropic-style',
+		supportsSystemMessage: 'separated',
+		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
+	},
 	'claude-fable-5-1': { // https://platform.claude.com/docs/en/models/fable-5-1/overview
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 128_000,
@@ -713,7 +729,7 @@ const anthropicModelOptions = {
 	'claude-sonnet-5-5': { // https://platform.claude.com/docs/en/models/sonnet-5-5/overview — adaptive, default effort high
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 128_000,
-		cost: { input: 2.00, cache_read: 0.20, cache_write: 2.50, output: 10.00 },
+		cost: { input: 2.00, cache_read: 0.10, cache_write: 2.50, output: 10.00 }, // cache reads at 5% of input, half of Sonnet 5's
 		downloadable: false,
 		supportsFIM: false,
 		supportsVision: true,
@@ -745,6 +761,19 @@ const anthropicModelOptions = {
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
 		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities_noXHigh,
+	},
+	'claude-haiku-5-5': { // https://platform.claude.com/docs/en/about-claude/pricing — adaptive, default effort medium
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 128_000,
+		// prompts up to 100K tokens; longer ones cost 5x (input $0.50, cache reads $0.05, cache writes $0.625, output $2.50)
+		cost: { input: 0.10, cache_read: 0.01, cache_write: 0.125, output: 0.50 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true,
+		supportsPDF: true,
+		specialToolFormat: 'anthropic-style',
+		supportsSystemMessage: 'separated',
+		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
 	},
 	'claude-haiku-4-5': {
 		contextWindow: 200_000,
@@ -795,7 +824,8 @@ const anthropicSettings: VoidStaticProviderInfo = {
 	modelOptionsFallback: (modelName) => {
 		const lower = modelName.toLowerCase()
 		let fallbackName: keyof typeof anthropicModelOptions | null = null
-		if (lower.includes('fable-5-1') || lower.includes('fable-5.1') || lower.includes('fable5.1')) fallbackName = 'claude-fable-5-1'
+		if (lower.includes('fable-5-2') || lower.includes('fable-5.2') || lower.includes('fable5.2')) fallbackName = 'claude-fable-5-2'
+		else if (lower.includes('fable-5-1') || lower.includes('fable-5.1') || lower.includes('fable5.1')) fallbackName = 'claude-fable-5-1'
 		else if (lower.includes('mythos-5-1') || lower.includes('mythos-5.1') || lower.includes('mythos5.1')) fallbackName = 'claude-mythos-5-1'
 		else if (lower.includes('fable-5') || lower.includes('fable5')) fallbackName = 'claude-fable-5'
 		else if (lower.includes('opus-5-5') || lower.includes('opus-5.5') || lower.includes('opus5.5')) fallbackName = 'claude-opus-5-5'
@@ -805,6 +835,7 @@ const anthropicSettings: VoidStaticProviderInfo = {
 		else if (lower.includes('sonnet-5') || lower.includes('sonnet5')) fallbackName = 'claude-sonnet-5'
 		else if (lower.includes('opus-4-7') || lower.includes('opus-4.7')) fallbackName = 'claude-opus-4-7'
 		else if (lower.includes('sonnet-4-6') || lower.includes('sonnet-4.6')) fallbackName = 'claude-sonnet-4-6'
+		else if (lower.includes('haiku-5-5') || lower.includes('haiku-5.5') || lower.includes('haiku5.5')) fallbackName = 'claude-haiku-5-5'
 		else if (lower.includes('haiku-4-5') || lower.includes('haiku-4.5')) fallbackName = 'claude-haiku-4-5'
 		else if (lower.includes('opus-4-6') || lower.includes('opus-4.6')) fallbackName = 'claude-opus-4-6'
 		// Sonnet 4.5 (retires on 2026-11-30) and Sonnet 3.7: Anthropic's replacement
@@ -1310,7 +1341,7 @@ const deepseekModelOptions = {
 	'deepseek-v4-pro': { // https://api-docs.deepseek.com/quick_start/pricing
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 384_000,
-		cost: { cache_read: 0.022, input: 0.66, output: 1.98 },
+		cost: { cache_read: 0.022, input: 0.66, output: 1.98 }, // off-peak; peak hours (01:00-04:00 and 06:00-10:00 UTC on weekdays) cost double
 		downloadable: false,
 		supportsFIM: true,
 		specialToolFormat: 'openai-style',
@@ -1387,7 +1418,7 @@ const mistralModelOptions = { // https://docs.mistral.ai/getting-started/models/
 	'mistral-large-4': { // Mistral Large 4 "Le Chonk", public preview (API id also mistral-large-4-0) — https://docs.mistral.ai/models/mistral-large-4-0
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 262_144,
-		cost: { input: 0.68, cache_read: 0.07, output: 2.09 }, // promotional rate; list price is double
+		cost: { input: 0.70, cache_read: 0.07, output: 2.10 }, // https://docs.mistral.ai/inference/pricing
 		supportsFIM: true, // Activer le FIM
 		supportsVision: true,
 		supportsPDF: true, // PDFs go as document_url chunks (convertToLLMMessageService): https://docs.mistral.ai/capabilities/document_ai/document_qna

@@ -11,7 +11,7 @@ import { X, RefreshCw, Loader2 } from 'lucide-react'
 import { ChatMarkdownRender } from '../markdown/ChatMarkdownRender.js'
 import { WarningBox } from './WarningBox.js'
 import { PROJECT_MEMORY_FILE_PATH } from '../../../../common/projectMemoryService.js';
-import { builtinInstructionsFrameworks, downloadInstructionsFramework, InstructionsFramework } from '../../../../common/instructionsFrameworks.js';
+import { builtinInstructionsFrameworks, downloadInstructionsFramework, InstructionsFramework, instructionsFrameworkContentForKodia } from '../../../../common/instructionsFrameworks.js';
 import { generateUuid } from '../../../../../../../base/common/uuid.js';
 import { URI } from '../../../../../../../base/common/uri.js';
 import { CancellationToken } from '../../../../../../../base/common/cancellation.js';
@@ -171,7 +171,7 @@ const InstructionsFrameworks = () => {
 		setDownloadingId(id)
 		setErrorOfId(errors => ({ ...errors, [id]: undefined }))
 		try {
-			const content = await downloadInstructionsFramework(requestService, sourceURL)
+			const content = instructionsFrameworkContentForKodia(id, await downloadInstructionsFramework(requestService, sourceURL))
 			const isOn = voidSettingsService.state.globalSettings.instructionsFrameworks.find(f => f.id === id)?.isOn ?? true
 			saveFramework({ id, name, sourceURL, content, isOn })
 			setEditorKey(k => k + 1)

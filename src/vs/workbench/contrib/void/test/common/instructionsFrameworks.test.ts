@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { builtinInstructionsFrameworks, joinUserInstructions, rawURLsOfFrameworkSource } from '../../common/instructionsFrameworks.js';
+import { builtinInstructionsFrameworks, instructionsFrameworkContentForKodia, joinUserInstructions, rawURLsOfFrameworkSource } from '../../common/instructionsFrameworks.js';
 
 suite('Kodia - instructions frameworks', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -48,5 +48,40 @@ suite('Kodia - instructions frameworks', () => {
 		assert.throws(() => rawURLsOfFrameworkSource('https://github.com/ai-driven-dev'));
 		assert.throws(() => rawURLsOfFrameworkSource('not a link'));
 		assert.throws(() => rawURLsOfFrameworkSource('file:///etc/passwd'));
+	});
+
+	test('keeps AIDD\'s guidelines without its memory, which lives in aidd_docs/', () => {
+		const aidd = [
+			'# AGENTS.md',
+			'',
+			'## Behavior',
+			'',
+			'- Stay critical.',
+			'- Docs are in `aidd_docs/` too.',
+			'',
+			'## Memory Management',
+			'',
+			'Project docs and memory live in `aidd_docs/`.',
+			'',
+			'<!-- aidd_project_memory:start -->',
+			'<!-- aidd_project_memory:end -->',
+			'',
+			'### Loading',
+			'- Load `aidd_docs/memory/internal/*` when relevant.',
+			'',
+			'## Action',
+			'',
+			'- Keep changes minimal.',
+			'',
+		].join('\n');
+		const adapted = '# AGENTS.md\n\n## Behavior\n\n- Stay critical.\n\n## Action\n\n- Keep changes minimal.';
+		assert.strictEqual(instructionsFrameworkContentForKodia('aidd', aidd), adapted);
+		// the section is the last one, as in AIDD's file
+		assert.strictEqual(instructionsFrameworkContentForKodia('aidd', '## Behavior\n- Stay critical.\n\n## Memory Management\nIn `aidd_docs/`.\n'), '## Behavior\n- Stay critical.');
+		// once adapted, and stored, it stays as it is
+		assert.strictEqual(instructionsFrameworkContentForKodia('aidd', adapted), adapted);
+		// other frameworks, the user's included, are kept as downloaded
+		assert.strictEqual(instructionsFrameworkContentForKodia('karpathy', aidd), aidd);
+		assert.strictEqual(instructionsFrameworkContentForKodia('6f1c0d8e-0000-4000-8000-000000000000', aidd), aidd);
 	});
 });

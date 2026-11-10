@@ -16,7 +16,18 @@ export type InstructionsFramework = {
 	isOn: boolean;
 }
 
-type BuiltinInstructionsFramework = { id: string, name: string, group: string, description: string, homepage: string, sourceURL: string }
+type BuiltinInstructionsFramework = { id: string, name: string, group: string, description: string, homepage: string, sourceURL: string, adaptForKodia?: (content: string) => string }
+
+// AIDD's AGENTS.md says the project's memory lives in aidd_docs/, which its Claude Code plugins create and fill in
+// between aidd_project_memory markers. Kodia has neither and keeps its own project memory (.kodia/memory.md), so the
+// "Memory Management" section goes, with any other line about aidd_docs/ or the markers.
+const withoutAIDDMemory = (content: string): string => {
+	const lines = content.split('\n')
+	const start = lines.findIndex(line => /^##\s+Memory Management\s*$/.test(line))
+	const end = start === -1 ? -1 : lines.findIndex((line, i) => i > start && /^#{1,2}\s/.test(line))
+	const kept = start === -1 ? lines : [...lines.slice(0, start), ...(end === -1 ? [] : lines.slice(end))]
+	return kept.filter(line => !/aidd_docs\/|aidd_project_memory/.test(line)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
 
 // The rules agent-rules-books condensed from a software book: its mini version, a few thousand characters
 const bookFramework = (id: string, name: string, description: string): BuiltinInstructionsFramework => ({
@@ -42,9 +53,10 @@ export const builtinInstructionsFrameworks: readonly BuiltinInstructionsFramewor
 		id: 'aidd',
 		name: 'AI-Driven Dev',
 		group: 'Agent behavior',
-		description: 'The AGENTS.md of the AI-Driven Dev framework: critical and anti-sycophantic, concise, evidence over assertion, minimal changes.',
+		description: 'The AGENTS.md of the AI-Driven Dev framework: critical and anti-sycophantic, concise, evidence over assertion, minimal changes. Without its memory section, which needs AIDD\'s plugins: Kodia keeps its own project memory.',
 		homepage: 'https://github.com/ai-driven-dev/framework',
 		sourceURL: 'https://raw.githubusercontent.com/ai-driven-dev/framework/main/plugins/aidd-context/skills/02-project-memory/assets/templates/AGENTS.md',
+		adaptForKodia: withoutAIDDMemory,
 	},
 	{
 		id: 'superclaude',
@@ -63,6 +75,10 @@ export const builtinInstructionsFrameworks: readonly BuiltinInstructionsFramewor
 	bookFramework('domain-driven-design', 'Domain-Driven Design', 'Eric Evans: a model and a language shared with the domain, inside explicit bounded contexts.'),
 	bookFramework('release-it', 'Release It!', 'Michael T. Nygard: production readiness, with timeouts, limits, isolation, recovery and diagnosis.'),
 ]
+
+// The text Kodia keeps for a framework: a built-in one may need adapting to Kodia
+export const instructionsFrameworkContentForKodia = (id: string, content: string): string =>
+	builtinInstructionsFrameworks.find(f => f.id === id)?.adaptForKodia?.(content) ?? content
 
 // sent with every request
 const MAX_FRAMEWORK_LENGTH = 50_000

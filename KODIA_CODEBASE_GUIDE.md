@@ -61,7 +61,7 @@ flowchart LR
   - the conversion covers OpenAI-compatible, Anthropic and Gemini formats, tool calls and attachments.
 - **`sendLLMMessageService`** forwards the request to the main process.
 - **`sendLLMMessage.impl.ts`** talks to the providers (Anthropic, OpenAI-compatible, Gemini, Mistral, Ollama…). Models without native tool calling use XML tool calls, parsed by `extractGrammar.ts`.
-- **`modelCapabilities.ts`** describes every model: context window, prices, reasoning, tool format, vision, PDF support, caching. Update it when providers change their catalog. The weekly `model-catalog.yml` workflow reports drift.
+- **`modelCapabilities.ts`** describes every model: context window, prices, reasoning, tool format, vision, PDF support, caching. Update it when providers change their catalog. The weekly `model-catalog.yml` workflow reports drift in an issue labelled `model-catalog`.
 - **`toolsService`** implements the built-in tools: read, search, edit and create files, project memory, and `fetch_url` (web pages, fetched by `electron-main/webFetchMainService.ts` because a window's requests hit CORS). **`terminalToolService`** runs commands. **`mcpService`**, with `electron-main/mcpChannel.ts`, connects MCP servers.
 
 Sending from the main process avoids CSP issues with local providers and gives access to Node modules.

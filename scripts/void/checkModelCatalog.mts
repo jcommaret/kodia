@@ -10,7 +10,8 @@
 // - Mistral's model list, when MISTRAL_API_KEY is set: the catalog Mistral models must exist and not be deprecated.
 //
 // Usage: node scripts/void/checkModelCatalog.mts
-// Prints a Markdown report (also to $GITHUB_STEP_SUMMARY) and exits 1 when something needs a look.
+// Prints a Markdown report (also to $GITHUB_STEP_SUMMARY) and exits 1 when something needs a look, 2 when the
+// check could not run. In CI, reportModelCatalog.sh turns both into an issue.
 
 import * as esbuild from 'esbuild';
 import * as fs from 'fs';

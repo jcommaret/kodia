@@ -1898,7 +1898,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	'deepseek/deepseek-v4.1-flash': {
 		...deepseekModelOptions['deepseek-flash'],
 		contextWindow: 1_048_576, // https://openrouter.ai/deepseek/deepseek-v4.1-flash
-		cost: { input: 0.0477, cache_read: 0.000954, output: 0.1908 }, // OpenRouter's price; it moves with the serving providers
+		cost: { input: 0.006, cache_read: 0.005, output: 0.50 }, // OpenRouter's price; it moves with the serving providers
 		downloadable: false,
 	},
 	'deepseek/deepseek-v4-pro': {
@@ -1907,8 +1907,8 @@ const openRouterModelOptions_assumingOpenAICompat = {
 	},
 	'qwen/qwen3.8-27b': { // https://openrouter.ai/qwen/qwen3.8-27b
 		...groqModelOptions['qwen/qwen3.8-27b'],
-		contextWindow: 1_000_000,
-		cost: { input: 0.20, cache_read: 0.09, output: 2.50 },
+		contextWindow: 1_048_575, // the largest serving provider's; most serve 262,144, and OpenRouter routes long prompts to the others
+		cost: { input: 0.15, cache_read: 0.0375, output: 1.875 }, // OpenRouter's price; it moves with the serving providers
 		downloadable: false,
 	},
 } as const satisfies { [s: string]: VoidStaticModelInfo }

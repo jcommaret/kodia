@@ -5,8 +5,8 @@
 
 // Compares Kodia's model catalog (src/vs/workbench/contrib/void/common/modelCapabilities.ts) with what the
 // providers publish, so retired models, context windows and prices that drifted show up without a manual review:
-// - OpenRouter's public model list (no key): Kodia's catalog OpenRouter models must exist there with the same
-//   context window and prices; native catalog models that OpenRouter also serves are compared for information;
+// - OpenRouter's public model list (no key): Kodia's catalog OpenRouter models must exist there, with the context
+//   window of the largest serving provider and prices within the serving providers' range; native catalog models that OpenRouter also serves are compared for information;
 // - Mistral's model list, when MISTRAL_API_KEY is set: the catalog Mistral models must exist and not be deprecated.
 //
 // Usage: node scripts/void/checkModelCatalog.mts
@@ -47,7 +47,7 @@ async function fetchJson<T>(url: string, headers: Record<string, string> = {}): 
 
 const differs = (a: number, b: number) => Math.abs(a - b) > TOLERANCE * Math.max(Math.abs(a), Math.abs(b), 1e-9);
 const perMillion = (perToken: string | undefined) => perToken === undefined ? undefined : Number(perToken) * 1e6;
-const money = (n: number | undefined) => n === undefined ? '—' : `$${n.toFixed(3)}`;
+const money = (n: number | undefined) => n === undefined ? '—' : `$${n !== 0 && Math.abs(n) < 0.01 ? Number(n.toPrecision(2)) : n.toFixed(3)}`;
 
 // Kodia's native catalog names → candidate OpenRouter ids (claude-sonnet-5-5 → anthropic/claude-sonnet-5.5)
 const openRouterPrefixOf: Record<string, string> = { anthropic: 'anthropic', openAI: 'openai', gemini: 'google', xAI: 'x-ai', deepseek: 'deepseek', mistral: 'mistralai' };
@@ -78,6 +78,36 @@ function compare(label: string, ours: Capabilities, theirs: OpenRouterModel): st
 	return problems;
 }
 
+// OpenRouter's model-level price is that of the provider it lists first, which changes from one day to the next.
+// A Kodia OpenRouter model is therefore checked against every serving provider: a price is flagged only when it
+// falls outside the range of their prices, and the context window is compared with the largest one.
+type OpenRouterEndpoint = { provider_name: string; context_length: number; pricing: OpenRouterModel['pricing'] };
+
+function compareToEndpoints(label: string, ours: Capabilities, theirs: OpenRouterModel, endpoints: OpenRouterEndpoint[]): string[] {
+	const problems: string[] = [];
+	const largestContext = Math.max(theirs.context_length, ...endpoints.map(e => e.context_length));
+	if (differs(ours.contextWindow, largestContext)) {
+		problems.push(`${label}: context window ${ours.contextWindow.toLocaleString('en')} in Kodia, ${largestContext.toLocaleString('en')} at the largest OpenRouter provider`);
+	}
+	const prices: [string, number | undefined, (p: OpenRouterModel['pricing']) => string | undefined][] = [
+		['input', ours.cost.input, p => p.prompt],
+		['output', ours.cost.output, p => p.completion],
+		['cache read', ours.cost.cache_read, p => p.input_cache_read],
+	];
+	for (const [name, kodia, priceOf] of prices) {
+		const range = endpoints.map(e => perMillion(priceOf(e.pricing))).filter((n): n is number => n !== undefined);
+		if (kodia === undefined || range.length === 0) {
+			continue;
+		}
+		const [min, max] = [Math.min(...range), Math.max(...range)];
+		const inRange = (kodia >= min && kodia <= max) || !differs(kodia, min) || !differs(kodia, max);
+		if (!inRange) {
+			problems.push(`${label}: ${name} price ${money(kodia)} in Kodia, outside the ${money(min)}–${money(max)} range of its ${endpoints.length} OpenRouter providers (per million tokens)`);
+		}
+	}
+	return problems;
+}
+
 async function main() {
 	const catalog = await loadCatalog();
 	const needsLook: string[] = [];
@@ -93,7 +123,10 @@ async function main() {
 				if (!theirs) {
 					needsLook.push(`openRouter/${modelName}: no longer listed on OpenRouter (retired or renamed)`);
 				} else {
-					needsLook.push(...compare(`openRouter/${modelName}`, ours, theirs));
+					const endpoints = (await fetchJson<{ data: { endpoints: OpenRouterEndpoint[] } }>(`https://openrouter.ai/api/v1/models/${modelName}/endpoints`)).data.endpoints;
+					needsLook.push(...(endpoints.length > 0
+						? compareToEndpoints(`openRouter/${modelName}`, ours, theirs, endpoints)
+						: compare(`openRouter/${modelName}`, ours, theirs)));
 				}
 				continue;
 			}
@@ -108,7 +141,7 @@ async function main() {
 	if (mistralKey) {
 		type MistralModel = { id: string; aliases?: string[]; deprecation?: string | null };
 		const models = (await fetchJson<{ data: MistralModel[] }>('https://api.mistral.ai/v1/models', { Authorization: `Bearer ${mistralKey}` })).data;
-		for (const modelName of catalog.catalogModelsOfProvider['mistral'] ?? []) {
+		for (const modelName of catalog.catalogModelsOfProvider.mistral ?? []) {
 			const model = models.find(m => m.id === modelName || m.aliases?.includes(modelName));
 			if (!model) {
 				needsLook.push(`mistral/${modelName}: not in Mistral's model list`);

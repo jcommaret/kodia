@@ -1,5 +1,6 @@
 # Weekly comparison of Kodia's model catalog with what the providers publish (retired models,
-# context windows, prices). The run fails when something needs a look; its summary lists what.
+# context windows, prices). The run stays green: what needs a look goes to an issue labelled
+# model-catalog, which GitHub e-mails to the repository owner, and the run summary lists everything.
 name: Model catalog check
 
 on:
@@ -9,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   check:
@@ -26,8 +28,27 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      # exit code 1: something needs a look, 2: the check could not run; the next step reports both
       - name: Compare the catalog with the providers
-        run: node scripts/void/checkModelCatalog.mts
+        id: check
+        run: |
+          set +e
+          node scripts/void/checkModelCatalog.mts > "$RUNNER_TEMP/report.md" 2> "$RUNNER_TEMP/error.log"
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+          # the error log goes into a public issue, where secrets are not masked
+          if [ -n "$MISTRAL_API_KEY" ]; then
+            error=$(cat "$RUNNER_TEMP/error.log")
+            printf '%s\n' "${error//"$MISTRAL_API_KEY"/***}" > "$RUNNER_TEMP/error.log"
+          fi
+          cat "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/error.log"
         env:
           # optional: enables the Mistral checks (existence, deprecations)
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+
+      - name: Report by issue
+        run: bash scripts/void/reportModelCatalog.sh "$STATUS" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/error.log"
+        env:
+          STATUS: ${{ steps.check.outputs.status }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

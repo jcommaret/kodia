@@ -52,6 +52,7 @@ import { AgentHostClientFileSystemProvider } from '../common/agentHostClientFile
 import { AGENT_CLIENT_SCHEME } from '../common/agentClientUri.js';
 import { AGENT_HOST_CLIENT_BYOK_LM_CHANNEL, createAgentHostClientByokLmConnection } from '../common/agentHostClientByokLmChannel.js';
 import { KODIA_AGENT_HOST_LM_CHANNEL } from '../common/kodiaAgentHostLm.js';
+import { createKodiaAgentHostLmConnection } from '../common/kodiaAgentHostLmChannel.js';
 import { AGENT_HOST_CLIENT_PROXY_CHANNEL, createAgentHostClientProxyConnection } from '../common/agentHostClientProxyChannel.js';
 import { join } from '../../../base/common/path.js';
 import ErrorTelemetry from '../../telemetry/node/errorTelemetry.js';
@@ -245,7 +246,7 @@ async function startAgentHost(): Promise<void> {
 					const byokLmConnection = createAgentHostClientByokLmConnection(getChannel(AGENT_HOST_CLIENT_BYOK_LM_CHANNEL));
 					connectionStore.add(byokLmBridgeRegistry.register(clientId, byokLmConnection));
 				}
-				connectionStore.add(kodiaLmBridgeRegistry.register(clientId, createAgentHostClientByokLmConnection(getChannel(KODIA_AGENT_HOST_LM_CHANNEL))));
+				connectionStore.add(kodiaLmBridgeRegistry.register(clientId, createKodiaAgentHostLmConnection(getChannel(KODIA_AGENT_HOST_LM_CHANNEL))));
 				authorityRegistrations.set(connection, connectionStore);
 			};
 			localDataPlaneDisposables.add(server.onDidAddConnection(registerConnection));

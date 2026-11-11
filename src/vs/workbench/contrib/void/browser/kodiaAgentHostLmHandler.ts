@@ -7,12 +7,14 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
-import type { IAgentHostByokLmHandler, IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo } from '../../../../platform/agentHost/common/agentHostByokLm.js';
+import type { IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaMcpTool, IKodiaMcpToolResult } from '../../../../platform/agentHost/common/agentHostByokLm.js';
 import { IKodiaAgentHostLmHandler } from '../../../../platform/agentHost/common/kodiaAgentHostLm.js';
 import { toInternalTool, toOutput, toSimpleMessages, toUsage } from '../common/kodiaAgentHostLmMessages.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { toolsXMLSystemPrompt } from '../common/prompt/prompts.js';
 import { joinUserInstructions } from '../common/instructionsFrameworks.js';
+import { coerceMcpArguments, mcpToolsOfServers } from '../common/kodiaMcpTools.js';
+import { IMCPService } from '../common/mcpService.js';
 import { IMlxService } from '../common/mlxService.js';
 import { prepareSimpleLLMMessages } from '../common/prepareLLMMessages.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
@@ -25,7 +27,7 @@ import { displayInfoOfProviderName, ModelSelection, ProviderName, providerNames 
  * provider. See {@link IKodiaAgentHostLmHandler}. Editor windows and the
  * Agents Window both register it (see `kodiaAgentsWindow.contribution.ts`).
  */
-class KodiaAgentHostLmHandler extends Disposable implements IAgentHostByokLmHandler {
+class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHandler {
 	declare readonly _serviceBrand: undefined;
 
 	readonly onDidChangeModels: Event<void>;
@@ -34,9 +36,35 @@ class KodiaAgentHostLmHandler extends Disposable implements IAgentHostByokLmHand
 		@IVoidSettingsService private readonly _voidSettingsService: IVoidSettingsService,
 		@ILLMMessageService private readonly _llmMessageService: ILLMMessageService,
 		@IMlxService private readonly _mlxService: IMlxService,
+		@IMCPService private readonly _mcpService: IMCPService,
 	) {
 		super();
 		this.onDidChangeModels = this._voidSettingsService.onDidChangeState;
+	}
+
+	// The tools of the user's MCP servers that are on: the window holds the servers, so it runs their tools for the agent.
+	async listMcpTools(): Promise<IKodiaMcpTool[]> {
+		return mcpToolsOfServers(this._mcpService.state.mcpServerOfName);
+	}
+
+	async callMcpTool(name: string, argsJson: string): Promise<IKodiaMcpToolResult> {
+		const tool = mcpToolsOfServers(this._mcpService.state.mcpServerOfName).find(t => t.name === name);
+		if (!tool) {
+			return { isError: true, output: `No MCP tool named "${name}" is available: its server may have been switched off.` };
+		}
+		let params: Record<string, unknown>;
+		try {
+			const parsed = argsJson ? JSON.parse(argsJson) : {};
+			params = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+		} catch {
+			return { isError: true, output: `Invalid JSON arguments for tool "${tool.displayName}".` };
+		}
+		try {
+			const { result } = await this._mcpService.callMCPTool({ serverName: tool.serverName, toolName: name, params: coerceMcpArguments(tool.inputSchema, params) });
+			return { isError: false, output: this._mcpService.stringifyResult(result) };
+		} catch (err) {
+			return { isError: true, output: err instanceof Error ? err.message : String(err) };
+		}
 	}
 
 	async listModels(): Promise<IByokLmModelInfo[]> {

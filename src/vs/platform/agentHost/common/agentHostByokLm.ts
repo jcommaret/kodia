@@ -243,4 +243,29 @@ export interface IByokLmBridgeConnection {
 	chat(request: IByokLmChatRequest, token?: CancellationToken): Promise<IByokLmChatResult>;
 	/** Emits the renderer's current BYOK model snapshot on subscribe and on every change. */
 	readonly onDidChangeModels: Event<IByokLmModelInfo[]>;
+	/** Kodia: the MCP tools the Kodia window offers the Kodia agent, when it does (see `KodiaAgentHostLmChannel`). */
+	listMcpTools?(token?: CancellationToken): Promise<IKodiaMcpTool[]>;
+	/** Kodia: runs one of those MCP tools in the Kodia window, which holds the MCP servers. `token` cancels the wait. */
+	callMcpTool?(name: string, argsJson: string, token?: CancellationToken): Promise<IKodiaMcpToolResult>;
+}
+
+/**
+ * Kodia: an MCP tool the Kodia window offers the Kodia agent of the Agents Window. The window runs the MCP
+ * servers, so the agent host lists and calls their tools through the window. Kodia prefixes MCP tool names so
+ * they are unique across servers and never clash with the agent's own tools: `name` is what the model calls,
+ * `displayName` what the user reads.
+ */
+export interface IKodiaMcpTool {
+	readonly name: string;
+	readonly displayName: string;
+	readonly serverName: string;
+	readonly description?: string;
+	/** The JSON Schema of the tool's arguments. */
+	readonly inputSchema?: object;
+}
+
+export interface IKodiaMcpToolResult {
+	readonly isError: boolean;
+	/** Text fed back to the model. */
+	readonly output: string;
 }

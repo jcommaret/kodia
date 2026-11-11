@@ -32,6 +32,7 @@ import { mountCtrlK } from './react/out/quick-edit-tsx/index.js'
 import { QuickEditPropsType } from './quickEditActions.js';
 import { IModelContentChangedEvent } from '../../../../editor/common/textModelEvents.js';
 import { extractCodeFromFIM, extractCodeFromRegular, ExtractedSearchReplaceBlock, extractSearchReplaceBlocks } from '../common/helpers/extractCodeFromResult.js';
+import { applySearchReplaceBlocks, findTextInCode, searchReplaceErrorMessage } from '../../../../platform/kodia/common/searchReplaceBlocks.js';
 import { INotificationService, } from '../../../../platform/notification/common/notification.js';
 import { EditorOption } from '../../../../editor/common/config/editorOptions.js';
 import { Emitter } from '../../../../base/common/event.js';
@@ -49,7 +50,6 @@ import { IConvertToLLMMessageService } from './convertToLLMMessageService.js';
 // import { isMacintosh } from '../../../../base/common/platform.js';
 // import { VOID_OPEN_SETTINGS_ACTION_ID } from './voidSettingsPane.js';
 
-const numLinesOfStr = (str: string) => str.split('\n').length
 
 
 export const getLengthOfTextPx = ({ tabWidth, spaceWidth, content }: { tabWidth: number, spaceWidth: number, content: string }) => {
@@ -98,55 +98,6 @@ const getLeadingWhitespacePx = (editor: ICodeEditor, startLine: number): number 
 
 	return leftWhitespacePx;
 };
-
-
-// Helper function to remove whitespace except newlines
-const removeWhitespaceExceptNewlines = (str: string): string => {
-	return str.replace(/[^\S\n]+/g, '');
-}
-
-
-
-// finds block.orig in fileContents and return its range in file
-// startingAtLine is 1-indexed and inclusive
-// returns 1-indexed lines
-const findTextInCode = (text: string, fileContents: string, canFallbackToRemoveWhitespace: boolean, opts: { startingAtLine?: number, returnType: 'lines' }) => {
-
-	const returnAns = (fileContents: string, idx: number) => {
-		const startLine = numLinesOfStr(fileContents.substring(0, idx + 1))
-		const numLines = numLinesOfStr(text)
-		const endLine = startLine + numLines - 1
-
-		return [startLine, endLine] as const
-	}
-
-	const startingAtLineIdx = (fileContents: string) => opts?.startingAtLine !== undefined ?
-		fileContents.split('\n').slice(0, opts.startingAtLine).join('\n').length // num characters in all lines before startingAtLine
-		: 0
-
-	// idx = starting index in fileContents
-	let idx = fileContents.indexOf(text, startingAtLineIdx(fileContents))
-
-	// if idx was found
-	if (idx !== -1) {
-		return returnAns(fileContents, idx)
-	}
-
-	if (!canFallbackToRemoveWhitespace)
-		return 'Not found' as const
-
-	// try to find it ignoring all whitespace this time
-	text = removeWhitespaceExceptNewlines(text)
-	fileContents = removeWhitespaceExceptNewlines(fileContents)
-	idx = fileContents.indexOf(text, startingAtLineIdx(fileContents));
-
-	if (idx === -1) return 'Not found' as const
-	const lastIdx = fileContents.lastIndexOf(text)
-	if (lastIdx !== idx) return 'Not unique' as const
-
-	return returnAns(fileContents, idx)
-}
-
 
 
 // line/col is the location, originalCodeStartLine is the start line of the original code being displayed
@@ -1558,81 +1509,14 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	}
 
 
-	/**
-	 * Generates a human-readable error message for an invalid ORIGINAL search block.
-	 */
-	private _errContentOfInvalidStr = (
-		str: 'Not found' | 'Not unique' | 'Has overlap',
-		blockOrig: string,
-	): string => {
-		const problematicCode = `${tripleTick[0]}\n${JSON.stringify(blockOrig)}\n${tripleTick[1]}`
-
-		// use a switch for better readability / exhaustiveness check
-		let descStr: string
-		switch (str) {
-			case 'Not found':
-				descStr = `The edit was not applied. The text in ORIGINAL must EXACTLY match lines of code in the file, but there was no match for:\n${problematicCode}. Ensure you have the latest version of the file, and ensure the ORIGINAL code matches a code excerpt exactly.`
-				break
-			case 'Not unique':
-				descStr = `The edit was not applied. The text in ORIGINAL must be unique in the file being edited, but the following ORIGINAL code appears multiple times in the file:\n${problematicCode}. Ensure you have the latest version of the file, and ensure the ORIGINAL code is unique.`
-				break
-			case 'Has overlap':
-				descStr = `The edit was not applied. The text in the ORIGINAL blocks must not overlap, but the following ORIGINAL code had overlap with another ORIGINAL string:\n${problematicCode}. Ensure you have the latest version of the file, and ensure the ORIGINAL code blocks do not overlap.`
-				break
-			default:
-				descStr = ''
-		}
-		return descStr
-	}
-
-
 	private _instantlyApplySRBlocks(uri: URI, blocksStr: string) {
-		const blocks = extractSearchReplaceBlocks(blocksStr)
-		if (blocks.length === 0) throw new Error(`No Search/Replace blocks were received!`)
+		if (extractSearchReplaceBlocks(blocksStr).length === 0) throw new Error(`No Search/Replace blocks were received!`)
 
 		const { model } = this._voidModelService.getModel(uri)
 		if (!model) throw new Error(`Error applying Search/Replace blocks: File does not exist.`)
-		const modelStr = model.getValue(EndOfLinePreference.LF)
-		// .split('\n').map(l => '\t' + l).join('\n') // for testing purposes only, remember to remove this
-		const modelStrLines = modelStr.split('\n')
 
-
-
-		const replacements: { origStart: number; origEnd: number; block: ExtractedSearchReplaceBlock }[] = []
-		for (const b of blocks) {
-			const res = findTextInCode(b.orig, modelStr, true, { returnType: 'lines' })
-			if (typeof res === 'string')
-				throw new Error(this._errContentOfInvalidStr(res, b.orig))
-			let [startLine, endLine] = res
-			startLine -= 1 // 0-index
-			endLine -= 1
-
-			// including newline before start
-			const origStart = (startLine !== 0 ?
-				modelStrLines.slice(0, startLine).join('\n') + '\n'
-				: '').length
-
-			// including endline at end
-			const origEnd = modelStrLines.slice(0, endLine + 1).join('\n').length - 1
-
-			replacements.push({ origStart, origEnd, block: b });
-		}
-		// sort in increasing order
-		replacements.sort((a, b) => a.origStart - b.origStart)
-
-		// ensure no overlap
-		for (let i = 1; i < replacements.length; i++) {
-			if (replacements[i].origStart <= replacements[i - 1].origEnd) {
-				throw new Error(this._errContentOfInvalidStr('Has overlap', replacements[i]?.block?.orig))
-			}
-		}
-
-		// apply each replacement from right to left (so indexes don't shift)
-		let newCode: string = modelStr
-		for (let i = replacements.length - 1; i >= 0; i--) {
-			const { origStart, origEnd, block } = replacements[i]
-			newCode = newCode.slice(0, origStart) + block.final + newCode.slice(origEnd + 1, Infinity)
-		}
+		// shared with the Kodia agent of the Agents window, which applies the same blocks to a file on disk
+		const newCode = applySearchReplaceBlocks(model.getValue(EndOfLinePreference.LF), blocksStr)
 
 		this._writeURIText(uri, newCode,
 			'wholeFileRange',
@@ -1821,7 +1705,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 								console.log('error:', errorMessage)
 								console.log('block.orig:', block.orig)
 								console.log('---------')
-								const content = this._errContentOfInvalidStr(errorMessage, block.orig)
+								const content = searchReplaceErrorMessage(errorMessage, block.orig)
 								const retryMsg = 'All of your previous outputs have been ignored. Please re-output ALL SEARCH/REPLACE blocks starting from the first one, and avoid the error this time.'
 								messages.push(
 									{ role: 'assistant', content: fullText }, // latest output

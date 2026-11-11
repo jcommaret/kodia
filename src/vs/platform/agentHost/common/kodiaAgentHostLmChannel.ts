@@ -7,12 +7,13 @@ import { CancellationToken } from '../../../base/common/cancellation.js';
 import type { Event } from '../../../base/common/event.js';
 import type { IChannel, IServerChannel } from '../../../base/parts/ipc/common/ipc.js';
 import type { ILogService } from '../../log/common/log.js';
-import type { IByokLmBridgeConnection, IKodiaMcpTool, IKodiaMcpToolResult } from './agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from './agentHostByokLm.js';
 import { AgentHostClientByokLmChannel, createAgentHostClientByokLmConnection } from './agentHostClientByokLmChannel.js';
 import type { IKodiaAgentHostLmHandler } from './kodiaAgentHostLm.js';
 
 /**
- * Node side of the Kodia reverse channel: the BYOK bridge's connection, plus the MCP tools of the Kodia window.
+ * Node side of the Kodia reverse channel: the BYOK bridge's connection, plus the MCP tools of the Kodia window and what
+ * its settings let the agent do without asking.
  * The BYOK bridge's own connection has no MCP calls, which only a Kodia window answers.
  */
 export function createKodiaAgentHostLmConnection(channel: IChannel): IByokLmBridgeConnection {
@@ -20,12 +21,13 @@ export function createKodiaAgentHostLmConnection(channel: IChannel): IByokLmBrid
 		...createAgentHostClientByokLmConnection(channel),
 		listMcpTools: token => channel.call('mcpTools', undefined, token) as Promise<IKodiaMcpTool[]>,
 		callMcpTool: (name, argsJson, token) => channel.call('callMcpTool', { name, argsJson }, token) as Promise<IKodiaMcpToolResult>,
+		getAutoApprove: token => channel.call('autoApprove', undefined, token) as Promise<IKodiaAutoApprove>,
 	};
 }
 
 /**
  * Window side: the BYOK bridge's channel, which serves the model requests, plus the MCP tools of the window's MCP
- * servers.
+ * servers and the window's auto-approval settings.
  */
 export class KodiaAgentHostLmChannel implements IServerChannel {
 
@@ -47,6 +49,8 @@ export class KodiaAgentHostLmChannel implements IServerChannel {
 		switch (command) {
 			case 'mcpTools':
 				return await this._handler.listMcpTools(token) as T;
+			case 'autoApprove':
+				return await this._handler.getAutoApprove(token) as T;
 			case 'callMcpTool': {
 				const { name, argsJson } = arg as { name: string; argsJson: string };
 				return await this._handler.callMcpTool(name, argsJson, token) as T;

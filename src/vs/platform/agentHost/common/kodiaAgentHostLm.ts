@@ -5,7 +5,7 @@
 
 import type { CancellationToken } from '../../../base/common/cancellation.js';
 import { createDecorator } from '../../instantiation/common/instantiation.js';
-import type { IAgentHostByokLmHandler, IKodiaMcpTool, IKodiaMcpToolResult } from './agentHostByokLm.js';
+import type { IAgentHostByokLmHandler, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from './agentHostByokLm.js';
 
 /**
  * Kodia: the Kodia agent runs, in the Agents Window, every model shown in
@@ -27,6 +27,8 @@ export interface IKodiaAgentHostLmHandler extends IAgentHostByokLmHandler {
 	listMcpTools(token: CancellationToken): Promise<IKodiaMcpTool[]>;
 	/** Runs one MCP tool, by the name {@link listMcpTools} gave it. A failure is a result with `isError`, not a rejection. */
 	callMcpTool(name: string, argsJson: string, token: CancellationToken): Promise<IKodiaMcpToolResult>;
+	/** What the user lets run without asking, in Kodia's settings. */
+	getAutoApprove(token: CancellationToken): Promise<IKodiaAutoApprove>;
 }
 
 export const IKodiaAgentHostLmHandler = createDecorator<IKodiaAgentHostLmHandler>('kodiaAgentHostLmHandler');

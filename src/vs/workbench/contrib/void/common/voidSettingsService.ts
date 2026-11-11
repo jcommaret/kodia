@@ -346,7 +346,7 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			}
 
 			if (!Array.isArray(readS.globalSettings.instructionsFrameworks)) readS.globalSettings.instructionsFrameworks = []
-			// frameworks downloaded before Kodia adapted them, such as AIDD with its memory section
+			// frameworks downloaded before Kodia adapted them, such as AIDD
 			readS.globalSettings.instructionsFrameworks = readS.globalSettings.instructionsFrameworks.map(f =>
 				typeof f?.content === 'string' ? { ...f, content: instructionsFrameworkContentForKodia(f.id, f.content) } : f)
 		}

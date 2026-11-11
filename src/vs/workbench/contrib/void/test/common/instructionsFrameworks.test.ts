@@ -50,7 +50,7 @@ suite('Kodia - instructions frameworks', () => {
 		assert.throws(() => rawURLsOfFrameworkSource('file:///etc/passwd'));
 	});
 
-	test('keeps AIDD\'s guidelines without its memory, which lives in aidd_docs/', () => {
+	test('keeps AIDD\'s guidelines Kodia can follow: no aidd_docs/ memory, subagents, batched calls or compaction', () => {
 		const aidd = [
 			'# AGENTS.md',
 			'',
@@ -58,6 +58,7 @@ suite('Kodia - instructions frameworks', () => {
 			'',
 			'- Stay critical.',
 			'- Docs are in `aidd_docs/` too.',
+			'- **If the user is frustrated, address the cause first; offer compaction if that doesn\'t help.**',
 			'',
 			'## Memory Management',
 			'',
@@ -72,9 +73,11 @@ suite('Kodia - instructions frameworks', () => {
 			'## Action',
 			'',
 			'- Keep changes minimal.',
+			'- **Batch independent operations when it saves time.**',
+			'- **Fan out genuinely independent subtasks when it costs less.**',
 			'',
 		].join('\n');
-		const adapted = '# AGENTS.md\n\n## Behavior\n\n- Stay critical.\n\n## Action\n\n- Keep changes minimal.';
+		const adapted = '## Behavior\n\n- Stay critical.\n- **If the user is frustrated, address the cause first.**\n\n## Action\n\n- Keep changes minimal.';
 		assert.strictEqual(instructionsFrameworkContentForKodia('aidd', aidd), adapted);
 		// the section is the last one, as in AIDD's file
 		assert.strictEqual(instructionsFrameworkContentForKodia('aidd', '## Behavior\n- Stay critical.\n\n## Memory Management\nIn `aidd_docs/`.\n'), '## Behavior\n- Stay critical.');

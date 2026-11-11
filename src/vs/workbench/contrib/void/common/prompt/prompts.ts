@@ -13,7 +13,8 @@ import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, 
 import { ChatMode } from '../voidSettingsTypes.js';
 import { MAX_PROJECT_MEMORY_TOKENS } from '../../../../../platform/kodia/common/projectMemory.js';
 import { joinProjectRules, PROJECT_RULES_FILE_NAMES, skillsPrompt } from '../../../../../platform/kodia/common/projectInstructions.js';
-import { DIVIDER, FINAL, ORIGINAL, replaceTool_description, searchReplaceBlockTemplate } from '../../../../../platform/kodia/common/searchReplaceBlocks.js';
+import { DIVIDER, FINAL, ORIGINAL, searchReplaceBlockTemplate } from '../../../../../platform/kodia/common/searchReplaceBlocks.js';
+import { SharedToolName, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
 
 // Triple backtick wrapper used throughout the prompts for code blocks
 export const tripleTick = ['```', '```']
@@ -159,12 +160,6 @@ const uriParam = (object: string) => ({
 	uri: { description: `The FULL path to the ${object}.` }
 })
 
-const paginationParam = {
-	page_number: { description: 'Optional. The page number of the result. Default is 1.' }
-} as const
-
-
-
 const terminalDescHelper = `You can use this tool to run any command: sed, grep, etc. Do not edit any files with this tool; use edit_file instead. When working with git and other tools that open an editor (e.g. git diff), you should pipe to cat to get all results and not get stuck in vim.`
 
 const cwdHelper = 'Optional. The directory in which to run the command. Defaults to the first workspace folder.'
@@ -185,6 +180,20 @@ export type SnakeCaseKeys<T extends Record<string, any>> = {
 
 
 
+// A tool Kodia's chat and the Kodia agent of the Agents window both have: defined once in the shared catalog. The chat
+// tells the model every parameter as a string, so only the descriptions are taken; `overrides` keeps the chat's own text
+// where the shared one can't name the chat's editor tools.
+const sharedTool = <T extends SharedToolName>(name: T, overrides?: { description?: string, params?: { [P in keyof (typeof sharedTools)[T]['params']]?: string } }) => {
+	const tool = sharedTools[name]
+	const overriddenParams = overrides?.params as { [paramName: string]: string | undefined } | undefined
+	const params: { [paramName: string]: { description: string } } = {}
+	for (const [paramName, param] of Object.entries(tool.params as { [paramName: string]: { description: string } })) {
+		params[paramName] = { description: overriddenParams?.[paramName] ?? param.description }
+	}
+	return { name, description: overrides?.description ?? tool.description, params: params as { [P in keyof (typeof sharedTools)[T]['params']]: { description: string } } }
+}
+
+
 export const builtinTools: {
 	[T in keyof BuiltinToolCallParams]: {
 		name: string;
@@ -195,71 +204,24 @@ export const builtinTools: {
 } = {
 	// --- context-gathering (read/search/list) ---
 
-	read_file: {
-		name: 'read_file',
-		description: `Returns full contents of a given file.`,
-		params: {
-			...uriParam('file'),
-			start_line: { description: 'Optional. Read from this line (1-based). For a large file, when you know the lines you need (from search_in_file, go_to_definition, find_references, or a lint error), read just that range instead of the whole file. Defaults to the beginning of the file.' },
-			end_line: { description: 'Optional. Read up to this line (inclusive). Defaults to the end of the file.' },
-			...paginationParam,
-		},
-	},
+	read_file: sharedTool('read_file', { params: { start_line: 'Optional. Read from this line (1-based). For a large file, when you know the lines you need (from search_in_file, go_to_definition, find_references, or a lint error), read just that range instead of the whole file. Defaults to the beginning of the file.' } }),
 
-	ls_dir: {
-		name: 'ls_dir',
-		description: `Lists all files and folders in the given URI.`,
-		params: {
-			uri: { description: `Optional. The FULL path to the ${'folder'}. Leave this as empty or "" to search all folders.` },
-			...paginationParam,
-		},
-	},
+	ls_dir: sharedTool('ls_dir'),
 
-	get_dir_tree: {
-		name: 'get_dir_tree',
-		description: `This is a very effective way to learn about the user's codebase. Returns a tree diagram of all the files and folders in the given folder. `,
-		params: {
-			...uriParam('folder')
-		}
-	},
+	get_dir_tree: sharedTool('get_dir_tree'),
 
 	// pathname_search: {
 	// 	name: 'pathname_search',
 	// 	description: `Returns all pathnames that match a given \`find\`-style query over the entire workspace. ONLY searches file names. ONLY searches the current workspace. You should use this when looking for a file with a specific name or path. ${paginationHelper.desc}`,
 
-	search_pathnames_only: {
-		name: 'search_pathnames_only',
-		description: `Returns all pathnames that match a given query (searches ONLY file names). You should use this when looking for a file with a specific name or path.`,
-		params: {
-			query: { description: `Your query for the search.` },
-			include_pattern: { description: 'Optional. Only fill this in if you need to limit your search because there were too many results.' },
-			...paginationParam,
-		},
-	},
+	search_pathnames_only: sharedTool('search_pathnames_only'),
 
 
 
-	search_for_files: {
-		name: 'search_for_files',
-		description: `Returns a list of file names whose content matches the given query. The query can be any substring or regex.`,
-		params: {
-			query: { description: `Your query for the search.` },
-			search_in_folder: { description: 'Optional. Leave as blank by default. ONLY fill this in if your previous search with the same query was truncated. Searches descendants of this folder only.' },
-			is_regex: { description: 'Optional. Default is false. Whether the query is a regex.' },
-			...paginationParam,
-		},
-	},
+	search_for_files: sharedTool('search_for_files'),
 
 	// add new search_in_file tool
-	search_in_file: {
-		name: 'search_in_file',
-		description: `Returns an array of all the start line numbers where the content appears in the file.`,
-		params: {
-			...uriParam('file'),
-			query: { description: 'The string or regex to search for in the file.' },
-			is_regex: { description: 'Optional. Default is false. Whether the query is a regex.' }
-		}
-	},
+	search_in_file: sharedTool('search_in_file'),
 
 	go_to_definition: {
 		name: 'go_to_definition',
@@ -304,69 +266,21 @@ export const builtinTools: {
 		params: {},
 	},
 
-	fetch_url: {
-		name: 'fetch_url',
-		description: `Fetches a web page and returns its text (as markdown: headings, lists, links and code blocks). Use it to read documentation, an API reference, a changelog or an issue, especially a URL the user gave you. Each URL needs the user's approval, so fetch only what you need, and never put workspace code, secrets or personal data in a URL.`,
-		params: {
-			url: { description: 'The full http(s) URL of the page.' },
-			...paginationParam,
-		},
-	},
+	fetch_url: sharedTool('fetch_url'),
 
 	// --- editing (create/delete) ---
 
-	create_file_or_folder: {
-		name: 'create_file_or_folder',
-		description: `Create a file or folder at the given path. To create a folder, the path MUST end with a trailing slash.`,
-		params: {
-			...uriParam('file or folder'),
-		},
-	},
+	create_file_or_folder: sharedTool('create_file_or_folder'),
 
-	delete_file_or_folder: {
-		name: 'delete_file_or_folder',
-		description: `Delete a file or folder at the given path.`,
-		params: {
-			...uriParam('file or folder'),
-			is_recursive: { description: 'Optional. Return true to delete recursively.' }
-		},
-	},
+	delete_file_or_folder: sharedTool('delete_file_or_folder'),
 
-	edit_file: {
-		name: 'edit_file',
-		description: `Edit the contents of a file. You must provide the file's URI as well as a SINGLE string of SEARCH/REPLACE block(s) that will be used to apply the edit.`,
-		params: {
-			...uriParam('file'),
-			search_replace_blocks: { description: replaceTool_description }
-		},
-	},
+	edit_file: sharedTool('edit_file'),
 
-	rewrite_file: {
-		name: 'rewrite_file',
-		description: `Edits a file, deleting all the old contents and replacing them with your new contents. Use this tool if you want to edit a file you just created.`,
-		params: {
-			...uriParam('file'),
-			new_content: { description: `The new contents of the file. Must be a string.` }
-		},
-	},
+	rewrite_file: sharedTool('rewrite_file'),
 
-	write_project_memory: {
-		name: 'write_project_memory',
-		description: `Saves durable notes about this project for future sessions, in the project memory (\`.kodia/memory.md\` in the repo, shown to you in PROJECT MEMORY at the start of every conversation). The memory is organized in "## " sections; this rewrites one whole section, so merge what's already there into the new content rather than repeating it. Save things worth knowing in every session: architecture, conventions, commands, decisions and their reasons, pitfalls. Keep it short and current: replace outdated notes, and delete a section by passing empty content. Never save secrets, credentials, or other sensitive information. The whole memory is capped at ~${MAX_PROJECT_MEMORY_TOKENS} tokens; a write that would exceed it is rejected, so condense other sections first.`,
-		params: {
-			section: { description: `The section title, e.g. "Architecture", "Conventions", "Commands", "Pitfalls". Reuse an existing title to rewrite that section.` },
-			content: { description: `The full new text of the section (markdown, no "## " heading). Empty to delete the section.` },
-		},
-	},
+	write_project_memory: sharedTool('write_project_memory'),
 
-	run_command: {
-		name: 'run_command',
-		description: `Runs a terminal command and waits for the result (times out after ${MAX_TERMINAL_INACTIVE_TIME}s of inactivity). ${terminalDescHelper}`,
-		params: {
-			command: { description: 'The terminal command to run.' },
-			cwd: { description: cwdHelper },
-		},
-	},
+	run_command: sharedTool('run_command', { description: `Runs a terminal command and waits for the result (times out after ${MAX_TERMINAL_INACTIVE_TIME}s of inactivity). ${terminalDescHelper}` }),
 
 	run_persistent_command: {
 		name: 'run_persistent_command',

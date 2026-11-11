@@ -7,6 +7,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { IFileService } from '../../../files/common/files.js';
 import { readSkills } from '../../../agentPlugins/common/pluginParsers.js';
 import { joinProjectRules, KODIA_SKILLS_FOLDER, PROJECT_RULES_FILE_NAMES, SkillOfPrompt, skillsOfPrompt } from '../../../kodia/common/projectInstructions.js';
+import { PROJECT_MEMORY_FILE_PATH } from '../../../kodia/common/projectMemory.js';
 
 // What the Kodia agent of the Agents window knows about its session's project beyond the model's tools: the
 // project's rules files and agent skills, which Kodia's chat reads through the editor. The agent works on its
@@ -37,6 +38,21 @@ export async function readProjectRules(workingDirectory: URI | undefined, fileSe
 		}
 	}));
 	return joinProjectRules(files.filter(file => !!file));
+}
+
+/**
+ * The notes the agent kept about the project with write_project_memory: .kodia/memory.md, as Kodia's chat reads it.
+ * Empty without a project folder, or before the first note.
+ */
+export async function readProjectMemory(workingDirectory: URI | undefined, fileService: IFileService): Promise<string> {
+	if (!workingDirectory) {
+		return '';
+	}
+	try {
+		return (await fileService.readFile(URI.joinPath(workingDirectory, PROJECT_MEMORY_FILE_PATH))).value.toString().trim();
+	} catch {
+		return '';
+	}
 }
 
 /**

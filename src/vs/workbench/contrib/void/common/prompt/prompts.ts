@@ -13,6 +13,7 @@ import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, 
 import { ChatMode } from '../voidSettingsTypes.js';
 import { MAX_PROJECT_MEMORY_TOKENS } from '../../../../../platform/kodia/common/projectMemory.js';
 import { joinProjectRules, PROJECT_RULES_FILE_NAMES, skillsPrompt } from '../../../../../platform/kodia/common/projectInstructions.js';
+import { DIVIDER, FINAL, ORIGINAL, replaceTool_description, searchReplaceBlockTemplate } from '../../../../../platform/kodia/common/searchReplaceBlocks.js';
 
 // Triple backtick wrapper used throughout the prompts for code blocks
 export const tripleTick = ['```', '```']
@@ -71,25 +72,8 @@ export const summarizedThreadMessage = (summary: string, latestRequest: string |
 export { joinProjectRules, PROJECT_RULES_FILE_NAMES, skillsPrompt as chat_skills }
 
 
-export const ORIGINAL = `<<<<<<< ORIGINAL`
-export const DIVIDER = `=======`
-export const FINAL = `>>>>>>> UPDATED`
-
-
-
-const searchReplaceBlockTemplate = `\
-${ORIGINAL}
-// ... original code goes here
-${DIVIDER}
-// ... final code goes here
-${FINAL}
-
-${ORIGINAL}
-// ... original code goes here
-${DIVIDER}
-// ... final code goes here
-${FINAL}`
-
+// the search/replace blocks' format is shared with the Kodia agent of the Agents window
+export { DIVIDER, FINAL, ORIGINAL }
 
 
 
@@ -142,24 +126,6 @@ ${FINAL}
 ${tripleTick[1]}`
 
 
-const replaceTool_description = `\
-A string of SEARCH/REPLACE block(s) which will be applied to the given file.
-Your SEARCH/REPLACE blocks string must be formatted as follows:
-${searchReplaceBlockTemplate}
-
-## Guidelines:
-
-1. You may output multiple search replace blocks if needed.
-
-2. The ORIGINAL code in each SEARCH/REPLACE block must EXACTLY match lines in the original file. Do not add or remove any whitespace or comments from the original code.
-
-3. Each ORIGINAL text must be large enough to uniquely identify the change. However, bias towards writing as little as possible.
-
-4. Each ORIGINAL text must be DISJOINT from all other ORIGINAL text.
-
-5. This field is a STRING (not an array).`
-
-
 // ======================================================== tools ========================================================
 
 
@@ -183,6 +149,9 @@ export type InternalToolInfo = {
 	params: {
 		[paramName: string]: { description: string }
 	},
+	// The tool's JSON Schema, if it has one (an MCP server's tool, a tool of the Agents window's agent): the providers
+	// are told its types and required parameters, see toolSchema.ts. Without one, every parameter is a string.
+	inputSchema?: object,
 	// Only if the tool is from an MCP server
 	mcpServerName?: string,
 }

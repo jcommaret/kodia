@@ -27,6 +27,7 @@ import { AgentHostClientState, AgentHostProtocolClient } from '../browser/agentH
 import { AhpJsonlLogger } from '../common/ahpJsonlLogger.js';
 import { AGENT_HOST_CLIENT_BYOK_LM_CHANNEL, AgentHostClientByokLmChannel, NullAgentHostClientByokLmChannel } from '../common/agentHostClientByokLmChannel.js';
 import { IKodiaAgentHostLmHandler, KODIA_AGENT_HOST_LM_CHANNEL } from '../common/kodiaAgentHostLm.js';
+import { KodiaAgentHostLmChannel } from '../common/kodiaAgentHostLmChannel.js';
 import { getAgentHostClientType } from '../common/agentHostClientInfo.js';
 import { AGENT_HOST_CLIENT_PROXY_CHANNEL, AgentHostClientProxyChannel } from '../common/agentHostClientProxyChannel.js';
 import { LOCAL_AGENT_HOST_RESOURCE_IDENTITY } from '../common/agentHostResourceService.js';
@@ -652,5 +653,5 @@ export function registerAgentHostClientChannels(
 	} catch {
 		kodiaHandler = undefined;
 	}
-	client.registerChannel(KODIA_AGENT_HOST_LM_CHANNEL, kodiaHandler ? new AgentHostClientByokLmChannel(kodiaHandler, logService) : new NullAgentHostClientByokLmChannel());
+	client.registerChannel(KODIA_AGENT_HOST_LM_CHANNEL, kodiaHandler ? new KodiaAgentHostLmChannel(kodiaHandler, logService) : new NullAgentHostClientByokLmChannel());
 }

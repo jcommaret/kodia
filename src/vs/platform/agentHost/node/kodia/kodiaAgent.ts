@@ -12,10 +12,12 @@ import { isWindows } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
+import { INativeEnvironmentService } from '../../../environment/common/environment.js';
+import { IFileService } from '../../../files/common/files.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClient, IAgent, IAgentChatConfigCompletionsParams, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, IAgentChats, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSpawnChatEvent } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmModelInfo } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo, IKodiaMcpTool } from '../../common/agentHostByokLm.js';
 import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { KODIA_AGENT_PROVIDER_ID, KODIA_AGENT_RESOURCE } from '../../common/kodiaAgentHostLm.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
@@ -25,6 +27,8 @@ import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirma
 import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
+import { readProjectRules, readProjectSkills } from './kodiaProjectContext.js';
+import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
 import { describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, needsApproval, toolDisplayName } from './kodiaTools.js';
 
 /**
@@ -35,6 +39,9 @@ export const IKodiaLmBridgeRegistry = createDecorator<IByokLmBridgeRegistry>('ko
 
 /** Safety cap on tool-call rounds within a single user turn. */
 const MAX_TOOL_ROUNDS = 50;
+
+/** As for the agent's own tools, what an MCP tool returns stays in the history: ~25k tokens at most. */
+const MAX_MCP_OUTPUT_CHARS = 100_000;
 
 /** What the model receives when the user denies a tool call. */
 const TOOL_DENIED_RESULT = 'The user denied this tool call.';
@@ -62,10 +69,20 @@ function instructionsFor(workingDirectory: URI | undefined): string {
 	return lines.join('\n');
 }
 
-function toToolCallResult(name: string, res: IKodiaToolResult): ToolCallResult {
+/** An MCP tool of the Kodia window, in the shape the model is offered tools in. */
+function mcpFunctionTool(tool: IKodiaMcpTool): IByokLmFunctionTool {
+	return {
+		type: 'function',
+		name: tool.name,
+		description: [tool.description, `(MCP server: ${tool.serverName})`].filter(Boolean).join(' '),
+		parametersSchema: tool.inputSchema ?? { type: 'object', properties: {} },
+	};
+}
+
+function toToolCallResult(displayName: string, res: IKodiaToolResult): ToolCallResult {
 	return {
 		success: res.success,
-		pastTenseMessage: res.success ? `Ran ${toolDisplayName(name)}` : `${toolDisplayName(name)} failed`,
+		pastTenseMessage: res.success ? `Ran ${displayName}` : `${displayName} failed`,
 		content: [{ type: ToolResultContentType.Text, text: res.output }],
 		...(res.success ? {} : { error: { message: res.output } }),
 	};
@@ -134,6 +151,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 	constructor(
 		@ILogService private readonly _logService: ILogService,
 		@IKodiaLmBridgeRegistry private readonly _bridge: IByokLmBridgeRegistry,
+		@IFileService private readonly _fileService: IFileService,
+		@INativeEnvironmentService private readonly _environmentService: INativeEnvironmentService,
 	) {
 		super();
 		this._publishModels();
@@ -441,8 +460,13 @@ export class KodiaAgent extends Disposable implements IAgent {
 		session.turnIds.push(turnId);
 
 		try {
+			// read once a turn: the rules and skills don't change between its rounds
+			const instructions = await this._instructions(session);
+			// and so do the MCP tools of the Kodia window, which has the user's MCP servers
+			const mcpTools = await this._mcpTools(connection);
+			const tools = [...KODIA_TOOLS, ...[...mcpTools.values()].map(mcpFunctionTool)];
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-				const result = await this._chat(connection, session, model, signal);
+				const result = await this._chat(connection, session, model, instructions, tools, signal);
 				if (signal.aborted) {
 					return;
 				}
@@ -481,17 +505,19 @@ export class KodiaAgent extends Disposable implements IAgent {
 				for (const call of toolCalls) {
 					// Registers the call with the host, which is what lets a later
 					// pending_confirmation round-trip through respondToPermissionRequest.
-					fire({ type: ActionType.ChatToolCallStart, turnId, toolCallId: call.callId, toolName: call.name, displayName: toolDisplayName(call.name) });
-					const description = describeKodiaToolCall(call.name, call.argumentsJson, session.workingDirectory);
-					if (needsApproval(call.name)) {
-						// Mutating tools go through the host's permission flow, which
+					const mcpTool = mcpTools.get(call.name);
+					const displayName = mcpTool ? `${mcpTool.displayName} (${mcpTool.serverName})` : toolDisplayName(call.name);
+					fire({ type: ActionType.ChatToolCallStart, turnId, toolCallId: call.callId, toolName: call.name, displayName });
+					const description = mcpTool ? { invocationMessage: displayName, toolInput: call.argumentsJson } : describeKodiaToolCall(call.name, call.argumentsJson, session.workingDirectory);
+					if (mcpTool || needsApproval(call.name)) {
+						// Mutating tools, and every MCP tool, go through the host's permission flow, which
 						// applies the session's approval settings or asks the user.
-						const approved = await this._requestApproval(session, call, description);
+						const approved = await this._requestApproval(session, call, description, mcpTool ? displayName : undefined);
 						if (signal.aborted) {
 							return;
 						}
 						if (!approved) {
-							fire({ type: ActionType.ChatToolCallComplete, turnId, toolCallId: call.callId, result: { success: false, pastTenseMessage: `${toolDisplayName(call.name)} denied`, content: [{ type: ToolResultContentType.Text, text: TOOL_DENIED_RESULT }] } });
+							fire({ type: ActionType.ChatToolCallComplete, turnId, toolCallId: call.callId, result: { success: false, pastTenseMessage: `${displayName} denied`, content: [{ type: ToolResultContentType.Text, text: TOOL_DENIED_RESULT }] } });
 							session.history.push({ type: 'function_call_output', callId: call.callId, output: TOOL_DENIED_RESULT });
 							continue;
 						}
@@ -502,11 +528,11 @@ export class KodiaAgent extends Disposable implements IAgent {
 							confirmed: ToolCallConfirmationReason.NotNeeded,
 						});
 					}
-					const res = await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
+					const res = mcpTool ? await this._callMcpTool(connection, call, signal) : await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
 					if (signal.aborted) {
 						return;
 					}
-					fire({ type: ActionType.ChatToolCallComplete, turnId, toolCallId: call.callId, result: toToolCallResult(call.name, res) });
+					fire({ type: ActionType.ChatToolCallComplete, turnId, toolCallId: call.callId, result: toToolCallResult(displayName, res) });
 					session.history.push({ type: 'function_call_output', callId: call.callId, output: res.output });
 				}
 			}
@@ -525,8 +551,68 @@ export class KodiaAgent extends Disposable implements IAgent {
 		}
 	}
 
+	/**
+	 * What the model is told besides the conversation: the agent's own instructions, then the project's rules files
+	 * and skills, from the most stable part to the most changing one so a provider's prompt cache keeps the longest
+	 * prefix. Rules and skills are the project's own, as in Kodia's chat: a failure to read them leaves them out.
+	 */
+	private async _instructions(session: KodiaAgentSession): Promise<string> {
+		const sections = [instructionsFor(session.workingDirectory)];
+		try {
+			const [rules, skills] = await Promise.all([
+				readProjectRules(session.workingDirectory, this._fileService),
+				readProjectSkills(session.workingDirectory, this._environmentService.userHome, this._fileService),
+			]);
+			if (rules) {
+				sections.push(`PROJECT RULES (from the project's rules files):\n${rules}`);
+			}
+			if (skills.length > 0) {
+				sections.push(skillsPrompt(skills));
+			}
+		} catch (err) {
+			this._logService.warn(`[Kodia] Could not read the project's rules and skills: ${err}`);
+		}
+		return sections.join('\n\n');
+	}
+
+	/**
+	 * The MCP tools of the Kodia window, by the name the model calls them. The window runs the MCP servers, so there
+	 * are none when it doesn't offer them (an older window) or can't be asked: the agent then has its own tools.
+	 */
+	private async _mcpTools(connection: IByokLmBridgeConnection): Promise<Map<string, IKodiaMcpTool>> {
+		if (!connection.listMcpTools || !connection.callMcpTool) {
+			return new Map();
+		}
+		try {
+			const ownTools = new Set(KODIA_TOOLS.map(tool => tool.name));
+			return new Map((await connection.listMcpTools()).filter(tool => !ownTools.has(tool.name)).map(tool => [tool.name, tool]));
+		} catch (err) {
+			this._logService.warn(`[Kodia] Could not list the MCP tools of the Kodia window: ${err}`);
+			return new Map();
+		}
+	}
+
+	/** One MCP tool call, run by the Kodia window and cancelled with the turn. */
+	private async _callMcpTool(connection: IByokLmBridgeConnection, call: IByokLmFunctionCallItem, signal: AbortSignal): Promise<IKodiaToolResult> {
+		if (!connection.callMcpTool) {
+			return { success: false, output: 'MCP tools are not available.' };
+		}
+		const cts = new CancellationTokenSource();
+		const onAbort = () => cts.cancel();
+		signal.addEventListener('abort', onAbort, { once: true });
+		try {
+			const { isError, output } = await connection.callMcpTool(call.name, call.argumentsJson, cts.token);
+			return { success: !isError, output: output.length > MAX_MCP_OUTPUT_CHARS ? `${output.slice(0, MAX_MCP_OUTPUT_CHARS)}\n(The output is cut here.)` : output };
+		} catch (err) {
+			return { success: false, output: err instanceof Error ? err.message : String(err) };
+		} finally {
+			signal.removeEventListener('abort', onAbort);
+			cts.dispose();
+		}
+	}
+
 	/** One model request, run by the serving Kodia window and cancelled with the turn. */
-	private async _chat(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, signal: AbortSignal): Promise<IByokLmChatResult> {
+	private async _chat(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, instructions: string, tools: IByokLmFunctionTool[], signal: AbortSignal): Promise<IByokLmChatResult> {
 		const cts = new CancellationTokenSource();
 		const onAbort = () => cts.cancel();
 		signal.addEventListener('abort', onAbort, { once: true });
@@ -534,9 +620,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 			return await connection.chat({
 				vendor: model.vendor,
 				modelId: model.modelId,
-				instructions: instructionsFor(session.workingDirectory),
+				instructions,
 				input: session.history,
-				tools: KODIA_TOOLS,
+				tools,
 			}, cts.token);
 		} finally {
 			signal.removeEventListener('abort', onAbort);
@@ -550,12 +636,14 @@ export class KodiaAgent extends Disposable implements IAgent {
 	 * terminal rules, workspace paths) and otherwise prompt the user; the
 	 * verdict arrives via {@link respondToPermissionRequest}.
 	 */
-	private _requestApproval(session: KodiaAgentSession, call: IByokLmFunctionCallItem, description: ReturnType<typeof describeKodiaToolCall>): Promise<boolean> {
+	private _requestApproval(session: KodiaAgentSession, call: IByokLmFunctionCallItem, description: ReturnType<typeof describeKodiaToolCall>, mcpDisplayName?: string): Promise<boolean> {
 		const isShell = call.name === 'run_bash';
 		const isWeb = call.name === 'fetch_url';
+		const isMcp = mcpDisplayName !== undefined;
 		// Kodia: a fetched URL has no auto-approval rule, so the host asks unless the session auto-approves everything,
 		// as Kodia's chat does for web pages
 		const confirmationTitle = isShell ? localize('kodiaAgent.runInTerminal', "Run in terminal")
+			: isMcp ? localize('kodiaAgent.runMcpTool', "Run MCP tool")
 			: isWeb ? localize('kodiaAgent.fetchUrl', "Fetch web page")
 				: call.name === 'edit_file' ? localize('kodiaAgent.editFile', "Edit file")
 					: call.name === 'write_project_memory' ? localize('kodiaAgent.saveProjectMemory', "Save project memory")
@@ -563,7 +651,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 		const state: ToolCallPendingConfirmationState = {
 			toolCallId: call.callId,
 			toolName: call.name,
-			displayName: toolDisplayName(call.name),
+			displayName: mcpDisplayName ?? toolDisplayName(call.name),
 			invocationMessage: description.invocationMessage,
 			toolInput: description.toolInput,
 			status: ToolCallStatus.PendingConfirmation,
@@ -573,7 +661,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 			kind: 'pending_confirmation',
 			chat: session.chat,
 			state,
-			permissionKind: isShell ? 'shell' : isWeb ? 'url' : 'write',
+			permissionKind: isShell ? 'shell' : isMcp ? 'mcp' : isWeb ? 'url' : 'write',
 			...(description.path ? { permissionPath: description.path } : {}),
 			// `child_process.exec` runs commands through cmd.exe on Windows.
 			...(isShell && !isWindows ? { shellLanguage: 'bash' as const } : {}),

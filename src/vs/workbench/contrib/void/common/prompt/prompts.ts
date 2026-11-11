@@ -12,6 +12,7 @@ import { RawToolParamsObj } from '../sendLLMMessageTypes.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, BuiltinToolResultType, ToolName } from '../toolsServiceTypes.js';
 import { ChatMode } from '../voidSettingsTypes.js';
 import { MAX_PROJECT_MEMORY_TOKENS } from '../../../../../platform/kodia/common/projectMemory.js';
+import { joinProjectRules, PROJECT_RULES_FILE_NAMES, skillsPrompt } from '../../../../../platform/kodia/common/projectInstructions.js';
 
 // Triple backtick wrapper used throughout the prompts for code blocks
 export const tripleTick = ['```', '```']
@@ -66,22 +67,8 @@ export const summarizedThreadMessage = (summary: string, latestRequest: string |
 ].join('\n\n')
 
 
-// The instruction files read from the root of each workspace folder: Kodia's own, then the ones
-// other agents use, so a project set up for Codex, Claude Code, Cursor or Windsurf works as is
-export const PROJECT_RULES_FILE_NAMES = ['.voidrules', 'AGENTS.md', 'CLAUDE.md', '.cursorrules', '.windsurfrules'] as const
-
-// Labels each rules file with its path. A file with the same content as an earlier one (a symlink, a copy) is left out.
-export const joinProjectRules = (files: { path: string, content: string }[]): string => {
-	const seen = new Set<string>()
-	const parts: string[] = []
-	for (const { path, content } of files) {
-		const trimmed = content.trim()
-		if (!trimmed || seen.has(trimmed)) continue
-		seen.add(trimmed)
-		parts.push(`From ${path}:\n${trimmed}`)
-	}
-	return parts.join('\n\n')
-}
+// The rules files and the skills prompt, shared with the Kodia agent of the Agents window
+export { joinProjectRules, PROJECT_RULES_FILE_NAMES, skillsPrompt as chat_skills }
 
 
 export const ORIGINAL = `<<<<<<< ORIGINAL`
@@ -627,26 +614,6 @@ ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)
 
 	return fullSystemMsgStr
 
-}
-
-// sent with every request: past this, the remaining skills are listed by name and file only
-const MAX_SKILL_DESCRIPTIONS_CHARS = 20_000
-
-// The agent skills (SKILL.md files) the agent can load: their name and description only, it reads a skill's file when a task matches it
-export const chat_skills = (skills: readonly { name: string, description: string, path: string }[]) => {
-	let descriptionsChars = 0
-	const entries = skills.map(({ name, description, path }) => {
-		descriptionsChars += description.length
-		return descriptionsChars <= MAX_SKILL_DESCRIPTIONS_CHARS
-			? `<skill>\n<name>${name}</name>\n<description>${description}</description>\n<file>${path}</file>\n</skill>`
-			: `<skill>\n<name>${name}</name>\n<file>${path}</file>\n</skill>`
-	})
-	return `SKILLS (instructions for specific kinds of tasks, from SKILL.md files in the workspace and the user's home):
-When the user's request matches a skill's description, read the skill's file with read_file before you start the task, and follow it. \
-A skill can refer to other files in its folder, by paths relative to that folder: read them when the skill tells you to.
-<skills>
-${entries.join('\n')}
-</skills>`
 }
 
 // last in the system prompt: it changes whenever a file is created or deleted

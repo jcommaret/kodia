@@ -11,6 +11,7 @@ import { os } from '../helpers/systemInfo.js';
 import { RawToolParamsObj } from '../sendLLMMessageTypes.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, BuiltinToolResultType, ToolName } from '../toolsServiceTypes.js';
 import { ChatMode } from '../voidSettingsTypes.js';
+import { MAX_PROJECT_MEMORY_TOKENS } from '../../../../../platform/kodia/common/projectMemory.js';
 import { DIVIDER, FINAL, ORIGINAL, replaceTool_description, searchReplaceBlockTemplate } from '../../../../../platform/kodia/common/searchReplaceBlocks.js';
 
 // Triple backtick wrapper used throughout the prompts for code blocks
@@ -29,8 +30,8 @@ export const MAX_TERMINAL_CHARS = 100_000
 export const MAX_TERMINAL_INACTIVE_TIME = 8 // seconds
 export const MAX_TERMINAL_BG_COMMAND_TIME = 5
 
-// project memory tool info
-export const MAX_PROJECT_MEMORY_TOKENS = 2_000
+// project memory tool info, shared with the Kodia agent of the Agents window
+export { MAX_PROJECT_MEMORY_TOKENS }
 
 
 // Maximum character limits for prefix and suffix context

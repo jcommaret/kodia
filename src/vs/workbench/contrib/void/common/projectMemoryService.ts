@@ -7,45 +7,12 @@ import { InstantiationType, registerSingleton } from '../../../../platform/insta
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
-import { MAX_PROJECT_MEMORY_TOKENS } from './prompt/prompts.js';
+import { MAX_PROJECT_MEMORY_TOKENS, memoryTooLongMessage, memoryWithSection, PROJECT_MEMORY_FILE_HEADER as FILE_HEADER, PROJECT_MEMORY_FILE_PATH } from '../../../../platform/kodia/common/projectMemory.js';
 import { PROJECT_MEMORY_STORAGE_KEY } from './storageKeys.js';
 import { estimateTokens } from './tokenizer.js';
 
-
-// In the repo, so people can read, edit, version and share it; the agent keeps it in "## Section"s.
-export const PROJECT_MEMORY_FILE_PATH = '.kodia/memory.md'
-
-const FILE_HEADER = `<!-- Notes Kodia's agent keeps about this project across sessions (write_project_memory rewrites one "## " section at a time). Edit freely. -->`
-
-type MemorySection = { title: string, body: string }
-
-// text before the first "## " heading is kept as-is
-export const parseMemorySections = (memory: string): { preamble: string, sections: MemorySection[] } => {
-	const parts = memory.split(/^## /m)
-	const preamble = parts.shift()!.trim()
-	const sections = parts.map(part => {
-		const newline = part.indexOf('\n')
-		return newline === -1
-			? { title: part.trim(), body: '' }
-			: { title: part.slice(0, newline).trim(), body: part.slice(newline + 1).trim() }
-	})
-	return { preamble, sections }
-}
-
-const renderMemorySections = ({ preamble, sections }: { preamble: string, sections: MemorySection[] }) =>
-	[preamble, ...sections.map(s => s.body ? `## ${s.title}\n${s.body}` : `## ${s.title}`)].filter(s => !!s).join('\n\n') + '\n'
-
-// Replaces the section's body (or adds the section); empty content removes it. Section titles match case-insensitively.
-export const memoryWithSection = (memory: string, title: string, content: string) => {
-	const parsed = parseMemorySections(memory)
-	const idx = parsed.sections.findIndex(s => s.title.toLowerCase() === title.toLowerCase())
-	if (!content.trim()) {
-		if (idx !== -1) parsed.sections.splice(idx, 1)
-	}
-	else if (idx !== -1) parsed.sections[idx] = { title: parsed.sections[idx].title, body: content.trim() }
-	else parsed.sections.push({ title, body: content.trim() })
-	return renderMemorySections(parsed)
-}
+// the file format is shared with the Kodia agent of the Agents window
+export { memoryWithSection, parseMemorySections, PROJECT_MEMORY_FILE_PATH } from '../../../../platform/kodia/common/projectMemory.js';
 
 
 export interface IProjectMemoryService {
@@ -118,7 +85,7 @@ class ProjectMemoryService extends Disposable implements IProjectMemoryService {
 		const memory = memoryWithSection(base, title, content)
 		const tokenCount = estimateTokens(memory)
 		if (tokenCount > MAX_PROJECT_MEMORY_TOKENS) {
-			throw new Error(`The project memory would be ${tokenCount} tokens, over its ~${MAX_PROJECT_MEMORY_TOKENS}-token limit, so nothing was saved. Condense it first: rewrite the longest sections more briefly, merge overlapping ones, or delete outdated ones (empty content). Then save again.`)
+			throw new Error(memoryTooLongMessage(tokenCount))
 		}
 		await this._write(memory)
 		return { memory, tokenCount }

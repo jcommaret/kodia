@@ -17,7 +17,7 @@ import { IFileService } from '../../../files/common/files.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClient, IAgent, IAgentChatConfigCompletionsParams, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, IAgentChats, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSpawnChatEvent } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo, IKodiaMcpTool } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool } from '../../common/agentHostByokLm.js';
 import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { KODIA_AGENT_PROVIDER_ID, KODIA_AGENT_RESOURCE } from '../../common/kodiaAgentHostLm.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
@@ -32,7 +32,7 @@ import { readProjectMemory, readProjectRules, readProjectSkills } from './kodiaP
 import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
 import { projectMemoryPrompt } from '../../../kodia/common/projectMemory.js';
 import { summarizeThread_systemMessage, summarizeThread_userMessage, summaryTranscriptMaxChars, transcriptForSummary } from '../../../kodia/common/threadSummary.js';
-import { approvalOfTool, describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, needsApproval, toolDisplayName } from './kodiaTools.js';
+import { approvalOfTool, describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
 
 /**
  * The bridge to the Kodia windows that run the Kodia agent's model requests,
@@ -481,6 +481,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 			const instructions = await this._instructions(session);
 			// and so do the MCP tools of the Kodia window, which has the user's MCP servers
 			const mcpTools = await this._mcpTools(connection);
+			// and what the user's Kodia settings let run without asking
+			const autoApprove = await this._autoApprove(connection);
 			const tools = [...KODIA_TOOLS, ...[...mcpTools.values()].map(mcpFunctionTool)];
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				await this._fitContext(connection, session, model, signal);
@@ -534,7 +536,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 					const displayName = mcpTool ? `${mcpTool.displayName} (${mcpTool.serverName})` : toolDisplayName(call.name);
 					fire({ type: ActionType.ChatToolCallStart, turnId, toolCallId: call.callId, toolName: call.name, displayName });
 					const description = mcpTool ? { invocationMessage: displayName, toolInput: call.argumentsJson } : describeKodiaToolCall(call.name, call.argumentsJson, session.workingDirectory);
-					if (mcpTool || needsApproval(call.name)) {
+					const approvalKind = mcpTool ? 'MCP tools' as const : approvalOfTool(call.name);
+					if (approvalKind && autoApprove[approvalKind] !== true) {
 						// Mutating tools, and every MCP tool, go through the host's permission flow, which
 						// applies the session's approval settings or asks the user.
 						const approved = await this._requestApproval(session, call, description, mcpTool ? displayName : undefined);
@@ -551,7 +554,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 						fire({
 							type: ActionType.ChatToolCallReady, turnId, toolCallId: call.callId,
 							invocationMessage: description.invocationMessage, toolInput: description.toolInput,
-							confirmed: ToolCallConfirmationReason.NotNeeded,
+							// a kind the user switched on in Kodia's settings is approved, as in the chat
+							confirmed: approvalKind ? ToolCallConfirmationReason.Setting : ToolCallConfirmationReason.NotNeeded,
 						});
 					}
 					const res = mcpTool ? await this._callMcpTool(connection, call, signal) : await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
@@ -691,6 +695,22 @@ export class KodiaAgent extends Disposable implements IAgent {
 		} catch (err) {
 			this._logService.warn(`[Kodia] Could not list the MCP tools of the Kodia window: ${err}`);
 			return new Map();
+		}
+	}
+
+	/**
+	 * What the user's Kodia settings let run without asking (Settings > Auto-approve), as the chat honors it. Nothing is
+	 * approved when the window doesn't say (an older one) or can't be asked: the host's permission flow decides then.
+	 */
+	private async _autoApprove(connection: IByokLmBridgeConnection): Promise<IKodiaAutoApprove> {
+		if (!connection.getAutoApprove) {
+			return {};
+		}
+		try {
+			return await connection.getAutoApprove() ?? {};
+		} catch (err) {
+			this._logService.warn(`[Kodia] Could not read the auto-approval settings of the Kodia window: ${err}`);
+			return {};
 		}
 	}
 

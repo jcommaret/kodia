@@ -18,9 +18,9 @@ import { FileService } from '../../../files/common/fileService.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentChatDataChange, type IAgentToolPendingConfirmationSignal } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
 import { ActionType } from '../../common/state/sessionActions.js';
-import { buildDefaultChatUri, ResponsePartKind } from '../../common/state/sessionState.js';
+import { buildDefaultChatUri, ResponsePartKind, ToolCallConfirmationReason } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
 import { CLEARED_TOOL_RESULT, summarizedThreadMessage, summarizeThread_systemMessage } from '../../../kodia/common/threadSummary.js';
@@ -35,6 +35,14 @@ class FakeKodiaWindow implements IByokLmBridgeConnection {
 	pending: Promise<IByokLmChatResult> | undefined;
 	/** The window's MCP servers; undefined for a window that doesn't offer MCP tools. */
 	mcp: { tools: IKodiaMcpTool[]; result: IKodiaMcpToolResult; calls: { name: string; argsJson: string }[]; listError?: Error } | undefined;
+
+	/** What Kodia's settings let run without asking; undefined for a window that doesn't say, an error for one that can't. */
+	autoApprove: IKodiaAutoApprove | Error | undefined;
+
+	get getAutoApprove() {
+		const setting = this.autoApprove;
+		return setting && (async () => { if (setting instanceof Error) { throw setting; } return setting; });
+	}
 
 	get listMcpTools() {
 		const mcp = this.mcp;
@@ -528,6 +536,104 @@ suite('KodiaAgent', () => {
 			await other.agent.chats.sendMessage(otherChat, 'two', [cwd], undefined, 'turn-2');
 			assert.strictEqual(other.registry.window!.requests.length, 2);
 			assert.strictEqual(other.registry.window!.requests[1].input.length, 3);
+		});
+	});
+
+	suite('what the user lets run without asking, in Kodia\'s settings', () => {
+
+		const readyOf = (signals: readonly AgentSignal[], toolCallId: string) => signals.filter((s): s is IAgentActionSignal => s.kind === 'action')
+			.map(s => s.action).find(a => a.type === ActionType.ChatToolCallReady && a.toolCallId === toolCallId);
+		const approvalRequests = (signals: readonly AgentSignal[]) => signals.filter((s): s is IAgentToolPendingConfirmationSignal => s.kind === 'pending_confirmation');
+
+		test('runs a kind of tool the user switched on without asking, and asks about the others', async () => {
+			const dir = fs.mkdtempSync(join(os.tmpdir(), 'kodia-approve-'));
+			try {
+				const { agent, registry } = createAgent();
+				const window = registry.window!;
+				window.autoApprove = { edits: true, terminal: false };
+				window.results = [
+					{ output: [{ type: 'function_call', callId: 'call-1', name: 'create_file_or_folder', argumentsJson: JSON.stringify({ uri: join(dir, 'new.txt') }) }] },
+					{ output: [{ type: 'function_call', callId: 'call-2', name: 'run_command', argumentsJson: JSON.stringify({ command: 'echo hi' }) }] },
+					text('Done.'),
+				];
+				const { session, chat } = newChat();
+				const { signals } = watch(agent);
+				await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+				const turn = agent.chats.sendMessage(chat, 'Make a file, then run a command', [cwd], undefined, 'turn-1');
+				const request = await answerApproval(agent, signals, false);
+				await turn;
+
+				assert.deepStrictEqual(approvalRequests(signals).map(r => [r.state.toolCallId, r.permissionKind]), [['call-2', 'shell']], 'only the command is asked about');
+				assert.ok(fs.existsSync(join(dir, 'new.txt')), 'the file was created');
+				assert.strictEqual(request.state.toolCallId, 'call-2');
+				const ready = readyOf(signals, 'call-1');
+				assert.ok(ready && ready.type === ActionType.ChatToolCallReady && ready.confirmed === ToolCallConfirmationReason.Setting, 'recorded as approved by a setting');
+				assert.deepStrictEqual(window.requests[2].input.at(-1), { type: 'function_call_output', callId: 'call-2', output: 'The user denied this tool call.' });
+			} finally {
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		test('runs the window\'s MCP tools without asking when the user switched MCP tools on', async () => {
+			const { agent, registry } = createAgent();
+			const window = registry.window!;
+			window.autoApprove = { 'MCP tools': true };
+			window.mcp = { tools: [issueSearch], result: { isError: false, output: '3 issues' }, calls: [] };
+			window.results = [
+				{ output: [{ type: 'function_call', callId: 'call-1', name: 'a1b2_search', argumentsJson: '{"query":"bug"}' }] },
+				text('Found them.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Look for bugs', [cwd], undefined, 'turn-1');
+
+			assert.deepStrictEqual(approvalRequests(signals), []);
+			assert.deepStrictEqual(window.mcp.calls, [{ name: 'a1b2_search', argsJson: '{"query":"bug"}' }]);
+			assert.deepStrictEqual(window.requests[1].input.at(-1), { type: 'function_call_output', callId: 'call-1', output: '3 issues' });
+		});
+
+		test('asks about everything when nothing is switched on, or the window does not say or can\'t be asked', async () => {
+			for (const autoApprove of [{}, { 'MCP tools': false, edits: true }, undefined, new Error('The window is busy.')]) {
+				const { agent, registry } = createAgent();
+				const window = registry.window!;
+				window.autoApprove = autoApprove;
+				window.mcp = { tools: [issueSearch], result: { isError: false, output: 'should not run' }, calls: [] };
+				window.results = [
+					{ output: [{ type: 'function_call', callId: 'call-1', name: 'a1b2_search', argumentsJson: '{}' }] },
+					text('Understood.'),
+				];
+				const { session, chat } = newChat();
+				const { signals } = watch(agent);
+				await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+				const turn = agent.chats.sendMessage(chat, 'Look for bugs', [cwd], undefined, 'turn-1');
+				const request = await answerApproval(agent, signals, false);
+				await turn;
+
+				assert.strictEqual(request.permissionKind, 'mcp', JSON.stringify(autoApprove));
+				assert.deepStrictEqual(window.mcp.calls, []);
+			}
+		});
+
+		test('never asks about a tool that only reads, whatever the settings', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.autoApprove = {};
+			registry.window!.results = [
+				{ output: [{ type: 'function_call', callId: 'call-1', name: 'ls_dir', argumentsJson: '{}' }] },
+				text('Done.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'What is here?', [cwd], undefined, 'turn-1');
+
+			assert.deepStrictEqual(approvalRequests(signals), []);
+			const ready = readyOf(signals, 'call-1');
+			assert.ok(ready && ready.type === ActionType.ChatToolCallReady && ready.confirmed === ToolCallConfirmationReason.NotNeeded);
 		});
 	});
 });

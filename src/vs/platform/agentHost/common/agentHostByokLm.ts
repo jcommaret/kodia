@@ -247,6 +247,19 @@ export interface IByokLmBridgeConnection {
 	listMcpTools?(token?: CancellationToken): Promise<IKodiaMcpTool[]>;
 	/** Kodia: runs one of those MCP tools in the Kodia window, which holds the MCP servers. `token` cancels the wait. */
 	callMcpTool?(name: string, argsJson: string, token?: CancellationToken): Promise<IKodiaMcpToolResult>;
+	/** Kodia: the kinds of tool call the user lets run without asking, in Kodia's settings, when the window offers them. */
+	getAutoApprove?(token?: CancellationToken): Promise<IKodiaAutoApprove>;
+}
+
+/**
+ * Kodia: which kinds of tool call the user has switched on for automatic approval in Kodia's settings (the chat's
+ * "Auto-approve" toggles). A kind that is missing or false is asked about.
+ */
+export interface IKodiaAutoApprove {
+	readonly edits?: boolean;
+	readonly terminal?: boolean;
+	readonly 'web pages'?: boolean;
+	readonly 'MCP tools'?: boolean;
 }
 
 /**

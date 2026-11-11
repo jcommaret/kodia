@@ -7,7 +7,7 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
-import type { IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaMcpTool, IKodiaMcpToolResult } from '../../../../platform/agentHost/common/agentHostByokLm.js';
+import type { IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../../../platform/agentHost/common/agentHostByokLm.js';
 import { IKodiaAgentHostLmHandler } from '../../../../platform/agentHost/common/kodiaAgentHostLm.js';
 import { toInternalTool, toOutput, toSimpleMessages, toUsage } from '../common/kodiaAgentHostLmMessages.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
@@ -65,6 +65,18 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 		} catch (err) {
 			return { isError: true, output: err instanceof Error ? err.message : String(err) };
 		}
+	}
+
+	// What the user switched on in Kodia's settings ("Auto-approve"), as the chat honors it: the agent asks about the rest.
+	async getAutoApprove(): Promise<IKodiaAutoApprove> {
+		await this._voidSettingsService.waitForInitState;
+		const { autoApprove } = this._voidSettingsService.state.globalSettings;
+		return {
+			edits: autoApprove.edits === true,
+			terminal: autoApprove.terminal === true,
+			'web pages': autoApprove['web pages'] === true,
+			'MCP tools': autoApprove['MCP tools'] === true,
+		};
 	}
 
 	async listModels(): Promise<IByokLmModelInfo[]> {

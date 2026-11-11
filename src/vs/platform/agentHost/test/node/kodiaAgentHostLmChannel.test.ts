@@ -27,6 +27,7 @@ suite('kodiaAgentHostLmChannel', () => {
 			listModels: async () => [],
 			listMcpTools: async token => { seen.tokens.push(token); return [search]; },
 			callMcpTool: async (name, argsJson, token) => { seen.calls.push({ name, argsJson }); seen.tokens.push(token); return { isError: false, output: `ran ${name}` }; },
+			getAutoApprove: async token => { seen.tokens.push(token); return { edits: true, terminal: false }; },
 		};
 		return { handler, seen };
 	}
@@ -52,6 +53,15 @@ suite('kodiaAgentHostLmChannel', () => {
 		assert.deepStrictEqual(await connection.listMcpTools!(), [search]);
 		assert.deepStrictEqual(await connection.callMcpTool!('x1y2_search', '{"query":"bug"}'), { isError: false, output: 'ran x1y2_search' });
 		assert.deepStrictEqual(seen.calls, [{ name: 'x1y2_search', argsJson: '{"query":"bug"}' }]);
+	});
+
+	test('asks the window what the user lets the agent do without asking', async () => {
+		const { handler: h, seen } = handler();
+		const connection = bridge(h);
+		const cts = store.add(new CancellationTokenSource());
+
+		assert.deepStrictEqual(await connection.getAutoApprove!(cts.token), { edits: true, terminal: false });
+		assert.strictEqual(seen.tokens[0], cts.token);
 	});
 
 	test('gives the window\'s handler the caller\'s token, or none', async () => {

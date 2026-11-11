@@ -49,6 +49,23 @@ suite('Kodia agent tools', () => {
 		assert.strictEqual(describeKodiaToolCall('read_file', JSON.stringify({ path: 'a.txt', start_line: 2, end_line: 3 }), ctx.workingDirectory).invocationMessage, 'Read a.txt, lines 2-3');
 	});
 
+	test('reads the numbers and flags the model sends as text, which is how the window offers every parameter', async () => {
+		await write('a.txt', 'one\ntwo\nthree\nfour\nfive');
+		assert.strictEqual((await run('read_file', { path: 'a.txt', start_line: '2', end_line: ' 3 ' })).output, 'Lines 2-3 of 5.\ntwo\nthree');
+		for (const notALine of ['abc', '0', '-1', '1.5', '']) {
+			assert.strictEqual((await run('read_file', { path: 'a.txt', start_line: notALine })).output, 'one\ntwo\nthree\nfour\nfive', `"${notALine}" is no line`);
+		}
+
+		await write('b.ts', 'let a = 1;\nlet b = 1;\n');
+		assert.strictEqual((await run('edit_file', { path: 'b.ts', old_string: '= ', new_string: '=', replace_all: 'true' })).success, true);
+		assert.strictEqual(await read('b.ts'), 'let a =1;\nlet b =1;\n');
+		assert.match((await run('edit_file', { path: 'b.ts', old_string: '=1', new_string: '=2', replace_all: 'false' })).output, /occurs 2 times/);
+
+		await write('c.ts', 'function foo() {}\n');
+		assert.strictEqual((await run('search_files', { query: 'fo+\\(', is_regex: 'true' })).output, 'c.ts:1:function foo() {}');
+		assert.strictEqual((await run('search_files', { query: 'fo+\\(', is_regex: 'false' })).output, 'No matches.');
+	});
+
 	test('read_file cuts a large file, and says where to read on', async () => {
 		const line = 'x'.repeat(60_000);
 		await write('big.txt', `${line}\n${line}\n${line}`);

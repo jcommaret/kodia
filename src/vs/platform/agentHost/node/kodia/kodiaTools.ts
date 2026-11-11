@@ -207,8 +207,15 @@ function resolveToolPath(p: unknown, root: string): string {
 	return path.isAbsolute(s) ? s : path.join(root, s);
 }
 
+// Kodia's window offers every tool parameter to the model as a string, whatever the schema above says: a line number
+// reaches these tools as "2" and a flag as "true". Both forms are read.
 function toPositiveInt(n: unknown): number | undefined {
-	return typeof n === 'number' && Number.isInteger(n) && n >= 1 ? n : undefined;
+	const value = typeof n === 'string' && /^\s*\d+\s*$/.test(n) ? Number(n) : n;
+	return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
+}
+
+function toBool(b: unknown): boolean {
+	return b === true || (typeof b === 'string' && b.trim().toLowerCase() === 'true');
 }
 
 /** What the host shows, and checks against its approval rules, before a tool call runs. */
@@ -374,7 +381,7 @@ export async function executeKodiaTool(name: string, argsJson: string, ctx: IKod
 					return { success: false, output: 'Missing "old_string". To create a file or replace all of it, use write_file.' };
 				}
 				const content = await fs.promises.readFile(target, 'utf8');
-				const edited = editedContent(content, oldString, typeof args.new_string === 'string' ? args.new_string : '', args.replace_all === true, target);
+				const edited = editedContent(content, oldString, typeof args.new_string === 'string' ? args.new_string : '', toBool(args.replace_all), target);
 				if (typeof edited === 'string') {
 					return { success: false, output: edited, path: target };
 				}
@@ -408,7 +415,7 @@ export async function executeKodiaTool(name: string, argsJson: string, ctx: IKod
 				const include = typeof args.include === 'string' && args.include ? ['--glob', args.include] : [];
 				return runRipgrep([
 					'--line-number', '--no-heading', '--color', 'never', '--max-columns', '300', '--max-columns-preview',
-					...(args.is_regex === true ? [] : ['--fixed-strings']), ...RIPGREP_HIDDEN_ARGS, ...include,
+					...(toBool(args.is_regex) ? [] : ['--fixed-strings']), ...RIPGREP_HIDDEN_ARGS, ...include,
 					'--regexp', query, ...searchPathArgs(args.path, root),
 				], root, ctx.signal, MAX_SEARCH_LINES, 'matches');
 			}

@@ -26,13 +26,14 @@ export function toInternalTool(tool: IByokLmTool): InternalToolInfo[] {
 	if (tool.type !== 'function') {
 		return [];
 	}
-	// Kodia offers every tool parameter as a string, which is all the agent's tools take.
+	// The parameters' descriptions are what a model without native tool calling is told (XML tools); the schema is what
+	// the other models get: the types and the required parameters the tool declares, see toolSchema.ts.
 	const properties = (tool.parametersSchema as { properties?: Record<string, { description?: string }> } | undefined)?.properties ?? {};
 	const params: InternalToolInfo['params'] = {};
 	for (const [name, property] of Object.entries(properties)) {
 		params[name] = { description: property.description ?? '' };
 	}
-	return [{ name: tool.name, description: tool.description ?? '', params }];
+	return [{ name: tool.name, description: tool.description ?? '', params, ...tool.parametersSchema ? { inputSchema: tool.parametersSchema } : {} }];
 }
 
 function parseArguments(argumentsJson: string): RawToolParamsObj {

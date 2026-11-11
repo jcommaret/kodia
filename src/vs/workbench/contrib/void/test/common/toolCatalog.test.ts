@@ -29,7 +29,7 @@ suite('Kodia - the tools the chat and the Agents window\'s agent share', () => {
 				}
 			}
 		}
-		assert.match(builtinTools.read_file.params.start_line.description, /go_to_definition, find_references, or a lint error/);
+		assert.match(builtinTools.read_file.params.start_line?.description ?? '', /go_to_definition, find_references, or a lint error/);
 		assert.match(builtinTools.run_command.description, /times out after 8s of inactivity/);
 		assert.doesNotMatch(sharedTools.read_file.params.start_line.description, /go_to_definition/, 'the agent has no language server');
 		assert.doesNotMatch(sharedTools.run_command.description, /8s/, 'the agent\'s commands run longer');

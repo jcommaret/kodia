@@ -25,7 +25,7 @@ import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirma
 import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
-import { describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, isMutatingTool, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
+import { describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, needsApproval, toolDisplayName } from './kodiaTools.js';
 
 /**
  * The bridge to the Kodia windows that run the Kodia agent's model requests,
@@ -57,6 +57,8 @@ function instructionsFor(workingDirectory: URI | undefined): string {
 	if (workingDirectory) {
 		lines.push(`The project is at ${workingDirectory.fsPath}; relative paths resolve against it.`);
 	}
+	lines.push('Find code with find_files and search_files, and change existing files with edit_file: write_file is for new files or full rewrites.');
+	lines.push('The project memory keeps notes across sessions: read it with read_project_memory before a task, and save what future sessions should know with write_project_memory.');
 	return lines.join('\n');
 }
 
@@ -481,7 +483,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 					// pending_confirmation round-trip through respondToPermissionRequest.
 					fire({ type: ActionType.ChatToolCallStart, turnId, toolCallId: call.callId, toolName: call.name, displayName: toolDisplayName(call.name) });
 					const description = describeKodiaToolCall(call.name, call.argumentsJson, session.workingDirectory);
-					if (isMutatingTool(call.name)) {
+					if (needsApproval(call.name)) {
 						// Mutating tools go through the host's permission flow, which
 						// applies the session's approval settings or asks the user.
 						const approved = await this._requestApproval(session, call, description);
@@ -550,6 +552,14 @@ export class KodiaAgent extends Disposable implements IAgent {
 	 */
 	private _requestApproval(session: KodiaAgentSession, call: IByokLmFunctionCallItem, description: ReturnType<typeof describeKodiaToolCall>): Promise<boolean> {
 		const isShell = call.name === 'run_bash';
+		const isWeb = call.name === 'fetch_url';
+		// Kodia: a fetched URL has no auto-approval rule, so the host asks unless the session auto-approves everything,
+		// as Kodia's chat does for web pages
+		const confirmationTitle = isShell ? localize('kodiaAgent.runInTerminal', "Run in terminal")
+			: isWeb ? localize('kodiaAgent.fetchUrl', "Fetch web page")
+				: call.name === 'edit_file' ? localize('kodiaAgent.editFile', "Edit file")
+					: call.name === 'write_project_memory' ? localize('kodiaAgent.saveProjectMemory', "Save project memory")
+						: localize('kodiaAgent.writeFile', "Write file");
 		const state: ToolCallPendingConfirmationState = {
 			toolCallId: call.callId,
 			toolName: call.name,
@@ -557,13 +567,13 @@ export class KodiaAgent extends Disposable implements IAgent {
 			invocationMessage: description.invocationMessage,
 			toolInput: description.toolInput,
 			status: ToolCallStatus.PendingConfirmation,
-			confirmationTitle: isShell ? localize('kodiaAgent.runInTerminal', "Run in terminal") : localize('kodiaAgent.writeFile', "Write file"),
+			confirmationTitle,
 		};
 		this._onDidChatProgress.fire({
 			kind: 'pending_confirmation',
 			chat: session.chat,
 			state,
-			permissionKind: isShell ? 'shell' : 'write',
+			permissionKind: isShell ? 'shell' : isWeb ? 'url' : 'write',
 			...(description.path ? { permissionPath: description.path } : {}),
 			// `child_process.exec` runs commands through cmd.exe on Windows.
 			...(isShell && !isWindows ? { shellLanguage: 'bash' as const } : {}),

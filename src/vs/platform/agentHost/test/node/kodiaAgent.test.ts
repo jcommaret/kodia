@@ -125,7 +125,7 @@ suite('KodiaAgent', () => {
 		const request = registry.window!.requests[0];
 		assert.strictEqual(request.vendor, 'openRouter');
 		assert.strictEqual(request.modelId, 'qwen/qwen3-coder');
-		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'write_file', 'list_dir', 'run_bash']);
+		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'edit_file', 'write_file', 'list_dir', 'find_files', 'search_files', 'run_bash', 'fetch_url', 'read_project_memory', 'write_project_memory']);
 		assert.deepStrictEqual(request.input, [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Hi' }] }]);
 		assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatTurnComplete]);
 

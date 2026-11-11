@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { decodeHTMLEntities, htmlToText } from '../../common/helpers/htmlToText.js';
+import { decodeHTMLEntities, htmlToText } from '../../../../../platform/kodia/common/htmlToText.js';
 
 suite('Kodia - web pages as text (fetch_url)', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();

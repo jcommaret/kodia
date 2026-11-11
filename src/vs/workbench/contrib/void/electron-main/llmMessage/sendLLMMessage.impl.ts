@@ -12,7 +12,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type OpenAI from 'openai';
 import type { ClientOptions, AzureOpenAI } from 'openai';
-import type { Tool as GeminiTool, FunctionDeclaration, ThinkingConfig, Schema, Type } from '@google/genai';
+import type { Tool as GeminiTool, FunctionDeclaration, ThinkingConfig, Type } from '@google/genai';
 /* eslint-enable */
 
 import { AnthropicLLMChatMessage, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, LLMUsage, ModelListParams, OllamaModelResponse, OnError, OnFinalMessage, OnText, RawToolCallObj, RawToolParamsObj } from '../../common/sendLLMMessageTypes.js';
@@ -20,6 +20,7 @@ import { ChatMode, displayInfoOfProviderName, ModelSelectionOptions, OverridesOf
 import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities, defaultProviderSettings, getReservedOutputTokenSpace, anthropicModelFeatures } from '../../common/modelCapabilities.js';
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
+import { geminiParametersOfTool, jsonSchemaOfTool } from '../../common/toolSchema.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
@@ -275,10 +276,7 @@ const _sendOpenAICompatibleFIM = async ({ messages: { prefix, suffix, stopTokens
 
 
 const toOpenAICompatibleTool = (toolInfo: InternalToolInfo) => {
-	const { name, description, params } = toolInfo
-
-	const paramsWithType: { [s: string]: { description: string; type: 'string' } } = {}
-	for (const key in params) { paramsWithType[key] = { ...params[key], type: 'string' } }
+	const { name, description } = toolInfo
 
 	return {
 		type: 'function',
@@ -286,12 +284,8 @@ const toOpenAICompatibleTool = (toolInfo: InternalToolInfo) => {
 			name: name,
 			// strict: true, // strict mode - https://platform.openai.com/docs/guides/function-calling?api-mode=chat
 			description: description,
-			parameters: {
-				type: 'object',
-				properties: paramsWithType,
-				// required: Object.keys(params), // in strict mode, all params are required and additionalProperties is false
-				// additionalProperties: false,
-			},
+			// the types and required parameters the tool's schema declares; strings, none required, without one
+			parameters: jsonSchemaOfTool(toolInfo),
 		}
 	} satisfies OpenAI.Chat.Completions.ChatCompletionTool
 }
@@ -795,17 +789,11 @@ const _openaiCompatibleList = async ({ onSuccess: onSuccess_, onError: onError_,
 
 // ------------ ANTHROPIC (HELPERS) ------------
 const toAnthropicTool = (toolInfo: InternalToolInfo) => {
-	const { name, description, params } = toolInfo
-	const paramsWithType: { [s: string]: { description: string; type: 'string' } } = {}
-	for (const key in params) { paramsWithType[key] = { ...params[key], type: 'string' } }
+	const { name, description } = toolInfo
 	return {
 		name: name,
 		description: description,
-		input_schema: {
-			type: 'object',
-			properties: paramsWithType,
-			// required: Object.keys(params),
-		},
+		input_schema: jsonSchemaOfTool(toolInfo),
 	} satisfies Anthropic.Messages.Tool
 }
 
@@ -1146,20 +1134,11 @@ const sendOllamaFIM = async ({ messages, onFinalMessage, onError, settingsOfProv
 // ---------------- GEMINI NATIVE IMPLEMENTATION ----------------
 
 const toGeminiFunctionDecl = (toolInfo: InternalToolInfo, GeminiType: typeof Type) => {
-	const { name, description, params } = toolInfo
+	const { name, description } = toolInfo
 	return {
 		name,
 		description,
-		parameters: {
-			type: GeminiType.OBJECT,
-			properties: Object.entries(params).reduce((acc, [key, value]) => {
-				acc[key] = {
-					type: GeminiType.STRING,
-					description: value.description
-				};
-				return acc;
-			}, {} as Record<string, Schema>)
-		}
+		parameters: geminiParametersOfTool(toolInfo, GeminiType),
 	} satisfies FunctionDeclaration
 }
 

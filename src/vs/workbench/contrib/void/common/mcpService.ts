@@ -191,6 +191,7 @@ class MCPService extends Disposable implements IMCPService {
 				allTools.push({
 					description: tool.description || '',
 					params: this._transformInputSchemaToParams(tool.inputSchema),
+					...tool.inputSchema ? { inputSchema: tool.inputSchema } : {},
 					name: tool.name,
 					mcpServerName: serverName,
 				})

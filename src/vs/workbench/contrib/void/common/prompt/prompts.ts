@@ -195,6 +195,9 @@ export type InternalToolInfo = {
 	params: {
 		[paramName: string]: { description: string }
 	},
+	// The tool's JSON Schema, if it has one (an MCP server's tool, a tool of the Agents window's agent): the providers
+	// are told its types and required parameters, see toolSchema.ts. Without one, every parameter is a string.
+	inputSchema?: object,
 	// Only if the tool is from an MCP server
 	mcpServerName?: string,
 }

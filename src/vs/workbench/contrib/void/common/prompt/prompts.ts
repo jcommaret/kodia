@@ -15,6 +15,7 @@ import { MAX_PROJECT_MEMORY_TOKENS } from '../../../../../platform/kodia/common/
 import { joinProjectRules, PROJECT_RULES_FILE_NAMES, skillsPrompt } from '../../../../../platform/kodia/common/projectInstructions.js';
 import { DIVIDER, FINAL, ORIGINAL, searchReplaceBlockTemplate } from '../../../../../platform/kodia/common/searchReplaceBlocks.js';
 import { SharedToolName, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
+import { summarizedThreadMessage, summarizeThread_systemMessage, summarizeThread_userMessage } from '../../../../../platform/kodia/common/threadSummary.js';
 
 // Triple backtick wrapper used throughout the prompts for code blocks
 export const tripleTick = ['```', '```']
@@ -41,32 +42,8 @@ export const MAX_PREFIX_SUFFIX_CHARS = 20_000
 
 
 // --- summarizing a thread that outgrew the context window (ContextSummaryEntry) ---
-
-export const summarizeThread_systemMessage = `\
-You summarize a conversation between a user and an AI coding agent. The agent will continue the work from your summary alone: the messages you summarize will be gone.
-
-Keep everything the agent needs to continue:
-- what the user asked for, with their exact constraints and preferences;
-- the decisions made, and why;
-- the files read, created or changed (full paths), and what changed in them;
-- the commands run and what they showed, the errors met and how they were fixed;
-- what is done, and what remains to do.
-
-Leave out pleasantries and details that no longer matter. Write short bullet points under short headings, at most about 600 words. State only what the conversation shows.`
-
-export const summarizeThread_userMessage = (transcript: string) => `\
-Summarize this conversation, following your instructions.
-
-<conversation>
-${transcript}
-</conversation>`
-
-// sent to the chat model in place of the summarized messages; latestRequest when the summary cut the current turn
-export const summarizedThreadMessage = (summary: string, latestRequest: string | undefined) => [
-	`(The earlier part of this conversation was summarized to fit the context window.)`,
-	`SUMMARY OF THE EARLIER CONVERSATION:\n${summary}`,
-	...latestRequest !== undefined ? [`THE USER'S CURRENT REQUEST, which you are working on:\n${latestRequest}`] : [],
-].join('\n\n')
+// the prompts are shared with the Kodia agent of the Agents window
+export { summarizedThreadMessage, summarizeThread_systemMessage, summarizeThread_userMessage }
 
 
 // The rules files and the skills prompt, shared with the Kodia agent of the Agents window

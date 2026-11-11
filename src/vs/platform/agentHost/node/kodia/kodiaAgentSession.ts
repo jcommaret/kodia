@@ -9,6 +9,7 @@ import { URI } from '../../../../base/common/uri.js';
 import type { IAgentSessionProjectInfo } from '../../common/agent.js';
 import type { IByokLmInputItem } from '../../common/agentHostByokLm.js';
 import type { ModelSelection } from '../../common/state/protocol/state.js';
+import type { IKodiaCompaction } from './kodiaContext.js';
 
 /**
  * The opaque backing Agent Host persists for each Kodia chat
@@ -22,8 +23,17 @@ interface IKodiaChatBacking {
 	readonly turnIds: string[];
 	readonly model?: ModelSelection;
 	readonly workingDirectory?: string;
+	/** What the model is not sent, once the history outgrew its context window (see kodiaContext.ts). */
+	readonly compaction?: IKodiaCompaction;
 	readonly createdAt: number;
 	readonly modifiedAt?: number;
+}
+
+// a compaction read back from storage: anything else is no compaction
+function isCompaction(value: unknown): value is IKodiaCompaction {
+	const compaction = value as IKodiaCompaction | undefined;
+	return typeof compaction?.clearedBefore === 'number'
+		&& (compaction.summary === undefined || (typeof compaction.summary.text === 'string' && typeof compaction.summary.keepFromIdx === 'number'));
 }
 
 export function projectForWorkingDirectory(workingDirectory: URI | undefined): IAgentSessionProjectInfo | undefined {
@@ -52,6 +62,18 @@ export class KodiaAgentSession extends Disposable {
 
 	modifiedAt: number;
 
+	/** What the model is sent in place of the old part of the history. Kept with the session. */
+	compaction: IKodiaCompaction | undefined;
+
+	/**
+	 * About how many tokens what the model is sent takes: what the last response said it took, and the messages added
+	 * since. Not kept with the session: it is unknown after a restart, until a response says.
+	 */
+	contextTokens: number | undefined;
+
+	/** The history's length when a summary was last tried, so one that failed isn't tried again at every round. */
+	summaryTriedAtLength: number | undefined;
+
 	private _abortController = new AbortController();
 
 	constructor(
@@ -61,6 +83,7 @@ export class KodiaAgentSession extends Disposable {
 			readonly turnIds?: string[];
 			readonly model?: ModelSelection;
 			readonly workingDirectory?: URI;
+			readonly compaction?: IKodiaCompaction;
 			readonly project?: IAgentSessionProjectInfo;
 			readonly materialized: boolean;
 			readonly modifiedAt?: number;
@@ -75,6 +98,9 @@ export class KodiaAgentSession extends Disposable {
 		this.project = init.project ?? projectForWorkingDirectory(init.workingDirectory);
 		this.materialized = init.materialized;
 		this.modifiedAt = init.modifiedAt ?? createdAt;
+		this.compaction = init.compaction;
+		this.contextTokens = undefined;
+		this.summaryTriedAtLength = undefined;
 	}
 
 	/** Restore a chat from the backing Agent Host persisted. Returns `undefined` for a corrupt blob. */
@@ -93,6 +119,7 @@ export class KodiaAgentSession extends Disposable {
 			turnIds: Array.isArray(backing.turnIds) ? backing.turnIds : [],
 			model: backing.model,
 			workingDirectory: backing.workingDirectory ? URI.parse(backing.workingDirectory) : undefined,
+			compaction: isCompaction(backing.compaction) ? backing.compaction : undefined,
 			// Only a materialized chat is ever persisted, so a restored one is too.
 			materialized: true,
 			modifiedAt: backing.modifiedAt,
@@ -105,6 +132,7 @@ export class KodiaAgentSession extends Disposable {
 			turnIds: this.turnIds,
 			...(this.model ? { model: this.model } : {}),
 			...(this.workingDirectory ? { workingDirectory: this.workingDirectory.toString() } : {}),
+			...(this.compaction ? { compaction: this.compaction } : {}),
 			createdAt: this.createdAt,
 			modifiedAt: this.modifiedAt,
 		};

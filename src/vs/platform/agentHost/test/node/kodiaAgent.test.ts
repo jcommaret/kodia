@@ -4,9 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import * as fs from 'fs';
 import * as os from 'os';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Event } from '../../../../base/common/event.js';
+import { join } from '../../../../base/common/path.js';
 import { IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
@@ -21,6 +23,7 @@ import { ActionType } from '../../common/state/sessionActions.js';
 import { buildDefaultChatUri, ResponsePartKind } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
+import { CLEARED_TOOL_RESULT, summarizedThreadMessage, summarizeThread_systemMessage } from '../../../kodia/common/threadSummary.js';
 
 /** A Kodia window: replays scripted results and records each request and its token. */
 class FakeKodiaWindow implements IByokLmBridgeConnection {
@@ -414,5 +417,117 @@ suite('KodiaAgent', () => {
 		await turn;
 
 		assert.deepStrictEqual(actionTypes(signals), [], 'the host records the cancellation itself');
+	});
+
+	suite('a conversation that outgrows the model\'s context window', () => {
+		// a model with a window of 1,000 tokens: the history may take 800 before it is made smaller
+		const tiny: IByokLmModelInfo = { vendor: 'tiny', id: 'tiny-1', name: 'tiny-1', maxContextWindowTokens: 1_000 };
+		// a response that says the conversation takes 900 tokens
+		const full = (value: string): IByokLmChatResult => ({ ...text(value), usage: { inputTokens: 900, outputTokens: 5 } });
+		const userMessage = (value: string) => ({ type: 'message', role: 'user', content: [{ type: 'text', text: value }] });
+
+		async function tinyChat() {
+			const { agent, registry } = createAgent();
+			registry.setModels([gemini, openRouter, tiny]);
+			const { session, chat } = newChat();
+			const watched = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd], model: { id: 'tiny/tiny-1' } });
+			return { agent, registry, window: registry.window!, session, chat, ...watched };
+		}
+
+		const backing = (data: IAgentChatDataChange[]) => JSON.parse(data[data.length - 1].providerData as string);
+
+		test('clears the results of old tool calls first: the model gets a stub, the Agents window keeps the result', async () => {
+			const dir = fs.mkdtempSync(join(os.tmpdir(), 'kodia-context-'));
+			try {
+				fs.writeFileSync(join(dir, 'file.txt'), 'a line of the file\n'.repeat(40));
+				const { agent, window, session, chat, data } = await tinyChat();
+				window.results = [
+					{ output: [{ type: 'function_call', callId: 'call-1', name: 'read_file', argumentsJson: JSON.stringify({ uri: join(dir, 'file.txt') }) }] },
+					full('I read it.'),
+					text('Sure.'),
+				];
+
+				await agent.chats.sendMessage(chat, 'Read file.txt', [cwd], undefined, 'turn-1');
+				await agent.chats.sendMessage(chat, 'And now?', [cwd], undefined, 'turn-2');
+
+				assert.strictEqual(window.requests.length, 3, 'clearing was enough: the model was not asked for a summary');
+				const sent = window.requests[2].input;
+				assert.deepStrictEqual(sent.map(item => item.type === 'function_call_output' ? item.output : item.type), ['message', 'function_call', CLEARED_TOOL_RESULT, 'message', 'message']);
+				assert.strictEqual(window.requests[1].input[2].type === 'function_call_output' && window.requests[1].input[2].output.includes('a line of the file'), true, 'the result was sent as it was while it was recent');
+
+				const kept = backing(data);
+				assert.ok(kept.history[2].output.includes('a line of the file'), 'what the Agents window shows is not changed');
+				assert.deepStrictEqual(kept.compaction, { clearedBefore: 4 });
+				const turns = await agent.chats.getMessages(chat, session);
+				assert.deepStrictEqual(turns.map(t => t.message.text), ['Read file.txt', 'And now?']);
+			} finally {
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		test('then the model summarizes the older messages, and is sent the summary in their place, also after a restart', async () => {
+			const { agent, window, session, chat, data } = await tinyChat();
+			window.results = [full('First answer.'), text('- The user said one.'), full('Second answer.')];
+
+			await agent.chats.sendMessage(chat, 'one', [cwd], undefined, 'turn-1');
+			await agent.chats.sendMessage(chat, 'two', [cwd], undefined, 'turn-2');
+
+			const [, summaryRequest, request] = window.requests;
+			assert.strictEqual(summaryRequest.instructions, summarizeThread_systemMessage);
+			assert.deepStrictEqual(summaryRequest.tools, []);
+			const transcript = (summaryRequest.input[0] as { content: { text: string }[] }).content[0].text;
+			assert.ok(transcript.includes('USER:\none') && transcript.includes('ASSISTANT:\nFirst answer.'), transcript);
+			assert.ok(!transcript.includes('two'), 'the latest request is kept as it is');
+			assert.deepStrictEqual(request.input, [userMessage(summarizedThreadMessage('- The user said one.', undefined)), userMessage('two')]);
+
+			const kept = backing(data);
+			assert.strictEqual(kept.history.length, 4, 'the Agents window keeps the whole conversation');
+			assert.deepStrictEqual(kept.compaction, { clearedBefore: 0, summary: { text: '- The user said one.', keepFromIdx: 2 } });
+			assert.deepStrictEqual((await agent.chats.getMessages(chat, session)).map(t => t.message.text), ['one', 'two']);
+
+			// the summary is kept with the chat: a restored one goes on from it, with no new summary
+			const restored = createAgent();
+			restored.registry.window!.results = [text('Third answer.')];
+			await restored.agent.materializeChat(chat, session, data[data.length - 1].providerData);
+			await restored.agent.chats.sendMessage(chat, 'three', [cwd], undefined, 'turn-3');
+			assert.strictEqual(restored.registry.window!.requests.length, 1);
+			assert.deepStrictEqual(restored.registry.window!.requests[0].input.map(item => item.type === 'message' ? item.content[0].type === 'text' ? item.content[0].text : '' : item.type), [
+				summarizedThreadMessage('- The user said one.', undefined), 'two', 'Second answer.', 'three',
+			]);
+		});
+
+		test('a summary that fails is not asked for again until the conversation has grown, and the conversation goes on as it is', async () => {
+			const { agent, window, chat } = await tinyChat();
+			window.results = [full('First answer.'), { output: [], error: 'Rate limited.' }, full('Second answer.'), text('Third answer.')];
+
+			await agent.chats.sendMessage(chat, 'one', [cwd], undefined, 'turn-1');
+			await agent.chats.sendMessage(chat, 'two', [cwd], undefined, 'turn-2');
+			assert.strictEqual(window.requests[1].instructions, summarizeThread_systemMessage, 'it was tried');
+			assert.deepStrictEqual(window.requests[2].input.length, 3, 'and the conversation was sent whole');
+
+			await agent.chats.sendMessage(chat, 'three', [cwd], undefined, 'turn-3');
+			assert.strictEqual(window.requests.length, 4, 'not tried again');
+			assert.deepStrictEqual(window.requests[3].input.length, 5);
+		});
+
+		test('a conversation that fits is sent as it is, and so is one whose model has no known window', async () => {
+			const { agent, window, chat } = await tinyChat();
+			window.results = [text('First answer.'), text('Second answer.')];
+			await agent.chats.sendMessage(chat, 'one', [cwd], undefined, 'turn-1');
+			await agent.chats.sendMessage(chat, 'two', [cwd], undefined, 'turn-2');
+			assert.strictEqual(window.requests.length, 2);
+			assert.strictEqual(window.requests[1].input.length, 3);
+
+			// openRouter's model has no known window, so there is nothing to fit it to
+			const other = createAgent();
+			other.registry.window!.results = [full('First answer.'), full('Second answer.')];
+			const { session, chat: otherChat } = newChat();
+			await other.agent.chats.createChat(otherChat, session, { workingDirectories: [cwd], model: { id: 'openRouter/qwen/qwen3-coder' } });
+			await other.agent.chats.sendMessage(otherChat, 'one', [cwd], undefined, 'turn-1');
+			await other.agent.chats.sendMessage(otherChat, 'two', [cwd], undefined, 'turn-2');
+			assert.strictEqual(other.registry.window!.requests.length, 2);
+			assert.strictEqual(other.registry.window!.requests[1].input.length, 3);
+		});
 	});
 });

@@ -13,9 +13,11 @@ import { reParsedToolXMLString } from './prompt/prompts.js';
 import { AnthropicDocumentBlock, AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, MistralDocumentPart, OpenAIFilePart, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { FeatureName, ModelSelection, OptionsOfModelSelection, OverridesOfModel, ProviderName } from './voidSettingsTypes.js';
 import { ToolName } from './toolsServiceTypes.js';
+import { CLEARED_TOOL_RESULT } from '../../../../platform/kodia/common/threadSummary.js';
 
 export const EMPTY_MESSAGE = '(empty message)'
-export const CLEARED_TOOL_RESULT = '(This result was cleared to fit the context window. Call the tool again if you need it.)'
+// shared with the Kodia agent of the Agents window
+export { CLEARED_TOOL_RESULT }
 
 
 

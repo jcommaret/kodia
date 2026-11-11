@@ -49,6 +49,18 @@ const isBlacklisted = (fsPath: string | undefined) => {
 	return extensionBlacklist.find(bItem => fsPath?.includes(bItem))
 }
 
+// An import replaces the user's own settings.json, keybindings.json and extensions.json: the current file is first
+// copied next to it, as <name>.<stamp>.bak, one stamp per import so a second import keeps the first backup. If the
+// copy fails, the error stops this file's import, so nothing is replaced without a backup.
+const backUpBeforeImport = async (fileService: IFileService, file: URI, stamp: string) => {
+	if (!await fileService.exists(file)) return
+	let backup = file.with({ path: `${file.path}.${stamp}.bak` })
+	for (let i = 1; await fileService.exists(backup); i++) {
+		backup = file.with({ path: `${file.path}.${stamp}-${i}.bak` })
+	}
+	await fileService.copy(file, backup, false)
+}
+
 export class ExtensionTransferService extends Disposable implements IExtensionTransferService {
 	_serviceBrand: undefined;
 
@@ -62,6 +74,7 @@ export class ExtensionTransferService extends Disposable implements IExtensionTr
 	async transferExtensions(os: 'mac' | 'windows' | 'linux' | null, fromEditor: TransferEditorType) {
 		const transferTheseFiles = transferTheseFilesOfOS(os, fromEditor, this._productService)
 		const fileService = this._fileService
+		const backupStamp = new Date().toISOString().replace(/[:.]/g, '-')
 
 		let errAcc = ''
 
@@ -79,6 +92,7 @@ export class ExtensionTransferService extends Disposable implements IExtensionTr
 						if (!toParentExists) {
 							await fileService.createFolder(toParent)
 						}
+						await backUpBeforeImport(fileService, to, backupStamp)
 						await fileService.copy(from, to, true)
 					} else {
 						console.log(`Skipping file that doesn't exist: ${from.toString()}`)
@@ -112,6 +126,7 @@ export class ExtensionTransferService extends Disposable implements IExtensionTr
 										const json: any = JSON.parse(contentsStr.value.toString())
 										const j2 = json.filter((entry: { identifier?: { id?: string } }) => !isBlacklisted(entry?.identifier?.id))
 										const jsonStr = JSON.stringify(j2)
+										await backUpBeforeImport(fileService, to, backupStamp)
 										await fileService.writeFile(to, VSBuffer.fromString(jsonStr))
 									}
 									catch {

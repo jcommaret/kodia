@@ -10,7 +10,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { FileService } from '../../../files/common/fileService.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { readProjectRules, readProjectSkills } from '../../node/kodia/kodiaProjectContext.js';
+import { readProjectMemory, readProjectRules, readProjectSkills } from '../../node/kodia/kodiaProjectContext.js';
 
 suite('Kodia agent project context', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -81,6 +81,13 @@ suite('Kodia agent project context', () => {
 		await write('/home/me/.claude/skills/SKILL.md', skill('stray', 'Not in a skill folder.'));
 		assert.deepStrictEqual(await readProjectSkills(project, userHome, fileService), []);
 		assert.deepStrictEqual(await readProjectSkills(undefined, userHome, fileService), []);
+	});
+
+	test('the project\'s memory is what its .kodia/memory.md says', async () => {
+		assert.strictEqual(await readProjectMemory(project, fileService), '', 'before the first note');
+		assert.strictEqual(await readProjectMemory(undefined, fileService), '');
+		await write('/project/.kodia/memory.md', '\n<!-- notes -->\n\n## Commands\nnpm test\n\n');
+		assert.strictEqual(await readProjectMemory(project, fileService), '<!-- notes -->\n\n## Commands\nnpm test');
 	});
 
 	test('without a project folder, only the user\'s skills are found', async () => {

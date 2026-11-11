@@ -120,9 +120,13 @@ Terms (`voidSettingsTypes.ts`):
 The Agents window is VS Code's agent session window. It talks to the **agent host**, a separate Node process (`src/vs/platform/agentHost/`) that runs agent "providers".
 
 Kodia registers only one: `KodiaAgent` (`src/vs/platform/agentHost/node/kodia/`, see `agentHostMain.ts`). It runs a tool loop with every model shown in Kodia's model dropdown, whatever its provider:
-- the tools (read, write, list, run a command, in `kodiaTools.ts`) execute locally in the agent host;
-- writes and commands go through the host's approval flow;
-- a Kodia window (an editor window or the Agents window itself) sends the model requests with Kodia's own LLM service and keys (`browser/kodiaAgentHostLmHandler.ts`).
+- the tools (`kodiaTools.ts`) execute locally in the agent host. They are the chat's tools that don't need the editor, with the chat's names, parameters and descriptions, defined once in `src/vs/platform/kodia/common/toolCatalog.ts` (the chat's `builtinTools` takes them from there too). The language server's tools and persistent terminals stay chat-only;
+- `edit_file` applies SEARCH/REPLACE blocks with the same engine as the chat (`platform/kodia/common/searchReplaceBlocks.ts`);
+- edits, commands and web pages go through the host's approval flow, and so does every MCP tool;
+- the agent reads the project's rules files, skills and memory (`kodiaProjectContext.ts`) into its instructions, as the chat does;
+- a Kodia window (an editor window or the Agents window itself) sends the model requests with Kodia's own LLM service and keys, and runs the MCP tools, since it holds the MCP servers (`browser/kodiaAgentHostLmHandler.ts`).
+
+Code both sides use lives in `src/vs/platform/kodia/`, because the agent host can't import the workbench: add a tool to the catalog rather than to one side.
 
 VS Code's Copilot, Claude and Codex agents are not registered. See `src/vs/platform/agentHost/AGENTS.md` for the host's architecture.
 

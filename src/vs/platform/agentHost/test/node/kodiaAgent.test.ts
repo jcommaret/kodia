@@ -148,7 +148,7 @@ suite('KodiaAgent', () => {
 		const request = registry.window!.requests[0];
 		assert.strictEqual(request.vendor, 'openRouter');
 		assert.strictEqual(request.modelId, 'qwen/qwen3-coder');
-		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'edit_file', 'write_file', 'list_dir', 'find_files', 'search_files', 'run_bash', 'fetch_url', 'read_project_memory', 'write_project_memory']);
+		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory']);
 		assert.deepStrictEqual(request.input, [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Hi' }] }]);
 		assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatTurnComplete]);
 
@@ -173,6 +173,7 @@ suite('KodiaAgent', () => {
 		await write('/project/.claude/skills/tdd/SKILL.md', '---\nname: tdd\ndescription: A copy of the same skill.\n---\n');
 		await write('/project/.claude/skills/release/SKILL.md', '---\nname: release\ndescription: Only for the user to run.\ndisable-model-invocation: true\n---\n');
 		await write('/home/me/.claude/skills/review/SKILL.md', '---\nname: review\ndescription: Use when reviewing a diff.\n---\n');
+		await write('/project/.kodia/memory.md', '<!-- notes -->\n\n## Commands\nnpm run test-void');
 		const { chat, session } = newChat();
 		await agent.chats.createChat(chat, session, { workingDirectories: [project] });
 
@@ -187,6 +188,10 @@ suite('KodiaAgent', () => {
 		assert.deepStrictEqual(skillNames, ['tdd', 'review'], 'the project\'s skills, then the user\'s, each once, without the one only the user may run');
 		assert.ok(instructions.includes('<description>Use when writing tests first.</description>'), 'the first folder\'s copy is the one listed');
 		assert.ok(instructions.includes('<file>/project/.agents/skills/tdd/SKILL.md</file>'), instructions);
+		// the project's memory comes last, as in the chat, and the model isn't told to read it with a tool
+		assert.ok(instructions.includes('PROJECT MEMORY (.kodia/memory.md: notes kept across sessions; rewrite a section with write_project_memory when something here is outdated or worth adding):\n<!-- notes -->\n\n## Commands\nnpm run test-void'), instructions);
+		assert.ok(instructions.indexOf('SKILLS (') < instructions.indexOf('PROJECT MEMORY'), 'the skills come before the memory');
+		assert.ok(!instructions.includes('read_project_memory'));
 	});
 
 	test('a project without rules or skills adds nothing to the agent\'s instructions', async () => {
@@ -199,13 +204,13 @@ suite('KodiaAgent', () => {
 		await agent.chats.sendMessage(chat, 'Hi', [project], undefined, 'turn-1');
 
 		const instructions = registry.window!.requests[0].instructions ?? '';
-		assert.ok(!instructions.includes('PROJECT RULES') && !instructions.includes('SKILLS ('), instructions);
+		assert.ok(!instructions.includes('PROJECT RULES') && !instructions.includes('SKILLS (') && !instructions.includes('PROJECT MEMORY'), instructions);
 	});
 
 	test('reads the rules and skills once a turn, not at each round of tool calls', async () => {
 		const { agent, registry, write } = createAgent();
 		registry.window!.results = [
-			{ output: [{ type: 'function_call', callId: 'call-1', name: 'list_dir', argumentsJson: '{}' }] },
+			{ output: [{ type: 'function_call', callId: 'call-1', name: 'ls_dir', argumentsJson: '{}' }] },
 			text('Done.'),
 		];
 		const project = URI.file('/project');
@@ -316,7 +321,7 @@ suite('KodiaAgent', () => {
 	});
 
 	test('has only its own tools when the window offers no MCP tools, or can\'t list them', async () => {
-		const ownTools = ['read_file', 'edit_file', 'write_file', 'list_dir', 'find_files', 'search_files', 'run_bash', 'fetch_url', 'read_project_memory', 'write_project_memory'];
+		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory'];
 		for (const mcp of [undefined, { tools: [issueSearch], result: { isError: false, output: '' }, calls: [], listError: new Error('MCP is not ready.') }]) {
 			const { agent, registry } = createAgent();
 			registry.window!.mcp = mcp;
@@ -347,7 +352,7 @@ suite('KodiaAgent', () => {
 	test('runs a read-only tool the model calls and sends its result back', async () => {
 		const { agent, registry } = createAgent();
 		registry.window!.results = [
-			{ output: [{ type: 'function_call', callId: 'call-1', name: 'list_dir', argumentsJson: '{}' }] },
+			{ output: [{ type: 'function_call', callId: 'call-1', name: 'ls_dir', argumentsJson: '{}' }] },
 			text('Done.'),
 		];
 		const { session, chat } = newChat();

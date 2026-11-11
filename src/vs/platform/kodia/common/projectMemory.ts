@@ -43,5 +43,9 @@ export const memoryWithSection = (memory: string, title: string, content: string
 	return renderMemorySections(parsed)
 }
 
+// The section of a prompt that holds the project's memory, in Kodia's chat and for the Kodia agent of the Agents window
+export const projectMemoryPrompt = (memory: string) =>
+	`PROJECT MEMORY (${PROJECT_MEMORY_FILE_PATH}: notes kept across sessions; rewrite a section with write_project_memory when something here is outdated or worth adding):\n${memory}`
+
 export const memoryTooLongMessage = (tokenCount: number) =>
 	`The project memory would be ${tokenCount} tokens, over its ~${MAX_PROJECT_MEMORY_TOKENS}-token limit, so nothing was saved. Condense it first: rewrite the longest sections more briefly, merge overlapping ones, or delete outdated ones (empty content). Then save again.`

@@ -27,9 +27,10 @@ import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirma
 import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
-import { readProjectRules, readProjectSkills } from './kodiaProjectContext.js';
+import { readProjectMemory, readProjectRules, readProjectSkills } from './kodiaProjectContext.js';
 import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
-import { describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, needsApproval, toolDisplayName } from './kodiaTools.js';
+import { projectMemoryPrompt } from '../../../kodia/common/projectMemory.js';
+import { approvalOfTool, describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, needsApproval, toolDisplayName } from './kodiaTools.js';
 
 /**
  * The bridge to the Kodia windows that run the Kodia agent's model requests,
@@ -64,8 +65,7 @@ function instructionsFor(workingDirectory: URI | undefined): string {
 	if (workingDirectory) {
 		lines.push(`The project is at ${workingDirectory.fsPath}; relative paths resolve against it.`);
 	}
-	lines.push('Find code with find_files and search_files, and change existing files with edit_file: write_file is for new files or full rewrites.');
-	lines.push('The project memory keeps notes across sessions: read it with read_project_memory before a task, and save what future sessions should know with write_project_memory.');
+	lines.push('Find files with search_pathnames_only and search_for_files, read just the lines you need of a large file with read_file, and change a file with edit_file: rewrite_file replaces all of one.');
 	return lines.join('\n');
 }
 
@@ -552,22 +552,27 @@ export class KodiaAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * What the model is told besides the conversation: the agent's own instructions, then the project's rules files
-	 * and skills, from the most stable part to the most changing one so a provider's prompt cache keeps the longest
-	 * prefix. Rules and skills are the project's own, as in Kodia's chat: a failure to read them leaves them out.
+	 * What the model is told besides the conversation: the agent's own instructions, then the project's rules files,
+	 * skills and memory, from the most stable part to the most changing one so a provider's prompt cache keeps the
+	 * longest prefix. They are the project's own, as in Kodia's chat: a failure to read them leaves them out.
 	 */
 	private async _instructions(session: KodiaAgentSession): Promise<string> {
 		const sections = [instructionsFor(session.workingDirectory)];
 		try {
-			const [rules, skills] = await Promise.all([
+			const [rules, skills, memory] = await Promise.all([
 				readProjectRules(session.workingDirectory, this._fileService),
 				readProjectSkills(session.workingDirectory, this._environmentService.userHome, this._fileService),
+				readProjectMemory(session.workingDirectory, this._fileService),
 			]);
 			if (rules) {
 				sections.push(`PROJECT RULES (from the project's rules files):\n${rules}`);
 			}
 			if (skills.length > 0) {
 				sections.push(skillsPrompt(skills));
+			}
+			// the notes the agent keeps with write_project_memory, as in the chat
+			if (memory) {
+				sections.push(projectMemoryPrompt(memory));
 			}
 		} catch (err) {
 			this._logService.warn(`[Kodia] Could not read the project's rules and skills: ${err}`);
@@ -637,17 +642,20 @@ export class KodiaAgent extends Disposable implements IAgent {
 	 * verdict arrives via {@link respondToPermissionRequest}.
 	 */
 	private _requestApproval(session: KodiaAgentSession, call: IByokLmFunctionCallItem, description: ReturnType<typeof describeKodiaToolCall>, mcpDisplayName?: string): Promise<boolean> {
-		const isShell = call.name === 'run_bash';
-		const isWeb = call.name === 'fetch_url';
+		const approval = approvalOfTool(call.name);
+		const isShell = approval === 'terminal';
+		const isWeb = approval === 'web pages';
 		const isMcp = mcpDisplayName !== undefined;
-		// Kodia: a fetched URL has no auto-approval rule, so the host asks unless the session auto-approves everything,
-		// as Kodia's chat does for web pages
-		const confirmationTitle = isShell ? localize('kodiaAgent.runInTerminal', "Run in terminal")
-			: isMcp ? localize('kodiaAgent.runMcpTool', "Run MCP tool")
-			: isWeb ? localize('kodiaAgent.fetchUrl', "Fetch web page")
-				: call.name === 'edit_file' ? localize('kodiaAgent.editFile', "Edit file")
-					: call.name === 'write_project_memory' ? localize('kodiaAgent.saveProjectMemory', "Save project memory")
-						: localize('kodiaAgent.writeFile', "Write file");
+		// a fetched URL has no auto-approval rule, so the host asks unless the session auto-approves everything, as
+		// Kodia's chat does for web pages
+		const confirmationTitle = isMcp ? localize('kodiaAgent.runMcpTool', "Run MCP tool")
+			: isShell ? localize('kodiaAgent.runInTerminal', "Run in terminal")
+				: isWeb ? localize('kodiaAgent.fetchUrl', "Fetch web page")
+					: call.name === 'edit_file' ? localize('kodiaAgent.editFile', "Edit file")
+						: call.name === 'create_file_or_folder' ? localize('kodiaAgent.createFile', "Create file or folder")
+							: call.name === 'delete_file_or_folder' ? localize('kodiaAgent.deleteFile', "Delete file or folder")
+								: call.name === 'write_project_memory' ? localize('kodiaAgent.saveProjectMemory', "Save project memory")
+									: localize('kodiaAgent.writeFile', "Write file");
 		const state: ToolCallPendingConfirmationState = {
 			toolCallId: call.callId,
 			toolName: call.name,

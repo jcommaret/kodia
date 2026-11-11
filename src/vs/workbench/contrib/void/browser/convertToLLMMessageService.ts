@@ -17,7 +17,8 @@ import { IVoidModelService } from '../common/voidModelService.js';
 import { URI } from '../../../../base/common/uri.js';
 import { EndOfLinePreference } from '../../../../editor/common/model.js';
 import { IMCPService } from '../common/mcpService.js';
-import { IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
+import { IProjectMemoryService } from '../common/projectMemoryService.js';
+import { projectMemoryPrompt } from '../../../../platform/kodia/common/projectMemory.js';
 import { joinUserInstructions } from '../common/instructionsFrameworks.js';
 import { skillsOfPrompt } from '../common/agentSkills.js';
 import { IPromptsService } from '../../chat/common/promptSyntax/service/promptsService.js';
@@ -142,7 +143,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 
 		await this.projectMemoryService.whenReady
 		const projectMemory = this._getProjectMemory()
-		if (projectMemory) sections.push(`PROJECT MEMORY (${PROJECT_MEMORY_FILE_PATH}: notes kept across sessions; rewrite a section with write_project_memory when something here is outdated or worth adding):\n${projectMemory}`)
+		if (projectMemory) sections.push(projectMemoryPrompt(projectMemory))
 
 		if (!disableSystemMessage) {
 			const directoryStr = await this.directoryStrService.getAllDirectoriesStr({

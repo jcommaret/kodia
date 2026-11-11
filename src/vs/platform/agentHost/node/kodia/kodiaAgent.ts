@@ -27,9 +27,11 @@ import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirma
 import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
+import { chooseKeepIdx, clearOldToolResults, estimateHistoryTokens, IKodiaCompaction, modelHistory, tokensOfChars, transcriptMessages } from './kodiaContext.js';
 import { readProjectMemory, readProjectRules, readProjectSkills } from './kodiaProjectContext.js';
 import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
 import { projectMemoryPrompt } from '../../../kodia/common/projectMemory.js';
+import { summarizeThread_systemMessage, summarizeThread_userMessage, summaryTranscriptMaxChars, transcriptForSummary } from '../../../kodia/common/threadSummary.js';
 import { approvalOfTool, describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, needsApproval, toolDisplayName } from './kodiaTools.js';
 
 /**
@@ -40,6 +42,9 @@ export const IKodiaLmBridgeRegistry = createDecorator<IByokLmBridgeRegistry>('ko
 
 /** Safety cap on tool-call rounds within a single user turn. */
 const MAX_TOOL_ROUNDS = 50;
+
+/** The share of the model's context window the history may take before it is made smaller. */
+const CONTEXT_BUDGET = 0.8;
 
 /** As for the agent's own tools, what an MCP tool returns stays in the history: ~25k tokens at most. */
 const MAX_MCP_OUTPUT_CHARS = 100_000;
@@ -403,7 +408,18 @@ export class KodiaAgent extends Disposable implements IAgent {
 				answered.add(item.callId);
 			}
 		}
-		session.history = session.history.filter(item => item.type !== 'function_call' || answered.has(item.callId));
+		const kept = session.history.map(item => item.type !== 'function_call' || answered.has(item.callId));
+		if (kept.every(Boolean)) {
+			return;
+		}
+		// the compaction points into the history: it follows the items that stay
+		const indexAfter = (idx: number) => kept.slice(0, idx).filter(Boolean).length;
+		const compaction = session.compaction;
+		session.compaction = compaction && {
+			clearedBefore: indexAfter(compaction.clearedBefore),
+			...(compaction.summary ? { summary: { text: compaction.summary.text, keepFromIdx: indexAfter(compaction.summary.keepFromIdx) } } : {}),
+		} satisfies IKodiaCompaction;
+		session.history = session.history.filter((_, i) => kept[i]);
 	}
 
 	// #endregion
@@ -456,6 +472,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 		const signal = session.abortSignal;
 		const toolCtx = { workingDirectory: session.workingDirectory, signal };
 		const usage = { inputTokens: 0, outputTokens: 0 };
+		session.contextTokens = (session.contextTokens ?? estimateHistoryTokens(modelHistory(session.history, session.compaction))) + tokensOfChars(prompt.length);
 		session.history.push({ type: 'message', role: 'user', content: [{ type: 'text', text: prompt }] });
 		session.turnIds.push(turnId);
 
@@ -466,6 +483,10 @@ export class KodiaAgent extends Disposable implements IAgent {
 			const mcpTools = await this._mcpTools(connection);
 			const tools = [...KODIA_TOOLS, ...[...mcpTools.values()].map(mcpFunctionTool)];
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+				await this._fitContext(connection, session, model, signal);
+				if (signal.aborted) {
+					return;
+				}
 				const result = await this._chat(connection, session, model, instructions, tools, signal);
 				if (signal.aborted) {
 					return;
@@ -477,6 +498,10 @@ export class KodiaAgent extends Disposable implements IAgent {
 				if (result.usage) {
 					usage.inputTokens = result.usage.inputTokens ?? usage.inputTokens;
 					usage.outputTokens += result.usage.outputTokens ?? 0;
+					// what was sent, and what came back: what the next request starts from
+					if (result.usage.inputTokens !== undefined) {
+						session.contextTokens = result.usage.inputTokens + (result.usage.outputTokens ?? 0);
+					}
 					fire({ type: ActionType.ChatUsage, turnId, usage: { ...usage, model: model.modelId } });
 				}
 
@@ -519,6 +544,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 						if (!approved) {
 							fire({ type: ActionType.ChatToolCallComplete, turnId, toolCallId: call.callId, result: { success: false, pastTenseMessage: `${displayName} denied`, content: [{ type: ToolResultContentType.Text, text: TOOL_DENIED_RESULT }] } });
 							session.history.push({ type: 'function_call_output', callId: call.callId, output: TOOL_DENIED_RESULT });
+							session.contextTokens = (session.contextTokens ?? 0) + tokensOfChars(TOOL_DENIED_RESULT.length);
 							continue;
 						}
 					} else {
@@ -534,6 +560,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 					}
 					fire({ type: ActionType.ChatToolCallComplete, turnId, toolCallId: call.callId, result: toToolCallResult(displayName, res) });
 					session.history.push({ type: 'function_call_output', callId: call.callId, output: res.output });
+					session.contextTokens = (session.contextTokens ?? 0) + tokensOfChars(res.output.length);
 				}
 			}
 
@@ -578,6 +605,76 @@ export class KodiaAgent extends Disposable implements IAgent {
 			this._logService.warn(`[Kodia] Could not read the project's rules and skills: ${err}`);
 		}
 		return sections.join('\n\n');
+	}
+
+	/**
+	 * Before a request: if the history no longer fits the model's context window, make it smaller, as Kodia's chat does.
+	 * First the results of the tool calls of earlier turns are cleared; if that isn't enough, the model summarizes the
+	 * older messages, and the summary takes their place. A conversation that can't be made smaller is sent as it is.
+	 */
+	private async _fitContext(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, signal: AbortSignal): Promise<void> {
+		const contextWindow = this._bridge.getModels().find(m => m.vendor === model.vendor && m.id === model.modelId)?.maxContextWindowTokens;
+		if (!contextWindow) {
+			return;
+		}
+		const budget = Math.floor(contextWindow * CONTEXT_BUDGET);
+		let tokens = session.contextTokens ?? estimateHistoryTokens(modelHistory(session.history, session.compaction));
+		if (tokens <= budget) {
+			return;
+		}
+		const cleared = clearOldToolResults(session.history, session.compaction);
+		if (cleared) {
+			session.compaction = cleared.compaction;
+			tokens = Math.max(0, tokens - tokensOfChars(cleared.clearedChars));
+			session.contextTokens = tokens;
+			if (tokens <= budget) {
+				this._logService.info(`[Kodia] Cleared the results of old tool calls to fit the context window (${cleared.clearedChars} characters).`);
+				return;
+			}
+		}
+		if (await this._summarizeOlderHistory(connection, session, model, contextWindow, signal)) {
+			session.contextTokens = estimateHistoryTokens(modelHistory(session.history, session.compaction));
+		}
+	}
+
+	/** The model summarizes the older part of the history, and the summary is what the model is sent in its place. False if there was nothing to summarize or it failed. */
+	private async _summarizeOlderHistory(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, contextWindow: number, signal: AbortSignal): Promise<boolean> {
+		// what is before this is in the latest summary already
+		const before = session.compaction?.summary?.keepFromIdx ?? 0;
+		const keepFromIdx = chooseKeepIdx(session.history, before);
+		// a summary that failed isn't tried again until the history has grown
+		if (keepFromIdx === undefined || (session.summaryTriedAtLength !== undefined && session.history.length - session.summaryTriedAtLength < 4)) {
+			return false;
+		}
+		session.summaryTriedAtLength = session.history.length;
+		const transcript = transcriptForSummary(transcriptMessages(session.history, before, keepFromIdx), { previousSummary: session.compaction?.summary?.text, maxChars: summaryTranscriptMaxChars(contextWindow) });
+		const cts = new CancellationTokenSource();
+		const onAbort = () => cts.cancel();
+		signal.addEventListener('abort', onAbort, { once: true });
+		try {
+			const result = await connection.chat({
+				vendor: model.vendor,
+				modelId: model.modelId,
+				instructions: summarizeThread_systemMessage,
+				input: [{ type: 'message', role: 'user', content: [{ type: 'text', text: summarizeThread_userMessage(transcript) }] }],
+				tools: [],
+			}, cts.token);
+			const summary = result.output.flatMap(item => item.type === 'message' ? item.content.map(part => part.type === 'text' ? part.text : '') : []).join('').trim();
+			if (result.error || !summary || signal.aborted) {
+				this._logService.warn(`[Kodia] Could not summarize the conversation: ${result.error ?? 'no summary'}`);
+				return false;
+			}
+			session.compaction = { clearedBefore: session.compaction?.clearedBefore ?? 0, summary: { text: summary, keepFromIdx } };
+			session.summaryTriedAtLength = undefined;
+			this._logService.info(`[Kodia] Summarized the conversation to fit the context window (${keepFromIdx - before} items).`);
+			return true;
+		} catch (err) {
+			this._logService.warn(`[Kodia] Could not summarize the conversation: ${err}`);
+			return false;
+		} finally {
+			signal.removeEventListener('abort', onAbort);
+			cts.dispose();
+		}
 	}
 
 	/**
@@ -626,7 +723,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 				vendor: model.vendor,
 				modelId: model.modelId,
 				instructions,
-				input: session.history,
+				input: modelHistory(session.history, session.compaction),
 				tools,
 			}, cts.token);
 		} finally {

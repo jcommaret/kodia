@@ -13,6 +13,7 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
 import { chat_userMessageContent, isABuiltinToolName, summarizeThread_systemMessage, summarizeThread_userMessage } from '../common/prompt/prompts.js';
 import { chooseSummaryKeepIdx, transcriptForSummary } from '../common/helpers/threadSummary.js';
+import { summaryTranscriptMaxChars } from '../../../../platform/kodia/common/threadSummary.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { AnthropicReasoning, getErrorMessage, LLMUsage, RawToolCallObj, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
@@ -570,9 +571,8 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		if (keepFromIdx === null || (this._summaryTriedAt.get(threadId) ?? -1) >= keepFromIdx) return false
 		this._summaryTriedAt.set(threadId, keepFromIdx)
 
-		// the transcript takes up to half the window (~3 characters per token)
 		const { contextWindow } = getModelCapabilities(modelSelection.providerName, modelSelection.modelName, overridesOfModel)
-		const maxChars = Math.max(8_000, Math.floor((contextWindow - 8_000) * 0.5 * 3))
+		const maxChars = summaryTranscriptMaxChars(contextWindow)
 		const transcript = transcriptForSummary(messages.slice(summarizedBefore, keepFromIdx), { previousSummary: previousSummary?.summary, maxChars })
 		const { messages: llmMessages, separateSystemMessage } = this._convertToLLMMessagesService.prepareLLMSimpleMessages({
 			simpleMessages: [{ role: 'user', content: summarizeThread_userMessage(transcript) }],

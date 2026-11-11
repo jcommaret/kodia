@@ -62,12 +62,15 @@ suite('kodiaAgentHostLmMessages', () => {
 	});
 
 	test('offers a function tool\'s parameters with their descriptions', () => {
+		const parametersSchema = { type: 'object', properties: { path: { type: 'string', description: 'File path.' }, start_line: { type: 'integer' } }, required: ['path'] };
 		assert.deepStrictEqual(toInternalTool({
 			type: 'function',
 			name: 'read_file',
 			description: 'Read a file.',
-			parametersSchema: { type: 'object', properties: { path: { type: 'string', description: 'File path.' } } },
-		}), [{ name: 'read_file', description: 'Read a file.', params: { path: { description: 'File path.' } } }]);
+			parametersSchema,
+		}), [{ name: 'read_file', description: 'Read a file.', params: { path: { description: 'File path.' }, start_line: { description: '' } }, inputSchema: parametersSchema }]);
+		// a tool with no schema has only its parameters' descriptions
+		assert.deepStrictEqual(toInternalTool({ type: 'function', name: 'list_dir' }), [{ name: 'list_dir', description: '', params: {} }]);
 		assert.deepStrictEqual(toInternalTool({ type: 'custom', name: 'apply_patch' }), []);
 	});
 

@@ -8,8 +8,9 @@ import { replaceTool_description } from './searchReplaceBlocks.js';
 // The tools Kodia's chat and the Kodia agent of the Agents window both have, defined once: the name, the description
 // and the parameters a model is told, with the types and required parameters the agent's schema declares and the kind
 // of approval a call needs. How each side runs them is its own: the chat edits through the editor, with a diff to
-// review, the agent writes to disk. The chat's tools that need the editor (language server, persistent terminals) are
-// not here, and the agent has no such tool.
+// review, the agent writes to disk. `sharedTools` are the ones the agent runs itself. `editorTools`, below, need an
+// editor window (its language server, its markers): the agent has them only while such a window is open, and asks it
+// to run them. Persistent terminals are not here yet: the agent has no such tool.
 
 export type SharedToolParam = {
 	description: string,
@@ -149,6 +150,49 @@ export const sharedTools = {
 export type SharedToolName = keyof typeof sharedTools
 
 export const sharedToolNames = Object.keys(sharedTools) as SharedToolName[]
+
+const symbolParams = {
+	uri: { description: 'The FULL path to the file where the symbol appears.', required: true },
+	line: { description: 'The line number (1-based) where the symbol appears in that file.', type: 'integer', required: true },
+	symbol: { description: 'The symbol exactly as written on that line, e.g. `getUser` (not `api.getUser`).', required: true },
+} as const satisfies { [paramName: string]: SharedToolParam }
+
+/**
+ * The tools of Kodia's chat that need an editor window: its language servers and its diagnostics. All read-only, so a
+ * call needs no approval. The chat runs them in its own window; the agent of the Agents window asks an editor window.
+ */
+export const editorTools = {
+	go_to_definition: {
+		name: 'go_to_definition',
+		description: `Finds where a symbol (function, class, method, type, variable...) is defined, using the language server. More precise than text search: it follows imports and ignores unrelated symbols with the same name. Returns each definition's path, line and first lines of code.`,
+		params: symbolParams,
+	},
+	find_references: {
+		name: 'find_references',
+		description: `Finds every place a symbol is used across the workspace, using the language server — e.g. all the callers of a function before changing its signature. Returns paths and lines.`,
+		params: symbolParams,
+	},
+	search_symbols: {
+		name: 'search_symbols',
+		description: `Searches the whole workspace for symbols (functions, classes, types, variables...) by name, using the language server. Use it to find where something is defined when you know its name but not its file.`,
+		params: {
+			query: { description: 'The symbol name, or part of it.', required: true },
+		},
+	},
+	read_lint_errors: {
+		name: 'read_lint_errors',
+		description: `Use this tool to view all the lint errors on a file.`,
+		params: {
+			uri: { description: 'The FULL path to the file.', required: true },
+		},
+	},
+} as const satisfies { [name: string]: SharedTool }
+
+export type EditorToolName = keyof typeof editorTools
+
+export const editorToolNames = Object.keys(editorTools) as EditorToolName[]
+
+export const isEditorToolName = (name: string): name is EditorToolName => Object.hasOwn(editorTools, name)
 
 export const nextPageNote = (hasNextPage: boolean) => hasNextPage ? '\n\n(more on next page...)' : ''
 

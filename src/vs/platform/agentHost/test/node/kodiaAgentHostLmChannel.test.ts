@@ -20,7 +20,7 @@ suite('kodiaAgentHostLmChannel', () => {
 
 	/** The window's handler: it records what it was asked, and the token it was given. */
 	function handler() {
-		const seen = { chat: [] as IByokLmChatRequest[], calls: [] as { name: string; argsJson: string }[], tokens: [] as CancellationToken[] };
+		const seen = { chat: [] as IByokLmChatRequest[], calls: [] as { name: string; argsJson: string }[], editorCalls: [] as { name: string; argsJson: string }[], tokens: [] as CancellationToken[] };
 		const handler: IKodiaAgentHostLmHandler = {
 			_serviceBrand: undefined,
 			chat: async request => { seen.chat.push(request); return { output: [] }; },
@@ -28,6 +28,8 @@ suite('kodiaAgentHostLmChannel', () => {
 			listMcpTools: async token => { seen.tokens.push(token); return [search]; },
 			callMcpTool: async (name, argsJson, token) => { seen.calls.push({ name, argsJson }); seen.tokens.push(token); return { isError: false, output: `ran ${name}` }; },
 			getAutoApprove: async token => { seen.tokens.push(token); return { edits: true, terminal: false }; },
+			listEditorTools: async token => { seen.tokens.push(token); return ['go_to_definition', 'read_lint_errors']; },
+			callEditorTool: async (name, argsJson, token) => { seen.editorCalls.push({ name, argsJson }); seen.tokens.push(token); return { isError: false, output: `ran ${name}` }; },
 		};
 		return { handler, seen };
 	}
@@ -62,6 +64,17 @@ suite('kodiaAgentHostLmChannel', () => {
 
 		assert.deepStrictEqual(await connection.getAutoApprove!(cts.token), { edits: true, terminal: false });
 		assert.strictEqual(seen.tokens[0], cts.token);
+	});
+
+	test('asks the window which editor tools it can run, and has it run one', async () => {
+		const { handler: h, seen } = handler();
+		const connection = bridge(h);
+		const cts = store.add(new CancellationTokenSource());
+
+		assert.deepStrictEqual(await connection.listEditorTools!(cts.token), ['go_to_definition', 'read_lint_errors']);
+		assert.deepStrictEqual(await connection.callEditorTool!('go_to_definition', '{"uri":"/a.ts","line":3,"symbol":"a"}', cts.token), { isError: false, output: 'ran go_to_definition' });
+		assert.deepStrictEqual(seen.editorCalls, [{ name: 'go_to_definition', argsJson: '{"uri":"/a.ts","line":3,"symbol":"a"}' }]);
+		assert.deepStrictEqual(seen.tokens, [cts.token, cts.token]);
 	});
 
 	test('gives the window\'s handler the caller\'s token, or none', async () => {

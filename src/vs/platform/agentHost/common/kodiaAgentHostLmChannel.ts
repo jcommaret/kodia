@@ -12,9 +12,9 @@ import { AgentHostClientByokLmChannel, createAgentHostClientByokLmConnection } f
 import type { IKodiaAgentHostLmHandler } from './kodiaAgentHostLm.js';
 
 /**
- * Node side of the Kodia reverse channel: the BYOK bridge's connection, plus the MCP tools of the Kodia window and what
- * its settings let the agent do without asking.
- * The BYOK bridge's own connection has no MCP calls, which only a Kodia window answers.
+ * Node side of the Kodia reverse channel: the BYOK bridge's connection, plus the MCP tools of the Kodia window, what
+ * its settings let the agent do without asking, and the editor tools an editor window runs for it.
+ * The BYOK bridge's own connection has none of these calls, which only a Kodia window answers.
  */
 export function createKodiaAgentHostLmConnection(channel: IChannel): IByokLmBridgeConnection {
 	return {
@@ -22,12 +22,14 @@ export function createKodiaAgentHostLmConnection(channel: IChannel): IByokLmBrid
 		listMcpTools: token => channel.call('mcpTools', undefined, token) as Promise<IKodiaMcpTool[]>,
 		callMcpTool: (name, argsJson, token) => channel.call('callMcpTool', { name, argsJson }, token) as Promise<IKodiaMcpToolResult>,
 		getAutoApprove: token => channel.call('autoApprove', undefined, token) as Promise<IKodiaAutoApprove>,
+		listEditorTools: token => channel.call('editorTools', undefined, token) as Promise<string[]>,
+		callEditorTool: (name, argsJson, token) => channel.call('callEditorTool', { name, argsJson }, token) as Promise<IKodiaMcpToolResult>,
 	};
 }
 
 /**
  * Window side: the BYOK bridge's channel, which serves the model requests, plus the MCP tools of the window's MCP
- * servers and the window's auto-approval settings.
+ * servers, the window's auto-approval settings and its editor tools.
  */
 export class KodiaAgentHostLmChannel implements IServerChannel {
 
@@ -51,6 +53,12 @@ export class KodiaAgentHostLmChannel implements IServerChannel {
 				return await this._handler.listMcpTools(token) as T;
 			case 'autoApprove':
 				return await this._handler.getAutoApprove(token) as T;
+			case 'editorTools':
+				return await this._handler.listEditorTools(token) as T;
+			case 'callEditorTool': {
+				const { name, argsJson } = arg as { name: string; argsJson: string };
+				return await this._handler.callEditorTool(name, argsJson, token) as T;
+			}
 			case 'callMcpTool': {
 				const { name, argsJson } = arg as { name: string; argsJson: string };
 				return await this._handler.callMcpTool(name, argsJson, token) as T;

@@ -14,7 +14,7 @@ import { ChatMode } from '../voidSettingsTypes.js';
 import { MAX_PROJECT_MEMORY_TOKENS } from '../../../../../platform/kodia/common/projectMemory.js';
 import { joinProjectRules, PROJECT_RULES_FILE_NAMES, skillsPrompt } from '../../../../../platform/kodia/common/projectInstructions.js';
 import { DIVIDER, FINAL, ORIGINAL, searchReplaceBlockTemplate } from '../../../../../platform/kodia/common/searchReplaceBlocks.js';
-import { SharedToolName, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
+import { EditorToolName, editorTools, SharedToolName, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
 import { summarizedThreadMessage, summarizeThread_systemMessage, summarizeThread_userMessage } from '../../../../../platform/kodia/common/threadSummary.js';
 
 // Triple backtick wrapper used throughout the prompts for code blocks
@@ -136,10 +136,6 @@ export type InternalToolInfo = {
 
 
 
-const uriParam = (object: string) => ({
-	uri: { description: `The FULL path to the ${object}.` }
-})
-
 const terminalDescHelper = `You can use this tool to run any command: sed, grep, etc. Do not edit any files with this tool; use edit_file instead. When working with git and other tools that open an editor (e.g. git diff), you should pipe to cat to get all results and not get stuck in vim.`
 
 const cwdHelper = 'Optional. The directory in which to run the command. Defaults to the first workspace folder.'
@@ -160,17 +156,19 @@ export type SnakeCaseKeys<T extends Record<string, any>> = {
 
 
 
-// A tool Kodia's chat and the Kodia agent of the Agents window both have: defined once in the shared catalog. The chat
-// tells the model every parameter as a string, so only the descriptions are taken; `overrides` keeps the chat's own text
-// where the shared one can't name the chat's editor tools.
-const sharedTool = <T extends SharedToolName>(name: T, overrides?: { description?: string, params?: { [P in keyof (typeof sharedTools)[T]['params']]?: string } }) => {
-	const tool = sharedTools[name]
+// A tool Kodia's chat and the Kodia agent of the Agents window both have: defined once in the shared catalog (its
+// `sharedTools`, and its `editorTools`, which the agent has while an editor window is open). The chat tells the model
+// every parameter as a string, so only the descriptions are taken; `overrides` keeps the chat's own text where the
+// shared one can't name the chat's editor tools.
+const catalogTools = { ...sharedTools, ...editorTools }
+const sharedTool = <T extends SharedToolName | EditorToolName>(name: T, overrides?: { description?: string, params?: { [P in keyof (typeof catalogTools)[T]['params']]?: string } }) => {
+	const tool = catalogTools[name]
 	const overriddenParams = overrides?.params as { [paramName: string]: string | undefined } | undefined
 	const params: { [paramName: string]: { description: string } } = {}
 	for (const [paramName, param] of Object.entries(tool.params as { [paramName: string]: { description: string } })) {
 		params[paramName] = { description: overriddenParams?.[paramName] ?? param.description }
 	}
-	return { name, description: overrides?.description ?? tool.description, params: params as { [P in keyof (typeof sharedTools)[T]['params']]: { description: string } } }
+	return { name, description: overrides?.description ?? tool.description, params: params as { [P in keyof (typeof catalogTools)[T]['params']]: { description: string } } }
 }
 
 
@@ -203,41 +201,13 @@ export const builtinTools: {
 	// add new search_in_file tool
 	search_in_file: sharedTool('search_in_file'),
 
-	go_to_definition: {
-		name: 'go_to_definition',
-		description: `Finds where a symbol (function, class, method, type, variable...) is defined, using the language server. More precise than text search: it follows imports and ignores unrelated symbols with the same name. Returns each definition's path, line and first lines of code.`,
-		params: {
-			...uriParam('file where the symbol appears'),
-			line: { description: 'The line number (1-based) where the symbol appears in that file.' },
-			symbol: { description: 'The symbol exactly as written on that line, e.g. `getUser` (not `api.getUser`).' },
-		}
-	},
+	go_to_definition: sharedTool('go_to_definition'),
 
-	find_references: {
-		name: 'find_references',
-		description: `Finds every place a symbol is used across the workspace, using the language server — e.g. all the callers of a function before changing its signature. Returns paths and lines.`,
-		params: {
-			...uriParam('file where the symbol appears'),
-			line: { description: 'The line number (1-based) where the symbol appears in that file.' },
-			symbol: { description: 'The symbol exactly as written on that line, e.g. `getUser` (not `api.getUser`).' },
-		}
-	},
+	find_references: sharedTool('find_references'),
 
-	search_symbols: {
-		name: 'search_symbols',
-		description: `Searches the whole workspace for symbols (functions, classes, types, variables...) by name, using the language server. Use it to find where something is defined when you know its name but not its file.`,
-		params: {
-			query: { description: 'The symbol name, or part of it.' },
-		}
-	},
+	search_symbols: sharedTool('search_symbols'),
 
-	read_lint_errors: {
-		name: 'read_lint_errors',
-		description: `Use this tool to view all the lint errors on a file.`,
-		params: {
-			...uriParam('file'),
-		},
-	},
+	read_lint_errors: sharedTool('read_lint_errors'),
 
 	// not offered anymore (see toolsNotOfferedToModels): the memory is in every system prompt. Kept so older threads that used it still render.
 	read_project_memory: {

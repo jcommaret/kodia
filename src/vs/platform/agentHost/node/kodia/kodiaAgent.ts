@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { SequencerByKey } from '../../../../base/common/async.js';
-import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableMap } from '../../../../base/common/lifecycle.js';
 import { IObservable, observableValue } from '../../../../base/common/observable.js';
@@ -17,7 +17,7 @@ import { IFileService } from '../../../files/common/files.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClient, IAgent, IAgentChatConfigCompletionsParams, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, IAgentChats, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSpawnChatEvent } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
 import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { KODIA_AGENT_PROVIDER_ID, KODIA_AGENT_RESOURCE } from '../../common/kodiaAgentHostLm.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
@@ -32,7 +32,8 @@ import { readProjectMemory, readProjectRules, readProjectSkills } from './kodiaP
 import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
 import { projectMemoryPrompt } from '../../../kodia/common/projectMemory.js';
 import { summarizeThread_systemMessage, summarizeThread_userMessage, summaryTranscriptMaxChars, transcriptForSummary } from '../../../kodia/common/threadSummary.js';
-import { approvalOfTool, describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
+import { editorToolNames, isEditorToolName } from '../../../kodia/common/toolCatalog.js';
+import { approvalOfTool, describeKodiaToolCall, editorFunctionTools, editorToolArguments, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
 
 /**
  * The bridge to the Kodia windows that run the Kodia agent's model requests,
@@ -46,8 +47,8 @@ const MAX_TOOL_ROUNDS = 50;
 /** The share of the model's context window the history may take before it is made smaller. */
 const CONTEXT_BUDGET = 0.8;
 
-/** As for the agent's own tools, what an MCP tool returns stays in the history: ~25k tokens at most. */
-const MAX_MCP_OUTPUT_CHARS = 100_000;
+/** As for the agent's own tools, what a tool run by a Kodia window (an MCP tool, an editor tool) returns stays in the history: ~25k tokens at most. */
+const MAX_WINDOW_TOOL_OUTPUT_CHARS = 100_000;
 
 /** What the model receives when the user denies a tool call. */
 const TOOL_DENIED_RESULT = 'The user denied this tool call.';
@@ -483,7 +484,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 			const mcpTools = await this._mcpTools(connection);
 			// and what the user's Kodia settings let run without asking
 			const autoApprove = await this._autoApprove(connection);
-			const tools = [...KODIA_TOOLS, ...[...mcpTools.values()].map(mcpFunctionTool)];
+			// and the editor tools (language server, lint errors), when an editor window is open to run them
+			const editor = await this._editorTools(connection);
+			const tools = [...KODIA_TOOLS, ...editorFunctionTools(editor?.names ?? []), ...[...mcpTools.values()].map(mcpFunctionTool)];
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				await this._fitContext(connection, session, model, signal);
 				if (signal.aborted) {
@@ -558,7 +561,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 							confirmed: approvalKind ? ToolCallConfirmationReason.Setting : ToolCallConfirmationReason.NotNeeded,
 						});
 					}
-					const res = mcpTool ? await this._callMcpTool(connection, call, signal) : await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
+					const res = mcpTool ? await this._callMcpTool(connection, call, signal)
+						: editor?.names.includes(call.name) ? await this._callEditorTool(editor.connection, call, session.workingDirectory, signal)
+							: await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
 					if (signal.aborted) {
 						return;
 					}
@@ -690,7 +695,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 			return new Map();
 		}
 		try {
-			const ownTools = new Set(KODIA_TOOLS.map(tool => tool.name));
+			const ownTools = new Set<string>([...KODIA_TOOLS.map(tool => tool.name), ...editorToolNames]);
 			return new Map((await connection.listMcpTools()).filter(tool => !ownTools.has(tool.name)).map(tool => [tool.name, tool]));
 		} catch (err) {
 			this._logService.warn(`[Kodia] Could not list the MCP tools of the Kodia window: ${err}`);
@@ -714,17 +719,56 @@ export class KodiaAgent extends Disposable implements IAgent {
 		}
 	}
 
+	/**
+	 * The Kodia window that can run the editor tools (the language server's, the lint errors) this turn, and which of
+	 * them it runs. Every Kodia window serves the model, but only an editor window has the tools: the Agents Window says
+	 * it has none. The serving window is asked first, then the others. Nothing when no window can, or none can be asked:
+	 * the agent then has its own tools, and searches by text.
+	 */
+	private async _editorTools(connection: IByokLmBridgeConnection): Promise<{ readonly connection: IByokLmBridgeConnection; readonly names: string[] } | undefined> {
+		for (const candidate of new Set([connection, ...(this._bridge.getServingConnections?.() ?? [])])) {
+			if (!candidate.listEditorTools || !candidate.callEditorTool) {
+				continue;
+			}
+			try {
+				const names = (await candidate.listEditorTools()).filter(isEditorToolName);
+				if (names.length > 0) {
+					return { connection: candidate, names };
+				}
+			} catch (err) {
+				this._logService.warn(`[Kodia] Could not list the editor tools of a Kodia window: ${err}`);
+			}
+		}
+		return undefined;
+	}
+
 	/** One MCP tool call, run by the Kodia window and cancelled with the turn. */
 	private async _callMcpTool(connection: IByokLmBridgeConnection, call: IByokLmFunctionCallItem, signal: AbortSignal): Promise<IKodiaToolResult> {
-		if (!connection.callMcpTool) {
+		const callMcpTool = connection.callMcpTool?.bind(connection);
+		if (!callMcpTool) {
 			return { success: false, output: 'MCP tools are not available.' };
 		}
+		return this._runInWindow(signal, token => callMcpTool(call.name, call.argumentsJson, token));
+	}
+
+	/** One editor tool call, run by the editor window that offered it. The path is made absolute: that window has another working directory. */
+	private async _callEditorTool(connection: IByokLmBridgeConnection, call: IByokLmFunctionCallItem, workingDirectory: URI | undefined, signal: AbortSignal): Promise<IKodiaToolResult> {
+		const callEditorTool = connection.callEditorTool?.bind(connection);
+		if (!callEditorTool) {
+			return { success: false, output: 'Editor tools are not available.' };
+		}
+		const argsJson = editorToolArguments(call.argumentsJson, workingDirectory);
+		return this._runInWindow(signal, token => callEditorTool(call.name, argsJson, token));
+	}
+
+	// A tool a Kodia window runs: cancelled with the turn, and its output cut where it would fill the context.
+	private async _runInWindow(signal: AbortSignal, run: (token: CancellationToken) => Promise<IKodiaMcpToolResult>): Promise<IKodiaToolResult> {
 		const cts = new CancellationTokenSource();
 		const onAbort = () => cts.cancel();
 		signal.addEventListener('abort', onAbort, { once: true });
 		try {
-			const { isError, output } = await connection.callMcpTool(call.name, call.argumentsJson, cts.token);
-			return { success: !isError, output: output.length > MAX_MCP_OUTPUT_CHARS ? `${output.slice(0, MAX_MCP_OUTPUT_CHARS)}\n(The output is cut here.)` : output };
+			const { isError, output } = await run(cts.token);
+			return { success: !isError, output: output.length > MAX_WINDOW_TOOL_OUTPUT_CHARS ? `${output.slice(0, MAX_WINDOW_TOOL_OUTPUT_CHARS)}\n(The output is cut here.)` : output };
 		} catch (err) {
 			return { success: false, output: err instanceof Error ? err.message : String(err) };
 		} finally {

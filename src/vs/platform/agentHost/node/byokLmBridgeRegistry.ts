@@ -51,6 +51,13 @@ export interface IByokLmBridgeRegistry {
 	getServingConnection(): IByokLmBridgeConnection | undefined;
 
 	/**
+	 * Kodia: every serving connection, the one {@link getServingConnection} gives first. Windows serve the same models but
+	 * not the same tools: only an editor window runs the language server's tools, so a caller that needs one looks
+	 * through them all.
+	 */
+	getServingConnections?(): readonly IByokLmBridgeConnection[];
+
+	/**
 	 * Subscribe to changes in the set of registered connections (a renderer
 	 * connecting or disconnecting) or in the serving window's pushed models, so
 	 * consumers can re-read {@link getModels}. Disposing the result removes the
@@ -131,6 +138,11 @@ export class ByokLmBridgeRegistry implements IByokLmBridgeRegistry {
 
 	getServingConnection(): IByokLmBridgeConnection | undefined {
 		return this._servingEntry()?.connection;
+	}
+
+	getServingConnections(): readonly IByokLmBridgeConnection[] {
+		const first = this._servingEntry();
+		return first ? [first.connection, ...[...this._entries.values()].filter(entry => entry !== first && entry.models !== undefined).map(entry => entry.connection)] : [];
 	}
 
 	/**

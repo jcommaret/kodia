@@ -1,0 +1,69 @@
+# Compiles the Rust CLI (cli/) on each platform kodia-builder ships it for. The PR checks don't
+# build it, so a change that breaks it (a crate bump, a platform-only path) otherwise only shows
+# up in a release build.
+name: CLI checks
+
+on:
+  pull_request:
+    paths:
+      - 'cli/**'
+      - '.github/workflows/cli-checks.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'cli/**'
+      - '.github/workflows/cli-checks.yml'
+
+concurrency:
+  group: cli-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cli:
+    name: cli (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # the runners kodia-builder builds the CLI on
+        os: [ubuntu-26.04, windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v7
+
+      # the same toolchain as kodia-builder, and its RUSTFLAGS (scripts/build_cli.sh): warnings don't fail the build
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.16.0
+        with:
+          cache-workspaces: cli
+          rustflags: -A unused-imports
+
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      # the Windows runner has no OpenSSL: kodia-builder uses VS Code's prebuilt one
+      - name: Download OpenSSL
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          npm pack @vscode/openssl-prebuilt@0.0.11
+          mkdir openssl
+          tar -xzf vscode-openssl-prebuilt-0.0.11.tgz --strip-components=1 --directory=openssl
+          echo "OPENSSL_LIB_DIR=$(pwd -W)/openssl/out/x64-windows-static/lib" >> "$GITHUB_ENV"
+          echo "OPENSSL_INCLUDE_DIR=$(pwd -W)/openssl/out/x64-windows-static/include" >> "$GITHUB_ENV"
+
+      - name: Check
+        run: cargo check --locked
+
+      - name: Test
+        if: runner.os == 'Linux'
+        run: cargo test --locked

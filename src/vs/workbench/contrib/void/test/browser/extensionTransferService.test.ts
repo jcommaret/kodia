@@ -155,6 +155,34 @@ suite('Kodia - transfer from another editor', () => {
 			assert.strictEqual(await exists('Library/Application Support/Void'), false);
 		});
 
+		// the contents of the backups kept next to a file
+		const backupsOf = async (path: string) => {
+			const folder = path.slice(0, path.lastIndexOf('/'));
+			const name = path.slice(path.lastIndexOf('/') + 1);
+			const children = (await fileService.resolve(uri(folder))).children ?? [];
+			return Promise.all(children.filter(c => c.name.startsWith(`${name}.`) && c.name.endsWith('.bak')).map(c => read(`${folder}/${c.name}`)));
+		};
+
+		test('keeps the files an import replaces, from one import to the next', async () => {
+			await write('Library/Application Support/Kodia/User/settings.json', '{"mine":true}');
+			await write('.kodia/extensions/extensions.json', '[{"identifier":{"id":"mine.ext"}}]');
+			await write('Library/Application Support/Code/User/settings.json', '{"from":"code"}');
+			await write('Library/Application Support/Code/User/keybindings.json', '[]');
+			await write('.vscode/extensions/extensions.json', '[]');
+
+			assert.strictEqual(await service.transferExtensions('mac', 'VS Code'), undefined);
+			assert.strictEqual(await read('Library/Application Support/Kodia/User/settings.json'), '{"from":"code"}');
+			assert.deepStrictEqual(await backupsOf('Library/Application Support/Kodia/User/settings.json'), ['{"mine":true}']);
+			assert.deepStrictEqual(await backupsOf('.kodia/extensions/extensions.json'), ['[{"identifier":{"id":"mine.ext"}}]']);
+			// nothing to keep where Kodia had no file yet
+			assert.deepStrictEqual(await backupsOf('Library/Application Support/Kodia/User/keybindings.json'), []);
+
+			await write('Library/Application Support/Code/User/settings.json', '{"from":"code, again"}');
+			assert.strictEqual(await service.transferExtensions('mac', 'VS Code'), undefined);
+			assert.strictEqual(await read('Library/Application Support/Kodia/User/settings.json'), '{"from":"code, again"}');
+			assert.deepStrictEqual((await backupsOf('Library/Application Support/Kodia/User/settings.json')).sort(), ['{"from":"code"}', '{"mine":true}']);
+		});
+
 		test('removing blacklisted extensions works on Kodia\'s folder, and leaves Void\'s alone', async () => {
 			await write('.kodia/extensions/github.copilot-1.0.0/package.json', '{}');
 			await write('.kodia/extensions/esbenp.prettier-1.0.0/package.json', '{}');

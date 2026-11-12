@@ -13,6 +13,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { IMetricsService } from './metricsService.js';
 import { defaultModelsOfProvider, defaultProviderSettings, getModelCapabilities, ModelOverrides, setDetectedModelOptions, VoidStaticModelInfo } from './modelCapabilities.js';
 import { DetectedModel } from './providerModels.js';
+import { instructionsFrameworkContentForKodia } from './instructionsFrameworks.js';
 import { VOID_SETTINGS_STORAGE_KEY } from './storageKeys.js';
 import { isMacintosh } from '../../../../base/common/platform.js';
 import { consolidateSingleAutodetectedProviderModels, dedupeProviderModels, normalizeAutodetectedModelNamesForProvider } from './localSingleModelProviders.js';
@@ -345,6 +346,9 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			}
 
 			if (!Array.isArray(readS.globalSettings.instructionsFrameworks)) readS.globalSettings.instructionsFrameworks = []
+			// frameworks downloaded before Kodia adapted them, such as AIDD
+			readS.globalSettings.instructionsFrameworks = readS.globalSettings.instructionsFrameworks.map(f =>
+				typeof f?.content === 'string' ? { ...f, content: instructionsFrameworkContentForKodia(f.id, f.content) } : f)
 		}
 		catch (e) {
 			readS = defaultState()

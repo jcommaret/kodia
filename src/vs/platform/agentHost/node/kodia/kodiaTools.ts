@@ -12,6 +12,7 @@ import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { MAX_PROJECT_MEMORY_TOKENS, memoryTooLongMessage, memoryWithSection, PROJECT_MEMORY_FILE_HEADER, PROJECT_MEMORY_FILE_PATH } from '../../../kodia/common/projectMemory.js';
 import { applySearchReplaceBlocks } from '../../../kodia/common/searchReplaceBlocks.js';
 import { EditorToolName, editorTools, isEditorToolName, jsonSchemaOfSharedTool, nextPageNote, SharedTool, SharedToolApproval, SharedToolName, sharedToolNames, sharedTools } from '../../../kodia/common/toolCatalog.js';
+import { executeGitTool, GitToolName, isGitToolName } from './kodiaGitTools.js';
 import { describeTodoList, parseTodoItems, TODO_TOOL_NAME } from './kodiaTodoTool.js';
 import { fetchWebPage } from '../../../kodia/node/webFetch.js';
 import type { IByokLmFunctionTool } from '../../common/agentHostByokLm.js';
@@ -39,8 +40,8 @@ export interface IKodiaToolResult {
  * The local toolset the Kodia agent offers its models, in the bridge's wire shape: the tools of Kodia's chat that
  * don't need the editor, with the chat's names, parameters and descriptions (see `toolCatalog.ts`), so a skill, a rule
  * or a model's habit means the same in both. Not here: the language server's tools (go_to_definition, find_references,
- * search_symbols, read_lint_errors), which need an editor window: see {@link editorFunctionTools}. Nor the task
- * list, which is the agent's own: see `kodiaTodoTool.ts`. Nor persistent terminals. The project memory is in the agent's instructions, as in the chat, so there is no read_project_memory.
+ * search_symbols, read_lint_errors), which need an editor window: see {@link editorFunctionTools}. Nor the git
+ * tools and the task list, which are the agent's own: see `kodiaGitTools.ts` and `kodiaTodoTool.ts`. Nor persistent terminals. The project memory is in the agent's instructions, as in the chat, so there is no read_project_memory.
  */
 export const KODIA_TOOLS: IByokLmFunctionTool[] = sharedToolNames.map(name => ({
 	type: 'function',
@@ -62,7 +63,7 @@ export function editorFunctionTools(names: readonly string[]): IByokLmFunctionTo
 	}));
 }
 
-const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName | typeof TODO_TOOL_NAME, string>> = {
+const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName | GitToolName | typeof TODO_TOOL_NAME, string>> = {
 	read_file: 'Read File',
 	ls_dir: 'List Directory',
 	get_dir_tree: 'Directory Tree',
@@ -80,6 +81,10 @@ const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName | typeof TO
 	find_references: 'Find References',
 	search_symbols: 'Search Symbols',
 	read_lint_errors: 'Read Lint Errors',
+	git_status: 'Git Status',
+	git_diff: 'Git Diff',
+	git_log: 'Git Log',
+	git_show: 'Git Show',
 	todo_write: 'Update Task List',
 };
 
@@ -88,7 +93,7 @@ function isSharedToolName(name: string): name is SharedToolName {
 }
 
 export function toolDisplayName(name: string): string {
-	return isSharedToolName(name) || isEditorToolName(name) || name === TODO_TOOL_NAME ? DISPLAY_NAMES[name] : name;
+	return isSharedToolName(name) || isEditorToolName(name) || isGitToolName(name) || name === TODO_TOOL_NAME ? DISPLAY_NAMES[name] : name;
 }
 
 /**
@@ -205,6 +210,22 @@ export function describeKodiaToolCall(name: string, argsJson: string, workingDir
 		case TODO_TOOL_NAME: {
 			const parsed = parseTodoItems(args);
 			return { invocationMessage: 'items' in parsed ? `Update the task list (${describeTodoList(parsed.items).summary})` : toolDisplayName(name), toolInput: argsJson };
+		}
+		case 'git_status':
+			return { invocationMessage: 'Check the git status', toolInput: argsJson };
+		case 'git_diff': {
+			const inFile = toStr(args.uri) ? ` of ${shown(resolveToolPath(args.uri, root))}` : '';
+			const what = toStr(args.base) ? `the changes since ${toStr(args.base)}` : toBool(args.staged) ? 'the staged changes' : 'the changes';
+			return { invocationMessage: `Show ${toBool(args.stat_only) ? 'the files of ' : ''}${what}${inFile}`, toolInput: argsJson };
+		}
+		case 'git_log': {
+			const inFile = toStr(args.uri) ? ` of ${shown(resolveToolPath(args.uri, root))}` : '';
+			const search = toStr(args.search) ? ` mentioning "${toStr(args.search)}"` : '';
+			return { invocationMessage: `Show the git log${toStr(args.ref) ? ` from ${toStr(args.ref)}` : ''}${inFile}${search}`, toolInput: argsJson };
+		}
+		case 'git_show': {
+			const inFile = toStr(args.uri) ? ` in ${shown(resolveToolPath(args.uri, root))}` : '';
+			return { invocationMessage: `Show the commit ${toStr(args.ref)}${inFile}`, toolInput: argsJson };
 		}
 		default:
 			return { invocationMessage: toolDisplayName(name), toolInput: argsJson };
@@ -495,6 +516,9 @@ export async function executeKodiaTool(name: string, argsJson: string, ctx: IKod
 				return 'items' in parsed ? { success: true, output: describeTodoList(parsed.items).text } : { success: false, output: parsed.error };
 			}
 			default:
+				if (isGitToolName(name)) {
+					return await executeGitTool(name, args, { root, resolve, signal: ctx.signal });
+				}
 				return { success: false, output: `Unknown tool: ${name}` };
 		}
 	} catch (err) {

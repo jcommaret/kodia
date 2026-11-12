@@ -11,7 +11,8 @@ import { importAMDNodeModule } from '../../../../amdX.js';
 type GptTokenizerModule = typeof import('gpt-tokenizer');
 
 let countTokensFn: GptTokenizerModule['countTokens'] | undefined;
-void importAMDNodeModule<GptTokenizerModule>('gpt-tokenizer', 'dist/o200k_base.js')
+/** Resolves once the tokenizer is loaded, or has failed to load (the estimate below is then the fallback). */
+export const tokenizerReady: Promise<void> = importAMDNodeModule<GptTokenizerModule>('gpt-tokenizer', 'dist/o200k_base.js')
 	.then(mod => { countTokensFn = mod.countTokens })
 	.catch(() => { /* keep using the fallback estimate below */ })
 
@@ -24,6 +25,8 @@ const FALLBACK_CHARS_PER_TOKEN = 4
 // off at import time above — finishes its one-time async load.
 export const estimateTokens = (text: string): number => {
 	if (!text) return 0
-	if (countTokensFn) return countTokensFn(text)
+	// Special tokens are counted as text: by default the counter throws on them, and a reply that ends with one
+	// (`<|im_end|>` from a local server) or a message that pastes one would fail the whole turn.
+	if (countTokensFn) return countTokensFn(text, { allowedSpecial: 'all' })
 	return Math.ceil(text.length / FALLBACK_CHARS_PER_TOKEN)
 }

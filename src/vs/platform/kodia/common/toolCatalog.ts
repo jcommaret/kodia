@@ -10,7 +10,8 @@ import { replaceTool_description } from './searchReplaceBlocks.js';
 // of approval a call needs. How each side runs them is its own: the chat edits through the editor, with a diff to
 // review, the agent writes to disk. `sharedTools` are the ones the agent runs itself. `editorTools`, below, need an
 // editor window (its language server, its markers): the agent has them only while such a window is open, and asks it
-// to run them. Persistent terminals are not here yet: the agent has no such tool.
+// to run them. `persistentTerminalTools` are the terminals that outlive a command: the chat opens them in its window,
+// the agent in the agent host's terminal manager.
 
 export type SharedToolParam = {
 	description: string,
@@ -28,6 +29,8 @@ export type SharedTool = {
 	params: { [paramName: string]: SharedToolParam },
 	approval?: SharedToolApproval,
 }
+
+const terminalCommandHelp = `You can use this tool to run any command: sed, grep, etc. Do not edit any files with this tool; use edit_file instead. When working with git and other tools that open an editor (e.g. git diff), you should pipe to cat to get all results and not get stuck in vim.`
 
 export const sharedTools = {
 	read_file: {
@@ -120,7 +123,7 @@ export const sharedTools = {
 	},
 	run_command: {
 		name: 'run_command',
-		description: 'Runs a terminal command and waits for the result, which ends with the command\'s exit code. It is stopped if it takes too long. You can use this tool to run any command: sed, grep, etc. Do not edit any files with this tool; use edit_file instead. When working with git and other tools that open an editor (e.g. git diff), you should pipe to cat to get all results and not get stuck in vim.',
+		description: `Runs a terminal command and waits for the result, which ends with the command's exit code. It is stopped if it takes too long. ${terminalCommandHelp}`,
 		params: {
 			command: { description: 'The terminal command to run.', required: true },
 			cwd: { description: 'Optional. The directory in which to run the command. Defaults to the first workspace folder.' },
@@ -150,6 +153,48 @@ export const sharedTools = {
 export type SharedToolName = keyof typeof sharedTools
 
 export const sharedToolNames = Object.keys(sharedTools) as SharedToolName[]
+
+/** Seconds a command of a persistent terminal is waited for: its output so far is returned then, and it keeps running. */
+export const MAX_TERMINAL_BG_COMMAND_TIME = 5
+
+/**
+ * The terminals that outlive a command: a dev server, a watcher, a background listener. Open one, run commands in it,
+ * kill it. All three need the approval of a terminal command. The chat runs them in a terminal of its window; the
+ * agent of the Agents window in a terminal of the agent host, which the window shows under the session.
+ */
+export const persistentTerminalTools = {
+	open_persistent_terminal: {
+		name: 'open_persistent_terminal',
+		description: `Use this tool when you want to run a terminal command indefinitely, like a dev server (eg \`npm run dev\`), a background listener, etc. Opens a new terminal in the user's environment which will not awaited for or killed.`,
+		params: {
+			cwd: { description: 'Optional. The directory in which to run the command. Defaults to the first workspace folder.' },
+		},
+		approval: 'terminal',
+	},
+	run_persistent_command: {
+		name: 'run_persistent_command',
+		description: `Runs a terminal command in the persistent terminal that you created with open_persistent_terminal (results after ${MAX_TERMINAL_BG_COMMAND_TIME} seconds are returned, and command continues running in background). ${terminalCommandHelp}`,
+		params: {
+			command: { description: 'The terminal command to run.', required: true },
+			persistent_terminal_id: { description: 'The ID of the terminal created using open_persistent_terminal.', required: true },
+		},
+		approval: 'terminal',
+	},
+	kill_persistent_terminal: {
+		name: 'kill_persistent_terminal',
+		description: `Interrupts and closes a persistent terminal that you opened with open_persistent_terminal.`,
+		params: {
+			persistent_terminal_id: { description: 'The ID of the persistent terminal.', required: true },
+		},
+		approval: 'terminal',
+	},
+} as const satisfies { [name: string]: SharedTool }
+
+export type PersistentTerminalToolName = keyof typeof persistentTerminalTools
+
+export const persistentTerminalToolNames = Object.keys(persistentTerminalTools) as PersistentTerminalToolName[]
+
+export const isPersistentTerminalToolName = (name: string): name is PersistentTerminalToolName => Object.hasOwn(persistentTerminalTools, name)
 
 const symbolParams = {
 	uri: { description: 'The FULL path to the file where the symbol appears.', required: true },

@@ -11,7 +11,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { MAX_PROJECT_MEMORY_TOKENS, memoryTooLongMessage, memoryWithSection, PROJECT_MEMORY_FILE_HEADER, PROJECT_MEMORY_FILE_PATH } from '../../../kodia/common/projectMemory.js';
 import { applySearchReplaceBlocks } from '../../../kodia/common/searchReplaceBlocks.js';
-import { EditorToolName, editorTools, isEditorToolName, jsonSchemaOfSharedTool, nextPageNote, SharedTool, SharedToolApproval, SharedToolName, sharedToolNames, sharedTools } from '../../../kodia/common/toolCatalog.js';
+import { EditorToolName, editorTools, isEditorToolName, isPersistentTerminalToolName, jsonSchemaOfSharedTool, nextPageNote, PersistentTerminalToolName, persistentTerminalTools, SharedTool, SharedToolApproval, SharedToolName, sharedToolNames, sharedTools } from '../../../kodia/common/toolCatalog.js';
 import { fetchWebPage } from '../../../kodia/node/webFetch.js';
 import type { IByokLmFunctionTool } from '../../common/agentHostByokLm.js';
 
@@ -32,6 +32,13 @@ export interface IKodiaToolResult {
 	readonly didWrite?: boolean;
 	/** Absolute path the tool acted on, when applicable. */
 	readonly path?: string;
+	/**
+	 * The terminal of the agent host a command ran in, which the window shows with the tool call: live while the
+	 * terminal lives, and then as the preview of the command's output.
+	 */
+	readonly terminal?: { readonly resource: string; readonly title: string; readonly exitCode?: number; readonly preview?: string };
+	/** What the window says of a tool call that succeeded, in place of "Ran <tool>". */
+	readonly pastTenseMessage?: string;
 }
 
 /**
@@ -39,7 +46,7 @@ export interface IKodiaToolResult {
  * don't need the editor, with the chat's names, parameters and descriptions (see `toolCatalog.ts`), so a skill, a rule
  * or a model's habit means the same in both. Not here: the language server's tools (go_to_definition, find_references,
  * search_symbols, read_lint_errors), which need an editor window: see {@link editorFunctionTools}. Nor persistent
- * terminals. The project memory is in the agent's instructions, as in the chat, so there is no read_project_memory.
+ * terminals, which need the host's terminals: see `kodiaTerminals.ts`. The project memory is in the agent's instructions, as in the chat, so there is no read_project_memory.
  */
 export const KODIA_TOOLS: IByokLmFunctionTool[] = sharedToolNames.map(name => ({
 	type: 'function',
@@ -61,7 +68,7 @@ export function editorFunctionTools(names: readonly string[]): IByokLmFunctionTo
 	}));
 }
 
-const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName, string>> = {
+const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName | PersistentTerminalToolName, string>> = {
 	read_file: 'Read File',
 	ls_dir: 'List Directory',
 	get_dir_tree: 'Directory Tree',
@@ -79,6 +86,9 @@ const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName, string>> =
 	find_references: 'Find References',
 	search_symbols: 'Search Symbols',
 	read_lint_errors: 'Read Lint Errors',
+	open_persistent_terminal: 'Open Persistent Terminal',
+	run_persistent_command: 'Run Persistent Command',
+	kill_persistent_terminal: 'Kill Persistent Terminal',
 };
 
 function isSharedToolName(name: string): name is SharedToolName {
@@ -86,7 +96,7 @@ function isSharedToolName(name: string): name is SharedToolName {
 }
 
 export function toolDisplayName(name: string): string {
-	return isSharedToolName(name) || isEditorToolName(name) ? DISPLAY_NAMES[name] : name;
+	return isSharedToolName(name) || isEditorToolName(name) || isPersistentTerminalToolName(name) ? DISPLAY_NAMES[name] : name;
 }
 
 /**
@@ -94,6 +104,9 @@ export function toolDisplayName(name: string): string {
  * that only reads. A fetched URL can carry data out of the workspace, so the user sees it first, as in the chat.
  */
 export function approvalOfTool(name: string): SharedToolApproval | undefined {
+	if (isPersistentTerminalToolName(name)) {
+		return persistentTerminalTools[name].approval;
+	}
 	if (!isSharedToolName(name)) {
 		return undefined;
 	}
@@ -111,7 +124,7 @@ function toolRoot(workingDirectory: URI | undefined): string {
 }
 
 // A path, relative to the project or absolute, or a file: URI, as the chat's tools take
-function resolveToolPath(p: unknown, root: string): string {
+export function resolveToolPath(p: unknown, root: string): string {
 	const s = typeof p === 'string' ? p.trim() : '';
 	if (s.startsWith('file://')) {
 		try {
@@ -138,10 +151,18 @@ function toStr(s: unknown): string {
 	return typeof s === 'string' ? s : '';
 }
 
+// the model gives the number of a persistent terminal as a string, or sometimes as a number
+export function persistentTerminalIdOf(id: unknown): string {
+	return typeof id === 'string' ? id.trim() : typeof id === 'number' ? String(id) : '';
+}
+
 /** What the host shows, and checks against its approval rules, before a tool call runs. */
 export interface IKodiaToolCallDescription {
 	readonly invocationMessage: string;
-	/** The bare command for `run_command` and the URL for `fetch_url`, so the host's rules apply to them; the JSON arguments otherwise. */
+	/**
+	 * The bare command for `run_command` and `run_persistent_command` and the URL for `fetch_url`, so the host's rules
+	 * apply to them; nothing for a terminal that opens or closes, which runs no command; the JSON arguments otherwise.
+	 */
 	readonly toolInput: string;
 	/** Absolute path a file tool acts on. */
 	readonly path?: string;
@@ -161,6 +182,17 @@ export function describeKodiaToolCall(name: string, argsJson: string, workingDir
 			const command = toStr(args.command);
 			return { invocationMessage: command || toolDisplayName(name), toolInput: command || argsJson };
 		}
+		case 'open_persistent_terminal': {
+			const inFolder = toStr(args.cwd).trim() ? ` in ${shown(resolveToolPath(args.cwd, root))}` : '';
+			return { invocationMessage: `Open a persistent terminal${inFolder}`, toolInput: '' };
+		}
+		case 'run_persistent_command': {
+			const command = toStr(args.command);
+			const terminal = persistentTerminalIdOf(args.persistent_terminal_id);
+			return { invocationMessage: command.trim() ? `Run in terminal ${terminal}: ${command}` : `Read the output of terminal ${terminal}`, toolInput: command };
+		}
+		case 'kill_persistent_terminal':
+			return { invocationMessage: `Close terminal ${persistentTerminalIdOf(args.persistent_terminal_id)}`, toolInput: '' };
 		case 'fetch_url': {
 			const url = toStr(args.url);
 			return { invocationMessage: url ? `Fetch ${url}` : toolDisplayName(name), toolInput: url || argsJson };

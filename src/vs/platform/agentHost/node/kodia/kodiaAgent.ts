@@ -26,6 +26,7 @@ import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from 
 import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirmationState, ToolDefinition } from '../../common/state/protocol/state.js';
 import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
+import { IAgentHostTerminalManager } from '../agentHostTerminalManager.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
 import { chooseKeepIdx, clearOldToolResults, estimateHistoryTokens, IKodiaCompaction, modelHistory, tokensOfChars, transcriptMessages } from './kodiaContext.js';
 import { readProjectMemory, readProjectRules, readProjectSkills } from './kodiaProjectContext.js';
@@ -33,6 +34,7 @@ import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
 import { projectMemoryPrompt } from '../../../kodia/common/projectMemory.js';
 import { summarizeThread_systemMessage, summarizeThread_userMessage, summaryTranscriptMaxChars, transcriptForSummary } from '../../../kodia/common/threadSummary.js';
 import { editorToolNames, isEditorToolName } from '../../../kodia/common/toolCatalog.js';
+import { isPersistentTerminalToolName, KodiaTerminals, PERSISTENT_TERMINAL_FUNCTION_TOOLS, persistentTerminalToolNames } from './kodiaTerminals.js';
 import { approvalOfTool, describeKodiaToolCall, editorFunctionTools, editorToolArguments, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
 
 /**
@@ -88,8 +90,17 @@ function mcpFunctionTool(tool: IKodiaMcpTool): IByokLmFunctionTool {
 function toToolCallResult(displayName: string, res: IKodiaToolResult): ToolCallResult {
 	return {
 		success: res.success,
-		pastTenseMessage: res.success ? `Ran ${displayName}` : `${displayName} failed`,
-		content: [{ type: ToolResultContentType.Text, text: res.output }],
+		pastTenseMessage: res.success ? res.pastTenseMessage ?? `Ran ${displayName}` : `${displayName} failed`,
+		// a command of a persistent terminal: the window shows the terminal with it, and what it printed once the terminal is gone
+		content: [
+			...res.terminal ? [{
+				type: ToolResultContentType.Terminal as const,
+				resource: res.terminal.resource,
+				title: res.terminal.title,
+				...(res.terminal.exitCode !== undefined || res.terminal.preview !== undefined ? { result: { exitCode: res.terminal.exitCode, preview: res.terminal.preview } } : {}),
+			}] : [],
+			{ type: ToolResultContentType.Text, text: res.output },
+		],
 		...(res.success ? {} : { error: { message: res.output } }),
 	};
 }
@@ -135,9 +146,16 @@ export class KodiaAgent extends Disposable implements IAgent {
 	/** Resolvers for in-flight tool approvals, keyed by tool call id. */
 	private readonly _pendingPermissions = new Map<string, (approved: boolean) => void>();
 
+	/** The terminals the agent opened, which outlive a command (open_persistent_terminal and its two tools). */
+	private readonly _terminals: KodiaTerminals;
+
 	readonly chats: IAgentChats = {
 		createChat: (chat, _context, options) => this._createChat(chat, options),
-		disposeChat: async chat => this._chats.deleteAndDispose(chat.toString()),
+		disposeChat: async chat => {
+			// the chat is deleted: so are the terminals the agent opened for it
+			this._terminals.shutdownChat(chat);
+			this._chats.deleteAndDispose(chat.toString());
+		},
 		// The backing is plain data; keep it so a later send continues the chat.
 		releaseChat: async () => { },
 		sendMessage: (chat, prompt, workingDirectoriesOrDirectory, attachments, turnId) => {
@@ -159,8 +177,10 @@ export class KodiaAgent extends Disposable implements IAgent {
 		@IKodiaLmBridgeRegistry private readonly _bridge: IByokLmBridgeRegistry,
 		@IFileService private readonly _fileService: IFileService,
 		@INativeEnvironmentService private readonly _environmentService: INativeEnvironmentService,
+		@IAgentHostTerminalManager terminalManager: IAgentHostTerminalManager,
 	) {
 		super();
+		this._terminals = this._register(new KodiaTerminals(terminalManager, this._logService));
 		this._publishModels();
 		this._register(this._bridge.onDidChangeModels(() => this._publishModels()));
 	}
@@ -486,7 +506,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 			const autoApprove = await this._autoApprove(connection);
 			// and the editor tools (language server, lint errors), when an editor window is open to run them
 			const editor = await this._editorTools(connection);
-			const tools = [...KODIA_TOOLS, ...editorFunctionTools(editor?.names ?? []), ...[...mcpTools.values()].map(mcpFunctionTool)];
+			const tools = [...KODIA_TOOLS, ...PERSISTENT_TERMINAL_FUNCTION_TOOLS, ...editorFunctionTools(editor?.names ?? []), ...[...mcpTools.values()].map(mcpFunctionTool)];
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				await this._fitContext(connection, session, model, signal);
 				if (signal.aborted) {
@@ -563,7 +583,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 					}
 					const res = mcpTool ? await this._callMcpTool(connection, call, signal)
 						: editor?.names.includes(call.name) ? await this._callEditorTool(editor.connection, call, session.workingDirectory, signal)
-							: await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
+							: isPersistentTerminalToolName(call.name) ? await this._terminals.execute(call.name, call.argumentsJson, { chat: session.chat, turnId, toolCallId: call.callId, workingDirectory: session.workingDirectory, signal })
+								: await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
 					if (signal.aborted) {
 						return;
 					}
@@ -580,6 +601,11 @@ export class KodiaAgent extends Disposable implements IAgent {
 				fireError('TurnError', err instanceof Error ? err.message : String(err));
 			}
 		} finally {
+			// A turn the user stopped takes with it the terminals it opened. The others stay for the next turn, until the
+			// agent kills them or the chat goes.
+			if (signal.aborted) {
+				this._terminals.shutdownChat(session.chat, turnId);
+			}
 			// Keep what happened, even in an aborted or failed turn, so the next one continues from it.
 			this._settleHistory(session);
 			session.modifiedAt = Date.now();
@@ -695,7 +721,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 			return new Map();
 		}
 		try {
-			const ownTools = new Set<string>([...KODIA_TOOLS.map(tool => tool.name), ...editorToolNames]);
+			const ownTools = new Set<string>([...KODIA_TOOLS.map(tool => tool.name), ...persistentTerminalToolNames, ...editorToolNames]);
 			return new Map((await connection.listMcpTools()).filter(tool => !ownTools.has(tool.name)).map(tool => [tool.name, tool]));
 		} catch (err) {
 			this._logService.warn(`[Kodia] Could not list the MCP tools of the Kodia window: ${err}`);
@@ -810,7 +836,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 		// a fetched URL has no auto-approval rule, so the host asks unless the session auto-approves everything, as
 		// Kodia's chat does for web pages
 		const confirmationTitle = isMcp ? localize('kodiaAgent.runMcpTool', "Run MCP tool")
-			: isShell ? localize('kodiaAgent.runInTerminal', "Run in terminal")
+			: call.name === 'open_persistent_terminal' ? localize('kodiaAgent.openTerminal', "Open persistent terminal")
+				: call.name === 'kill_persistent_terminal' ? localize('kodiaAgent.killTerminal', "Close persistent terminal")
+					: isShell ? localize('kodiaAgent.runInTerminal', "Run in terminal")
 				: isWeb ? localize('kodiaAgent.fetchUrl', "Fetch web page")
 					: call.name === 'edit_file' ? localize('kodiaAgent.editFile', "Edit file")
 						: call.name === 'create_file_or_folder' ? localize('kodiaAgent.createFile', "Create file or folder")
@@ -898,7 +926,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 
 	async shutdown(): Promise<void> {
 		this._logService.trace('[Kodia] shutdown');
-		// Aborts any in-flight turn; the backings live in Agent Host's catalog.
+		// Aborts any in-flight turn, and kills the terminals; the backings live in Agent Host's catalog.
 		this._chats.clearAndDisposeAll();
+		this._terminals.dispose();
 	}
 }

@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Event } from '../../../../base/common/event.js';
+import { isWindows } from '../../../../base/common/platform.js';
 import { join } from '../../../../base/common/path.js';
 import { IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -19,11 +20,13 @@ import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesy
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentChatDataChange, type IAgentToolPendingConfirmationSignal } from '../../common/agent.js';
 import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
+import { TerminalClaimKind } from '../../common/state/protocol/state.js';
 import { ActionType } from '../../common/state/sessionActions.js';
-import { buildDefaultChatUri, ResponsePartKind, ToolCallConfirmationReason } from '../../common/state/sessionState.js';
+import { buildDefaultChatUri, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
-import { editorToolNames } from '../../../kodia/common/toolCatalog.js';
+import { FakeTerminalManager } from './kodiaFakeTerminalManager.js';
+import { editorToolNames, persistentTerminalToolNames } from '../../../kodia/common/toolCatalog.js';
 import { CLEARED_TOOL_RESULT, summarizedThreadMessage, summarizeThread_systemMessage } from '../../../kodia/common/threadSummary.js';
 
 /** A Kodia window: replays scripted results and records each request and its token. */
@@ -119,14 +122,16 @@ suite('KodiaAgent', () => {
 
 	const userHome = URI.file('/home/me');
 
-	function createAgent(registry = new FakeBridgeRegistry()): { agent: KodiaAgent; registry: FakeBridgeRegistry; write: (path: string, content: string) => Promise<void> } {
+	function createAgent(registry = new FakeBridgeRegistry()): { agent: KodiaAgent; registry: FakeBridgeRegistry; terminals: FakeTerminalManager; write: (path: string, content: string) => Promise<void> } {
 		registry.models = [gemini, openRouter];
 		// the agent reads the project's rules and skills through the file service, here an in-memory disk
 		const fileService = store.add(new FileService(new NullLogService()));
 		store.add(fileService.registerProvider('file', store.add(new InMemoryFileSystemProvider())));
 		const environmentService = { userHome } as INativeEnvironmentService;
 		const write = async (path: string, content: string) => { await fileService.writeFile(URI.file(path), VSBuffer.fromString(content)); };
-		return { agent: store.add(new KodiaAgent(new NullLogService(), registry, fileService, environmentService)), registry, write };
+		// the persistent terminals of the agent are those of the agent host, here a fake
+		const terminals = store.add(new FakeTerminalManager());
+		return { agent: store.add(new KodiaAgent(new NullLogService(), registry, fileService, environmentService, terminals)), registry, terminals, write };
 	}
 
 	let sessionCounter = 0;
@@ -176,7 +181,7 @@ suite('KodiaAgent', () => {
 		const request = registry.window!.requests[0];
 		assert.strictEqual(request.vendor, 'openRouter');
 		assert.strictEqual(request.modelId, 'qwen/qwen3-coder');
-		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory']);
+		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', ...persistentTerminalToolNames]);
 		assert.deepStrictEqual(request.input, [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Hi' }] }]);
 		assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatTurnComplete]);
 
@@ -349,7 +354,7 @@ suite('KodiaAgent', () => {
 	});
 
 	test('has only its own tools when the window offers no MCP tools, or can\'t list them', async () => {
-		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory'];
+		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', ...persistentTerminalToolNames];
 		for (const mcp of [undefined, { tools: [issueSearch], result: { isError: false, output: '' }, calls: [], listError: new Error('MCP is not ready.') }]) {
 			const { agent, registry } = createAgent();
 			registry.window!.mcp = mcp;
@@ -655,7 +660,7 @@ suite('KodiaAgent', () => {
 	});
 	suite('the editor tools, which an editor window runs', () => {
 
-		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory'];
+		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', ...persistentTerminalToolNames];
 		const definition: IKodiaMcpToolResult = { isError: false, output: 'src/a.ts:12\n```\nfunction a() {}\n```' };
 		const editorWindow = (result = definition) => { const window = new FakeKodiaWindow(); window.editor = { names: [...editorToolNames], result, calls: [] }; return window; };
 		const agentsWindow = () => { const window = new FakeKodiaWindow(); window.editor = { names: [], result: definition, calls: [] }; return window; };
@@ -763,6 +768,200 @@ suite('KodiaAgent', () => {
 				assert.strictEqual(names.filter(n => n === 'go_to_definition').length, window.editor ? 1 : 0);
 				assert.strictEqual(names.at(-1), 'a1b2_search');
 			}
+		});
+	});
+
+	suite('persistent terminals, which outlive a command', () => {
+
+		const call = (name: string, args: object, callId: string) => ({ output: [{ type: 'function_call' as const, callId, name, argumentsJson: JSON.stringify(args) }] });
+		const approvalRequests = (signals: readonly AgentSignal[]) => signals.filter((s): s is IAgentToolPendingConfirmationSignal => s.kind === 'pending_confirmation');
+		const completes = (signals: readonly AgentSignal[]) => signals.filter((s): s is IAgentActionSignal => s.kind === 'action').map(s => s.action).filter(a => a.type === ActionType.ChatToolCallComplete);
+
+		/** Waits for the nth approval request of the turns, and answers it. */
+		async function answerNth(agent: KodiaAgent, signals: AgentSignal[], n: number, approved: boolean): Promise<IAgentToolPendingConfirmationSignal> {
+			for (let i = 0; i < 400 && approvalRequests(signals).length <= n; i++) {
+				await new Promise(resolve => setTimeout(resolve, 1));
+			}
+			const request = approvalRequests(signals)[n];
+			assert.ok(request, `the agent asks for approval ${n + 1}`);
+			agent.respondToPermissionRequest(request.state.toolCallId, approved);
+			return request;
+		}
+
+		const echoHi = (terminals: FakeTerminalManager) => {
+			terminals.shell = (terminal, command) => {
+				terminal.start(command);
+				terminal.print('hi\r\n');
+				terminal.finish(0);
+			};
+		};
+
+		test('opens a terminal, runs a command in it and closes it, each asked about as a terminal command is', async () => {
+			const { agent, registry, terminals } = createAgent();
+			echoHi(terminals);
+			const window = registry.window!;
+			window.results = [
+				call('open_persistent_terminal', {}, 'call-1'),
+				call('run_persistent_command', { command: 'echo hi', persistent_terminal_id: '1' }, 'call-2'),
+				call('kill_persistent_terminal', { persistent_terminal_id: '1' }, 'call-3'),
+				text('Done.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Run echo hi in a terminal', [cwd], undefined, 'turn-1');
+			for (let i = 0; i < 3; i++) {
+				await answerNth(agent, signals, i, true);
+			}
+			await turn;
+
+			// the host's rules see the bare command; a terminal that opens or closes has none
+			assert.deepStrictEqual(approvalRequests(signals).map(r => [r.state.toolName, r.permissionKind, r.state.toolInput, r.state.confirmationTitle]), [
+				['open_persistent_terminal', 'shell', '', 'Open persistent terminal'],
+				['run_persistent_command', 'shell', 'echo hi', 'Run in terminal'],
+				['kill_persistent_terminal', 'shell', '', 'Close persistent terminal'],
+			]);
+			assert.strictEqual(approvalRequests(signals)[1].shellLanguage, isWindows ? undefined : 'bash');
+
+			assert.deepStrictEqual(window.requests[1].input.at(-1), { type: 'function_call_output', callId: 'call-1', output: 'Successfully created persistent terminal. persistentTerminalId="1"' });
+			assert.deepStrictEqual(window.requests[2].input.at(-1), { type: 'function_call_output', callId: 'call-2', output: 'hi\n(exit code 0)' });
+			assert.deepStrictEqual(window.requests[3].input.at(-1), { type: 'function_call_output', callId: 'call-3', output: 'Successfully closed terminal "1".' });
+
+			// the session claims the terminal, so the window shows it under the session
+			assert.strictEqual(terminals.created.length, 1);
+			assert.deepStrictEqual(terminals.created[0].params.claim, { kind: TerminalClaimKind.Session, session: parseRequiredSessionUriFromChatUri(chat), chat: chat.toString(), turnId: 'turn-1', toolCallId: 'call-1' });
+			assert.deepStrictEqual(terminals.created[0].typed, ['echo hi']);
+			assert.deepStrictEqual(terminals.disposed, [terminals.created[0].uri]);
+
+			// and the window shows the terminal with the commands that ran in it, and what they printed when it is gone
+			const run = completes(signals).find(a => a.type === ActionType.ChatToolCallComplete && a.toolCallId === 'call-2');
+			assert.ok(run && run.type === ActionType.ChatToolCallComplete);
+			assert.deepStrictEqual(run.result.content?.map(c => c.type), [ToolResultContentType.Terminal, ToolResultContentType.Text]);
+			assert.deepStrictEqual(run.result.content?.[0], { type: ToolResultContentType.Terminal, resource: terminals.created[0].uri, title: 'Kodia Agent', result: { exitCode: 0, preview: 'hi' } });
+			// opening and closing one are not commands: no terminal pill, and a message of their own
+			const opened = completes(signals).find(a => a.type === ActionType.ChatToolCallComplete && a.toolCallId === 'call-1');
+			assert.ok(opened && opened.type === ActionType.ChatToolCallComplete);
+			assert.deepStrictEqual([opened.result.pastTenseMessage, opened.result.content?.map(c => c.type)], ['Opened persistent terminal 1', [ToolResultContentType.Text]]);
+		});
+
+		test('runs them without asking when the user switched terminal commands on in Kodia\'s settings', async () => {
+			const { agent, registry, terminals } = createAgent();
+			echoHi(terminals);
+			const window = registry.window!;
+			window.autoApprove = { terminal: true };
+			window.results = [
+				call('open_persistent_terminal', {}, 'call-1'),
+				call('run_persistent_command', { command: 'echo hi', persistent_terminal_id: '1' }, 'call-2'),
+				text('Done.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Run echo hi in a terminal', [cwd], undefined, 'turn-1');
+
+			assert.deepStrictEqual(approvalRequests(signals), []);
+			assert.deepStrictEqual(terminals.created[0].typed, ['echo hi']);
+		});
+
+		test('does not run a command the user denied', async () => {
+			const { agent, registry, terminals } = createAgent();
+			echoHi(terminals);
+			const window = registry.window!;
+			window.results = [
+				call('open_persistent_terminal', {}, 'call-1'),
+				call('run_persistent_command', { command: 'rm -rf node_modules', persistent_terminal_id: '1' }, 'call-2'),
+				text('Done.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Clean up', [cwd], undefined, 'turn-1');
+			await answerNth(agent, signals, 0, true);
+			await answerNth(agent, signals, 1, false);
+			await turn;
+
+			assert.deepStrictEqual(terminals.created[0].typed, []);
+			assert.deepStrictEqual(window.requests[2].input.at(-1), { type: 'function_call_output', callId: 'call-2', output: 'The user denied this tool call.' });
+		});
+
+		test('keeps a terminal for the next turns, and takes it away with the chat', async () => {
+			const { agent, registry, terminals } = createAgent();
+			echoHi(terminals);
+			const window = registry.window!;
+			window.autoApprove = { terminal: true };
+			window.results = [call('open_persistent_terminal', {}, 'call-1'), text('Opened.')];
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+			await agent.chats.sendMessage(chat, 'Open a terminal', [cwd], undefined, 'turn-1');
+			assert.deepStrictEqual(terminals.disposed, [], 'the turn ended, the terminal did not');
+
+			window.results = [call('run_persistent_command', { command: 'echo hi', persistent_terminal_id: '1' }, 'call-2'), text('Ran.')];
+			await agent.chats.sendMessage(chat, 'Run echo hi', [cwd], undefined, 'turn-2');
+			assert.deepStrictEqual(terminals.created.length, 1, 'the second turn used the terminal of the first');
+			assert.deepStrictEqual(window.requests.at(-1)!.input.at(-1), { type: 'function_call_output', callId: 'call-2', output: 'hi\n(exit code 0)' });
+
+			await agent.chats.disposeChat(chat, session);
+			assert.deepStrictEqual(terminals.disposed, [terminals.created[0].uri]);
+		});
+
+		test('a turn the user stops takes away the terminals it opened, and not those of the turns before', async () => {
+			const { agent, registry, terminals } = createAgent();
+			echoHi(terminals);
+			const window = registry.window!;
+			window.autoApprove = { terminal: true };
+			window.results = [call('open_persistent_terminal', {}, 'call-1'), text('Opened.')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+			await agent.chats.sendMessage(chat, 'Open a terminal', [cwd], undefined, 'turn-1');
+
+			// turn 2 opens another one, then waits for the user to approve a command: who stops the turn instead
+			window.autoApprove = { terminal: false };
+			window.results = [call('open_persistent_terminal', {}, 'call-2'), call('run_persistent_command', { command: 'npm run dev', persistent_terminal_id: '2' }, 'call-3'), text('Never.')];
+			const turn = agent.chats.sendMessage(chat, 'Start the server', [cwd], undefined, 'turn-2');
+			await answerNth(agent, signals, 0, true);
+			for (let i = 0; i < 400 && approvalRequests(signals).length < 2; i++) {
+				await new Promise(resolve => setTimeout(resolve, 1));
+			}
+			assert.strictEqual(approvalRequests(signals).length, 2, 'the command waits for the user');
+			await agent.chats.abort(chat, session);
+			await turn;
+
+			assert.strictEqual(terminals.created.length, 2);
+			assert.deepStrictEqual(terminals.disposed, [terminals.created[1].uri]);
+			assert.ok(terminals.terminals.has(terminals.created[0].uri), 'the terminal of the first turn is still there');
+		});
+
+		test('kills the terminals when the agent shuts down', async () => {
+			const { agent, registry, terminals } = createAgent();
+			const window = registry.window!;
+			window.autoApprove = { terminal: true };
+			window.results = [call('open_persistent_terminal', {}, 'call-1'), call('open_persistent_terminal', {}, 'call-2'), text('Opened.')];
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+			await agent.chats.sendMessage(chat, 'Open two terminals', [cwd], undefined, 'turn-1');
+			assert.strictEqual(terminals.terminals.size, 2);
+
+			await agent.shutdown();
+
+			assert.deepStrictEqual(terminals.disposed.sort(), terminals.created.map(t => t.uri).sort());
+		});
+
+		test('an MCP tool never takes the name of a persistent terminal tool', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.mcp = { tools: [{ ...issueSearch, name: 'open_persistent_terminal' }, issueSearch], result: { isError: false, output: '' }, calls: [] };
+			registry.window!.results = [text('Done.')];
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			const names = registry.window!.requests[0].tools!.map(t => t.name);
+			assert.strictEqual(names.filter(n => n === 'open_persistent_terminal').length, 1);
+			assert.strictEqual(names.at(-1), 'a1b2_search');
 		});
 	});
 });

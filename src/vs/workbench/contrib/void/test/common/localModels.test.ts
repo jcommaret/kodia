@@ -10,8 +10,8 @@ import { canonicalModelNameForProvider, normalizeAutodetectedModelNamesForProvid
 suite('Kodia - autodetected model names', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('MLX lists only the one loaded model', () => {
-		assert.deepStrictEqual(normalizeAutodetectedModelNamesForProvider('mlx', ['mlx-community/Qwen3-8B', 'mlx-community/Qwen3-8B', 'other']), ['mlx-community/Qwen3-8B']);
+	test('MLX lists every model of the server, once, in the server\'s order', () => {
+		assert.deepStrictEqual(normalizeAutodetectedModelNamesForProvider('mlx', ['mlx-community/Qwen3-8B', 'mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit', 'mlx-community/Qwen3-8B', 'other']), ['mlx-community/Qwen3-8B', 'mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit', 'other']);
 		assert.deepStrictEqual(normalizeAutodetectedModelNamesForProvider('mlx', []), []);
 	});
 

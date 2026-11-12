@@ -687,11 +687,11 @@ export const OllamaSetupInstructions = ({ sayWeAutoDetect }: { sayWeAutoDetect?:
 
 export const MlxSetupInstructions = () => {
 	return <div className='prose-p:my-0 prose-ol:list-decimal prose-p:py-0 prose-ol:my-0 prose-ol:py-0 text-void-fg-3 text-sm list-decimal select-text mb-4'>
-		<div><ChatMarkdownRender string={`MLX (one model at a time)`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`1. Kodia can run \`pip install mlx-lm\` and start \`mlx_lm.server\` for you (toggle in Settings → Models). Default model: \`mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit\` on port 8080.`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`2. Kodia shows only **one** autodetected entry: the model currently loaded by the server.`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`3. **Switch models**: stop the server, run \`mlx_lm.server --model <other-hf-repo>\`, then click **Refresh** next to MLX in Settings → Models.`} chatMessageLocation={undefined} /></div>
-		<div className='pl-6'><ChatMarkdownRender string={`4. **Second model in parallel**: run another server on a different port (e.g. \`mlx_lm.server --model … --port 8081\`), then at the bottom of the model list use **Add Model** → **OpenAI-Compatible** with \`http://127.0.0.1:8081/v1\`, or add the model id manually under MLX if the endpoint exposes multiple ids.`} chatMessageLocation={undefined} /></div>
+		<div><ChatMarkdownRender string={`MLX (one model loaded at a time)`} chatMessageLocation={undefined} /></div>
+		<div className='pl-6'><ChatMarkdownRender string={`1. Kodia can run \`pip install mlx-lm\` and start \`mlx_lm.server\` for you (toggle in Settings → Models), with the newest mlx-lm of your Mac. Default model: \`mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit\` on port 8080.`} chatMessageLocation={undefined} /></div>
+		<div className='pl-6'><ChatMarkdownRender string={`2. Kodia lists the models of the server, which are those of your Hugging Face cache. The server loads the one you pick, and swaps it for another when you pick another: the first request of a model waits for it to load.`} chatMessageLocation={undefined} /></div>
+		<div className='pl-6'><ChatMarkdownRender string={`3. A model that is too big for your memory, or too new for your mlx-lm, fails with the server's error: update with \`python3 -m pip install --upgrade mlx-lm\`.`} chatMessageLocation={undefined} /></div>
+		<div className='pl-6'><ChatMarkdownRender string={`4. **Second model in parallel**: run another server on a different port (e.g. \`mlx_lm.server --model … --port 8081\`), then at the bottom of the model list use **Add Model** → **OpenAI-Compatible** with \`http://127.0.0.1:8081/v1\`.`} chatMessageLocation={undefined} /></div>
 	</div>
 }
 

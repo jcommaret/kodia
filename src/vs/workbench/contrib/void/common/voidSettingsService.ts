@@ -16,7 +16,7 @@ import { DetectedModel } from './providerModels.js';
 import { instructionsFrameworkContentForKodia } from './instructionsFrameworks.js';
 import { VOID_SETTINGS_STORAGE_KEY } from './storageKeys.js';
 import { isMacintosh } from '../../../../base/common/platform.js';
-import { consolidateSingleAutodetectedProviderModels, dedupeProviderModels, normalizeAutodetectedModelNamesForProvider } from './localSingleModelProviders.js';
+import { dedupeProviderModels, normalizeAutodetectedModelNamesForProvider } from './localSingleModelProviders.js';
 import { defaultSettingsOfProvider, displayInfoOfProviderName, FeatureName, ProviderName, ModelSelectionOfFeature, SettingsOfProvider, SettingName, providerNames, ModelSelection, modelSelectionsEqual, featureNames, VoidStatefulModelInfo, GlobalSettings, GlobalSettingName, defaultGlobalSettings, ModelSelectionOptions, OptionsOfModelSelection, ChatMode, OverridesOfModel, defaultOverridesOfModel, MCPUserStateOfName as MCPUserStateOfName, MCPUserState } from './voidSettingsTypes.js';
 
 
@@ -387,12 +387,6 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 					readS.settingsOfProvider[providerName].headersJSON = '{}'
 				}
 
-				if (providerName === 'mlx') {
-					readS.settingsOfProvider[providerName].models = consolidateSingleAutodetectedProviderModels(
-						providerName,
-						readS.settingsOfProvider[providerName].models,
-					)
-				}
 				readS.settingsOfProvider[providerName].models = dedupeProviderModels(
 					providerName,
 					readS.settingsOfProvider[providerName].models,
@@ -573,10 +567,7 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		const oldModelNames = models.map(m => m.modelName)
 
 		const normalizedNames = normalizeAutodetectedModelNamesForProvider(providerName, autodetectedModelNames)
-		let newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: normalizedNames, type: 'autodetected' })
-		if (providerName === 'mlx') {
-			newModels = consolidateSingleAutodetectedProviderModels(providerName, newModels)
-		}
+		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: normalizedNames, type: 'autodetected' })
 		this.setSettingOfProvider(providerName, 'models', newModels)
 
 		// if the models changed, log it

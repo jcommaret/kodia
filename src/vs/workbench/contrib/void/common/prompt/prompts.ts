@@ -14,7 +14,7 @@ import { ChatMode } from '../voidSettingsTypes.js';
 import { MAX_PROJECT_MEMORY_TOKENS } from '../../../../../platform/kodia/common/projectMemory.js';
 import { joinProjectRules, PROJECT_RULES_FILE_NAMES, skillsPrompt } from '../../../../../platform/kodia/common/projectInstructions.js';
 import { DIVIDER, FINAL, ORIGINAL, searchReplaceBlockTemplate } from '../../../../../platform/kodia/common/searchReplaceBlocks.js';
-import { EditorToolName, editorTools, SharedToolName, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
+import { EditorToolName, editorTools, MAX_TERMINAL_BG_COMMAND_TIME, PersistentTerminalToolName, persistentTerminalTools, SharedToolName, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
 import { summarizedThreadMessage, summarizeThread_systemMessage, summarizeThread_userMessage } from '../../../../../platform/kodia/common/threadSummary.js';
 
 // Triple backtick wrapper used throughout the prompts for code blocks
@@ -31,7 +31,8 @@ export const MAX_CHILDREN_URIs_PAGE = 500
 // terminal tool info
 export const MAX_TERMINAL_CHARS = 100_000
 export const MAX_TERMINAL_INACTIVE_TIME = 8 // seconds
-export const MAX_TERMINAL_BG_COMMAND_TIME = 5
+// shared with the Kodia agent of the Agents window, whose persistent terminals wait as long
+export { MAX_TERMINAL_BG_COMMAND_TIME }
 
 // project memory tool info, shared with the Kodia agent of the Agents window
 export { MAX_PROJECT_MEMORY_TOKENS }
@@ -138,8 +139,6 @@ export type InternalToolInfo = {
 
 const terminalDescHelper = `You can use this tool to run any command: sed, grep, etc. Do not edit any files with this tool; use edit_file instead. When working with git and other tools that open an editor (e.g. git diff), you should pipe to cat to get all results and not get stuck in vim.`
 
-const cwdHelper = 'Optional. The directory in which to run the command. Defaults to the first workspace folder.'
-
 export type SnakeCase<S extends string> =
 	// exact acronym URI
 	S extends 'URI' ? 'uri'
@@ -157,11 +156,11 @@ export type SnakeCaseKeys<T extends Record<string, any>> = {
 
 
 // A tool Kodia's chat and the Kodia agent of the Agents window both have: defined once in the shared catalog (its
-// `sharedTools`, and its `editorTools`, which the agent has while an editor window is open). The chat tells the model
-// every parameter as a string, so only the descriptions are taken; `overrides` keeps the chat's own text where the
-// shared one can't name the chat's editor tools.
-const catalogTools = { ...sharedTools, ...editorTools }
-const sharedTool = <T extends SharedToolName | EditorToolName>(name: T, overrides?: { description?: string, params?: { [P in keyof (typeof catalogTools)[T]['params']]?: string } }) => {
+// `sharedTools`, its `editorTools`, which the agent has while an editor window is open, and its `persistentTerminalTools`).
+// The chat tells the model every parameter as a string, so only the descriptions are taken; `overrides` keeps the chat's
+// own text where the shared one can't name the chat's editor tools.
+const catalogTools = { ...sharedTools, ...editorTools, ...persistentTerminalTools }
+const sharedTool = <T extends SharedToolName | EditorToolName | PersistentTerminalToolName>(name: T, overrides?: { description?: string, params?: { [P in keyof (typeof catalogTools)[T]['params']]?: string } }) => {
 	const tool = catalogTools[name]
 	const overriddenParams = overrides?.params as { [paramName: string]: string | undefined } | undefined
 	const params: { [paramName: string]: { description: string } } = {}
@@ -232,31 +231,11 @@ export const builtinTools: {
 
 	run_command: sharedTool('run_command', { description: `Runs a terminal command and waits for the result (times out after ${MAX_TERMINAL_INACTIVE_TIME}s of inactivity). ${terminalDescHelper}` }),
 
-	run_persistent_command: {
-		name: 'run_persistent_command',
-		description: `Runs a terminal command in the persistent terminal that you created with open_persistent_terminal (results after ${MAX_TERMINAL_BG_COMMAND_TIME} are returned, and command continues running in background). ${terminalDescHelper}`,
-		params: {
-			command: { description: 'The terminal command to run.' },
-			persistent_terminal_id: { description: 'The ID of the terminal created using open_persistent_terminal.' },
-		},
-	},
+	run_persistent_command: sharedTool('run_persistent_command'),
 
+	open_persistent_terminal: sharedTool('open_persistent_terminal'),
 
-
-	open_persistent_terminal: {
-		name: 'open_persistent_terminal',
-		description: `Use this tool when you want to run a terminal command indefinitely, like a dev server (eg \`npm run dev\`), a background listener, etc. Opens a new terminal in the user's environment which will not awaited for or killed.`,
-		params: {
-			cwd: { description: cwdHelper },
-		}
-	},
-
-
-	kill_persistent_terminal: {
-		name: 'kill_persistent_terminal',
-		description: `Interrupts and closes a persistent terminal that you opened with open_persistent_terminal.`,
-		params: { persistent_terminal_id: { description: `The ID of the persistent terminal.` } }
-	}
+	kill_persistent_terminal: sharedTool('kill_persistent_terminal'),
 
 
 	// go_to_definition

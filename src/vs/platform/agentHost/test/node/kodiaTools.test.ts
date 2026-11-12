@@ -14,6 +14,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { getRandomTestPath } from '../../../../base/test/node/testUtils.js';
 import { DIVIDER, FINAL, ORIGINAL } from '../../../kodia/common/searchReplaceBlocks.js';
 import { editorToolNames } from '../../../kodia/common/toolCatalog.js';
+import { PERSISTENT_TERMINAL_FUNCTION_TOOLS } from '../../node/kodia/kodiaTerminals.js';
 import { approvalOfTool, describeKodiaToolCall, editorFunctionTools, editorToolArguments, executeKodiaTool, IKodiaToolContext, KODIA_TOOLS, needsApproval, toolDisplayName } from '../../node/kodia/kodiaTools.js';
 
 const block = (orig: string, final: string) => `${ORIGINAL}\n${orig}\n${DIVIDER}\n${final}\n${FINAL}`;
@@ -82,6 +83,26 @@ suite('Kodia agent tools', () => {
 			assert.strictEqual(needsApproval(tool.name), false);
 		}
 		assert.deepStrictEqual(editorFunctionTools(editorToolNames).map(t => t.name), ['go_to_definition', 'find_references', 'search_symbols', 'read_lint_errors']);
+	});
+
+	test('offers the persistent terminal tools with the chat\'s names, and each needs the approval of a terminal command', () => {
+		assert.deepStrictEqual(PERSISTENT_TERMINAL_FUNCTION_TOOLS.map(t => t.name), ['open_persistent_terminal', 'run_persistent_command', 'kill_persistent_terminal']);
+		for (const tool of PERSISTENT_TERMINAL_FUNCTION_TOOLS) {
+			assert.notStrictEqual(toolDisplayName(tool.name), tool.name, `${tool.name} has a display name`);
+			assert.strictEqual(approvalOfTool(tool.name), 'terminal', tool.name);
+			assert.strictEqual(needsApproval(tool.name), true);
+		}
+		assert.ok(!KODIA_TOOLS.some(t => PERSISTENT_TERMINAL_FUNCTION_TOOLS.some(p => p.name === t.name)), 'the terminals are not run like the other tools: they need the host\'s terminals');
+		assert.match(PERSISTENT_TERMINAL_FUNCTION_TOOLS[1].description ?? '', /^Runs a terminal command in the persistent terminal that you created with open_persistent_terminal \(results after 5 seconds are returned/);
+	});
+
+	test('describes a persistent terminal call: the host\'s rules see the bare command, and a terminal that opens or closes has none', () => {
+		const described = (name: string, args: object) => describeKodiaToolCall(name, JSON.stringify(args), ctx.workingDirectory);
+		assert.deepStrictEqual(described('open_persistent_terminal', {}), { invocationMessage: 'Open a persistent terminal', toolInput: '' });
+		assert.deepStrictEqual(described('open_persistent_terminal', { cwd: 'web' }), { invocationMessage: 'Open a persistent terminal in web', toolInput: '' });
+		assert.deepStrictEqual(described('run_persistent_command', { command: 'npm run dev', persistent_terminal_id: '1' }), { invocationMessage: 'Run in terminal 1: npm run dev', toolInput: 'npm run dev' });
+		assert.deepStrictEqual(described('run_persistent_command', { command: '', persistent_terminal_id: 2 }), { invocationMessage: 'Read the output of terminal 2', toolInput: '' });
+		assert.deepStrictEqual(described('kill_persistent_terminal', { persistent_terminal_id: '1' }), { invocationMessage: 'Close terminal 1', toolInput: '' });
 	});
 
 	test('describes an editor tool call, and makes the path in its arguments absolute for the window that runs it', () => {

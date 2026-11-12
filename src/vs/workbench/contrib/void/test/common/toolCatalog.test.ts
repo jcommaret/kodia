@@ -5,8 +5,8 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { editorToolNames, editorTools, isEditorToolName, jsonSchemaOfSharedTool, nextPageNote, SharedTool, sharedToolNames, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
-import { availableTools, builtinTools } from '../../common/prompt/prompts.js';
+import { editorToolNames, editorTools, isEditorToolName, isPersistentTerminalToolName, jsonSchemaOfSharedTool, MAX_TERMINAL_BG_COMMAND_TIME, nextPageNote, persistentTerminalToolNames, persistentTerminalTools, SharedTool, sharedToolNames, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
+import { availableTools, builtinTools, MAX_TERMINAL_BG_COMMAND_TIME as CHAT_TERMINAL_BG_COMMAND_TIME } from '../../common/prompt/prompts.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolName } from '../../common/toolsServiceTypes.js';
 
 suite('Kodia - the tools the chat and the Agents window\'s agent share', () => {
@@ -48,6 +48,32 @@ suite('Kodia - the tools the chat and the Agents window\'s agent share', () => {
 		for (const name of ['go_to_definition', 'find_references', 'search_symbols', 'read_lint_errors', 'run_persistent_command', 'open_persistent_terminal', 'kill_persistent_terminal', 'read_project_memory']) {
 			assert.ok(!(sharedToolNames as string[]).includes(name), name);
 		}
+	});
+
+	test('the chat tells a model what the catalog says of the persistent terminals, and asks for the approval of a terminal command', () => {
+		assert.deepStrictEqual(persistentTerminalToolNames, ['open_persistent_terminal', 'run_persistent_command', 'kill_persistent_terminal']);
+		const offered = new Set((availableTools('agent', undefined) ?? []).map(tool => tool.name));
+		for (const name of persistentTerminalToolNames) {
+			const catalog: SharedTool = persistentTerminalTools[name];
+			const chat = builtinTools[name];
+			assert.strictEqual(chat.name, name);
+			assert.strictEqual(chat.description, catalog.description, `${name}'s description`);
+			assert.deepStrictEqual(Object.keys(chat.params), Object.keys(catalog.params), `${name}'s parameters`);
+			for (const [paramName, param] of Object.entries(catalog.params)) {
+				assert.strictEqual((chat.params as { [paramName: string]: { description: string } })[paramName].description, param.description, `${name}.${paramName}`);
+			}
+			assert.ok(offered.has(name), `${name} is offered by the chat in Agent mode`);
+			assert.strictEqual(approvalTypeOfBuiltinToolName[name], catalog.approval, `${name}'s approval`);
+			assert.strictEqual(catalog.approval, 'terminal');
+			assert.ok(!(sharedToolNames as string[]).includes(name), `${name} is not one the agent runs itself`);
+			assert.ok(isPersistentTerminalToolName(name));
+		}
+		assert.ok(!isPersistentTerminalToolName('run_command') && !isPersistentTerminalToolName('toString'));
+		assert.strictEqual(CHAT_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_BG_COMMAND_TIME, 'a command is waited for as long in both');
+		assert.match(builtinTools.run_persistent_command.description, /^Runs a terminal command in the persistent terminal that you created with open_persistent_terminal \(results after 5 seconds are returned/);
+		assert.deepStrictEqual(jsonSchemaOfSharedTool(persistentTerminalTools.run_persistent_command).required, ['command', 'persistent_terminal_id']);
+		assert.deepStrictEqual(jsonSchemaOfSharedTool(persistentTerminalTools.open_persistent_terminal).required, []);
+		assert.deepStrictEqual(jsonSchemaOfSharedTool(persistentTerminalTools.kill_persistent_terminal).required, ['persistent_terminal_id']);
 	});
 
 	test('the chat tells a model what the catalog says of the editor tools, and offers them all', () => {

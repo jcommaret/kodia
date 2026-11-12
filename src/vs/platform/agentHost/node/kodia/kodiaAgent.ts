@@ -20,11 +20,13 @@ import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClien
 import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmMessageItem, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
 import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { KODIA_AGENT_PROVIDER_ID, KODIA_AGENT_RESOURCE } from '../../common/kodiaAgentHostLm.js';
+import { ChatInputRequestPurpose, withChatInputRequestPurpose } from '../../common/meta/agentChatInputRequestMeta.js';
+import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { ActionType, type ChatAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirmationState, ToolDefinition } from '../../common/state/protocol/state.js';
-import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputRequest, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { IAgentHostTerminalManager } from '../agentHostTerminalManager.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
@@ -48,6 +50,9 @@ export const IKodiaLmBridgeRegistry = createDecorator<IByokLmBridgeRegistry>('ko
 
 /** Safety cap on tool-call rounds within a single user turn. */
 const MAX_TOOL_ROUNDS = 50;
+// what the user's Continue answer sends the model, when it stopped at its output limit in the middle of its reply
+const CONTINUE_PROMPT = 'Continue from exactly where you stopped.';
+const CONTINUE_OPTION_ID = 'continue';
 
 /** The share of the model's context window the history may take before it is made smaller. */
 const CONTEXT_BUDGET = 0.8;
@@ -149,6 +154,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 	/** Resolvers for in-flight tool approvals, keyed by tool call id. */
 	private readonly _pendingPermissions = new Map<string, (approved: boolean) => void>();
 
+	/** The questions the agent asked the user (whether to continue a reply cut at the output limit), waiting for an answer. */
+	private readonly _pendingInputs = new PendingRequestRegistry<{ response: ChatInputResponseKind; answers?: Record<string, ChatInputAnswer> }, { questionId: string }>();
+
 	/** The terminals the agent opened, which outlive a command (open_persistent_terminal and its two tools). */
 	private readonly _terminals: KodiaTerminals;
 
@@ -159,6 +167,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 			this._terminals.shutdownChat(chat);
 			this._chats.deleteAndDispose(chat.toString());
 		},
+		// A command a terminal of the chat left running shows as background work in the chat's state, which idle eviction
+		// would drop while the command goes on: the chat is not released until it ends.
+		canReleaseChat: async chat => !this._terminals.hasBackgroundWork(chat),
 		// The backing is plain data; keep it so a later send continues the chat.
 		releaseChat: async () => { },
 		sendMessage: (chat, prompt, workingDirectoriesOrDirectory, attachments, turnId) => {
@@ -184,6 +195,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 	) {
 		super();
 		this._terminals = this._register(new KodiaTerminals(terminalManager, this._logService));
+		// a command a terminal left running goes on after its tool call: the chat shows it, outside of any turn
+		this._register(this._terminals.onDidChangeBackgroundWork(({ chat, action }) => this._onDidChatProgress.fire({ kind: 'action', resource: chat, action })));
 		this._publishModels();
 		this._register(this._bridge.onDidChangeModels(() => this._publishModels()));
 	}
@@ -562,6 +575,15 @@ export class KodiaAgent extends Disposable implements IAgent {
 					}
 				}
 				if (toolCalls.length === 0) {
+					// the model stopped at its output limit, in the middle of its reply: the user can have it go on
+					if (result.reachedOutputLimit && await this._askToContinue(fire, turnId, signal)) {
+						session.history.push({ type: 'message', role: 'user', content: [{ type: 'text', text: CONTINUE_PROMPT }] });
+						session.contextTokens = (session.contextTokens ?? 0) + tokensOfChars(CONTINUE_PROMPT.length);
+						continue;
+					}
+					if (signal.aborted) {
+						return;
+					}
 					break;
 				}
 
@@ -907,8 +929,47 @@ export class KodiaAgent extends Disposable implements IAgent {
 		this._pendingPermissions.get(requestId)?.(approved);
 	}
 
-	respondToUserInputRequest(_requestId: string, _response: ChatInputResponseKind, _answers?: Record<string, ChatInputAnswer>): void {
-		// The toolset has no `ask_user` elicitation, so there is nothing to route back.
+	respondToUserInputRequest(requestId: string, response: ChatInputResponseKind, answers?: Record<string, ChatInputAnswer>): void {
+		// The toolset has no `ask_user` elicitation: the only question the agent asks is whether to continue a cut reply.
+		this._pendingInputs.respond(requestId, { response, answers });
+	}
+
+	/**
+	 * Asks the user, in the chat, whether the model should go on with the reply it stopped in the middle of: a question
+	 * with one answer, Continue. False when the user declines, or when the turn is stopped.
+	 */
+	private async _askToContinue(fire: (action: ChatAction) => void, turnId: string, signal: AbortSignal): Promise<boolean> {
+		if (signal.aborted) {
+			return false;
+		}
+		const requestId = generateUuid();
+		const questionId = generateUuid();
+		const request = withChatInputRequestPurpose<ChatInputRequest>({
+			id: requestId,
+			questions: [{
+				kind: ChatInputQuestionKind.SingleSelect,
+				id: questionId,
+				message: localize('kodiaAgent.continue.message', "The model reached its output limit in the middle of its reply."),
+				// one click on Continue answers it; leaving it unanswered ends the turn, as it did
+				required: false,
+				options: [{ id: CONTINUE_OPTION_ID, label: localize('kodiaAgent.continue.label', "Continue"), recommended: true }],
+				allowFreeformInput: false,
+			}],
+		}, ChatInputRequestPurpose.AskUser);
+		const answered = this._pendingInputs.register(requestId, { questionId });
+		const onAbort = () => this._pendingInputs.respond(requestId, { response: ChatInputResponseKind.Cancel });
+		signal.addEventListener('abort', onAbort, { once: true });
+		try {
+			fire({ type: ActionType.ChatInputRequested, request });
+			const { response, answers } = await answered;
+			const answer = answers?.[questionId];
+			return response === ChatInputResponseKind.Accept
+				&& answer?.state === ChatInputAnswerState.Submitted
+				&& answer.value.kind === ChatInputAnswerValueKind.Selected
+				&& answer.value.value === CONTINUE_OPTION_ID;
+		} finally {
+			signal.removeEventListener('abort', onAbort);
+		}
 	}
 
 	// #endregion

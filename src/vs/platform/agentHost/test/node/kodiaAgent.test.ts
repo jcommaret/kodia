@@ -21,9 +21,9 @@ import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentChatDataChange, type IAgentToolPendingConfirmationSignal } from '../../common/agent.js';
 import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmContentPart, IByokLmFunctionTool, IByokLmMessageItem, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
 import { toHostSnapshotAttachmentMeta } from '../../common/meta/agentSnapshotAttachmentMeta.js';
-import { TerminalClaimKind } from '../../common/state/protocol/state.js';
+import { BackgroundWorkKind, TerminalClaimKind } from '../../common/state/protocol/state.js';
 import { ActionType } from '../../common/state/sessionActions.js';
-import { buildDefaultChatUri, MessageAttachmentKind, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type MessageAttachment } from '../../common/state/sessionState.js';
+import { buildDefaultChatUri, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type ChatInputAnswer, type ChatInputRequest, type MessageAttachment } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
 import { FakeTerminalManager } from './kodiaFakeTerminalManager.js';
@@ -937,6 +937,68 @@ suite('KodiaAgent', () => {
 			assert.ok(terminals.terminals.has(terminals.created[0].uri), 'the terminal of the first turn is still there');
 		});
 
+		test('shows a command left running as background work of the chat, outside of the turn, and holds the chat until it ends', async () => {
+			const { agent, registry, terminals } = createAgent();
+			const window = registry.window!;
+			window.autoApprove = { terminal: true };
+			window.results = [
+				call('open_persistent_terminal', {}, 'call-1'),
+				call('run_persistent_command', { command: 'npm run dev', persistent_terminal_id: '1' }, 'call-2'),
+				text('The server runs.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			terminals.shell = (terminal, command) => {
+				terminal.start(command);
+				terminal.print('ready on :3000\r\n');
+				// the user lets the command go on in the background: the call returns, the command does not end
+				terminal.onDidChangeClaim.fire({ kind: TerminalClaimKind.Session, session: parseRequiredSessionUriFromChatUri(chat), chat: chat.toString(), turnId: 'turn-1' });
+			};
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+			const backgroundWork = () => signals.filter((s): s is IAgentActionSignal => s.kind === 'action' && (s.action.type === ActionType.ChatBackgroundWorkSet || s.action.type === ActionType.ChatBackgroundWorkRemoved));
+			assert.strictEqual(await agent.chats.canReleaseChat!(chat, session), true, 'nothing runs');
+
+			await agent.chats.sendMessage(chat, 'Start the dev server', [cwd], undefined, 'turn-1');
+
+			const [set, ...others] = backgroundWork();
+			assert.deepStrictEqual(others, []);
+			assert.strictEqual(set.resource.toString(), chat.toString());
+			assert.ok(set.action.type === ActionType.ChatBackgroundWorkSet);
+			assert.deepStrictEqual({ ...set.action.work, startedAt: undefined }, { kind: BackgroundWorkKind.Shell, id: 'shell:1', label: 'npm run dev', command: 'npm run dev', terminal: terminals.created[0].uri, startedAt: undefined });
+			assert.strictEqual(await agent.chats.canReleaseChat!(chat, session), false, 'its state shows the command: idle eviction would drop it');
+
+			terminals.created[0].finish(0);
+
+			const [, removed, ...rest] = backgroundWork();
+			assert.deepStrictEqual(rest, []);
+			assert.deepStrictEqual([removed.resource.toString(), removed.action], [chat.toString(), { type: ActionType.ChatBackgroundWorkRemoved, id: 'shell:1' }]);
+			assert.strictEqual(await agent.chats.canReleaseChat!(chat, session), true);
+		});
+
+		test('takes the background work away with the chat', async () => {
+			const { agent, registry, terminals } = createAgent();
+			const window = registry.window!;
+			window.autoApprove = { terminal: true };
+			window.results = [
+				call('open_persistent_terminal', {}, 'call-1'),
+				call('run_persistent_command', { command: 'npm run dev', persistent_terminal_id: '1' }, 'call-2'),
+				text('The server runs.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			terminals.shell = (terminal, command) => {
+				terminal.start(command);
+				terminal.onDidChangeClaim.fire({ kind: TerminalClaimKind.Session, session: parseRequiredSessionUriFromChatUri(chat), chat: chat.toString(), turnId: 'turn-1' });
+			};
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+			await agent.chats.sendMessage(chat, 'Start the dev server', [cwd], undefined, 'turn-1');
+
+			await agent.chats.disposeChat(chat, session);
+
+			const work = signals.filter((s): s is IAgentActionSignal => s.kind === 'action').map(s => s.action).filter(a => a.type === ActionType.ChatBackgroundWorkSet || a.type === ActionType.ChatBackgroundWorkRemoved);
+			assert.deepStrictEqual(work.map(a => a.type), [ActionType.ChatBackgroundWorkSet, ActionType.ChatBackgroundWorkRemoved]);
+		});
+
 		test('kills the terminals when the agent shuts down', async () => {
 			const { agent, registry, terminals } = createAgent();
 			const window = registry.window!;
@@ -1151,6 +1213,114 @@ suite('KodiaAgent', () => {
 
 			assert.strictEqual(registry.window!.requests.length, 3, 'the older messages were summarized before the request');
 			assert.strictEqual(registry.window!.requests[1].instructions, summarizeThread_systemMessage);
+		});
+	});
+
+	suite('a reply the model cut at its output limit', () => {
+		const cut = (partial: string): IByokLmChatResult => ({ ...text(partial), reachedOutputLimit: true });
+		const CONTINUE_PROMPT = 'Continue from exactly where you stopped.';
+
+		/** The question the agent asked the user, once it has. */
+		async function question(signals: AgentSignal[]): Promise<{ request: ChatInputRequest; questionId: string; optionId: string }> {
+			const asked = () => signals.filter((s): s is IAgentActionSignal => s.kind === 'action').map(s => s.action).find(a => a.type === ActionType.ChatInputRequested);
+			while (!asked()) {
+				await new Promise(resolve => setTimeout(resolve, 0));
+			}
+			const request = (asked() as { request: ChatInputRequest }).request;
+			const [q] = request.questions!;
+			assert.strictEqual(q.kind, ChatInputQuestionKind.SingleSelect);
+			return { request, questionId: q.id, optionId: (q as { options: { id: string }[] }).options[0].id };
+		}
+
+		const answerWith = (questionId: string, optionId: string): Record<string, ChatInputAnswer> => ({ [questionId]: { state: ChatInputAnswerState.Submitted, value: { kind: ChatInputAnswerValueKind.Selected, value: optionId } } });
+
+		test('asks the user whether to continue, and goes on from where it stopped when they do', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.results = [cut('The first half of'), text(' the answer.')];
+			const { session, chat } = newChat();
+			const { signals, data } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Write it', [cwd], undefined, 'turn-1');
+			const { request, questionId, optionId } = await question(signals);
+			assert.strictEqual(request.questions!.length, 1);
+			assert.strictEqual((request.questions![0] as { allowFreeformInput?: boolean }).allowFreeformInput, false);
+			assert.deepStrictEqual((request.questions![0] as { options: { label: string }[] }).options.map(o => o.label), ['Continue']);
+			assert.strictEqual(registry.window!.requests.length, 1, 'the model is not asked again before the user answers');
+
+			agent.respondToUserInputRequest(request.id, ChatInputResponseKind.Accept, answerWith(questionId, optionId));
+			await turn;
+
+			assert.strictEqual(registry.window!.requests.length, 2);
+			assert.deepStrictEqual(
+				registry.window!.requests[1].input.map(item => item.type === 'message' ? `${item.role}: ${item.content.map(part => part.type === 'text' ? part.text : '').join('')}` : item.type),
+				['user: Write it', 'assistant: The first half of', `user: ${CONTINUE_PROMPT}`],
+			);
+			assert.deepStrictEqual(actionTypes(signals), [
+				ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatInputRequested,
+				ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatTurnComplete,
+			]);
+			assert.ok(data.length > 0);
+		});
+
+		test('ends the turn when the user does not continue', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.results = [cut('The first half of'), text('never asked for')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Write it', [cwd], undefined, 'turn-1');
+			const { request } = await question(signals);
+			agent.respondToUserInputRequest(request.id, ChatInputResponseKind.Decline);
+			await turn;
+
+			assert.strictEqual(registry.window!.requests.length, 1);
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatInputRequested, ActionType.ChatTurnComplete]);
+		});
+
+		test('ends the turn when the answer is not the one offered', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.results = [cut('The first half of'), text('never asked for')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Write it', [cwd], undefined, 'turn-1');
+			const { request, questionId } = await question(signals);
+			agent.respondToUserInputRequest(request.id, ChatInputResponseKind.Accept, answerWith(questionId, 'something else'));
+			await turn;
+
+			assert.strictEqual(registry.window!.requests.length, 1);
+		});
+
+		test('stopping the turn while the question waits ends it', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.results = [cut('The first half of'), text('never asked for')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Write it', [cwd], undefined, 'turn-1');
+			await question(signals);
+			await agent.chats.abort(chat, session);
+			await turn;
+
+			assert.strictEqual(registry.window!.requests.length, 1);
+			assert.ok(!actionTypes(signals).includes(ActionType.ChatTurnComplete), 'the host records the cancellation itself');
+		});
+
+		test('asks nothing of a reply that ended by itself, and not of one that goes on with tools', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.results = [{ output: [{ type: 'function_call', callId: 'call-1', name: 'ls_dir', argumentsJson: '{}' }], reachedOutputLimit: true }, text('Done.')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'What is here?', [cwd], undefined, 'turn-1');
+
+			assert.ok(!actionTypes(signals).includes(ActionType.ChatInputRequested));
+			assert.strictEqual(registry.window!.requests.length, 2);
 		});
 	});
 });

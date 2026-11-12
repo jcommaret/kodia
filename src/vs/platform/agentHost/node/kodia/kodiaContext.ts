@@ -28,7 +28,8 @@ const IMAGE_CHARS = 3_000;
 const isToolOutput = (item: IByokLmInputItem): item is Extract<IByokLmInputItem, { type: 'function_call_output' | 'custom_tool_call_output' }> =>
 	item.type === 'function_call_output' || item.type === 'custom_tool_call_output';
 
-const textOfParts = (parts: readonly IByokLmContentPart[]) => parts.map(part => part.type === 'text' ? part.text : '').join('');
+// the text of a message: after the prompt of a user's message come its attachments, one a part
+const textOfParts = (parts: readonly IByokLmContentPart[]) => parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n\n');
 
 const sizeOfParts = (parts: readonly IByokLmContentPart[] | undefined) => (parts ?? []).reduce((chars, part) => chars + (part.type === 'text' ? part.text.length : IMAGE_CHARS), 0);
 
@@ -90,6 +91,23 @@ export function modelHistory(history: IByokLmInputItem[], compaction: IKodiaComp
 	const userIdx = latestUserIdx(history);
 	const latestRequest = userIdx !== -1 && userIdx < summary.keepFromIdx ? textOfMessage(history[userIdx], 'user') : undefined;
 	return [{ type: 'message', role: 'user', content: [{ type: 'text', text: summarizedThreadMessage(summary.text, latestRequest) }] }, ...items];
+}
+
+/** What a model that can't see images is told in place of one, in a message of the user. */
+export const IMAGE_NOT_SEEN_NOTE = '(An image was attached here, but this model cannot see images.)';
+
+/**
+ * What a model that can't see images is sent: the history, but for the images of the user's messages, which are the
+ * note that one was attached. The history keeps them, for a model that can see them.
+ */
+export function withoutImages(history: IByokLmInputItem[]): IByokLmInputItem[] {
+	const hasImage = (item: IByokLmInputItem) => item.type === 'message' && item.content.some(part => part.type === 'image');
+	if (!history.some(hasImage)) {
+		return history;
+	}
+	return history.map(item => item.type === 'message' && hasImage(item)
+		? { ...item, content: item.content.map((part): IByokLmContentPart => part.type === 'image' ? { type: 'text', text: IMAGE_NOT_SEEN_NOTE } : part) }
+		: item);
 }
 
 /**

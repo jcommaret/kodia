@@ -13,22 +13,24 @@ import { isWindows } from '../../../../base/common/platform.js';
 import { join } from '../../../../base/common/path.js';
 import { IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
-import { VSBuffer } from '../../../../base/common/buffer.js';
+import { encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import type { INativeEnvironmentService } from '../../../environment/common/environment.js';
 import { FileService } from '../../../files/common/fileService.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentChatDataChange, type IAgentToolPendingConfirmationSignal } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatDelta, IByokLmChatRequest, IByokLmChatResult, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatDelta, IByokLmChatRequest, IByokLmChatResult, IByokLmContentPart, IByokLmFunctionTool, IByokLmMessageItem, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
+import { toHostSnapshotAttachmentMeta } from '../../common/meta/agentSnapshotAttachmentMeta.js';
 import { BackgroundWorkKind, TerminalClaimKind } from '../../common/state/protocol/state.js';
 import { ActionType, type ChatAction } from '../../common/state/sessionActions.js';
-import { buildDefaultChatUri, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type ChatInputAnswer, type ChatInputRequest } from '../../common/state/sessionState.js';
+import { buildDefaultChatUri, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type ChatInputAnswer, type ChatInputRequest, type MessageAttachment } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
 import { FakeTerminalManager } from './kodiaFakeTerminalManager.js';
 import { editorToolNames, persistentTerminalToolNames } from '../../../kodia/common/toolCatalog.js';
 import { CLEARED_TOOL_RESULT, summarizedThreadMessage, summarizeThread_systemMessage } from '../../../kodia/common/threadSummary.js';
+import { IMAGE_NOT_SEEN_NOTE } from '../../node/kodia/kodiaContext.js';
 
 /** A Kodia window: replays scripted results and records each request and its token. */
 class FakeKodiaWindow implements IByokLmBridgeConnection {
@@ -1219,6 +1221,194 @@ suite('KodiaAgent', () => {
 			assert.strictEqual(names.at(-1), 'a1b2_search');
 		});
 	});
+	suite('what the user attaches to a message, with "Add Context..."', () => {
+		const fsPath = (path: string) => URI.file(path).fsPath;
+		const file = (path: string, extra: Partial<MessageAttachment> = {}): MessageAttachment => ({ type: MessageAttachmentKind.Resource, uri: URI.file(path).toString(), label: path.slice(path.lastIndexOf('/') + 1), displayKind: 'document', ...extra } as MessageAttachment);
+		const png = encodeBase64(VSBuffer.fromString('fake-png-bytes'));
+		/** What the model was sent of the user's message in its first request. */
+		const sentParts = (registry: FakeBridgeRegistry, request = 0): IByokLmContentPart[] => (registry.window!.requests[request].input[0] as IByokLmMessageItem).content;
+		const texts = (parts: readonly IByokLmContentPart[]) => parts.map(part => part.type === 'text' ? part.text : `<${part.type}>`);
+
+		async function send(attachments: MessageAttachment[], options: { model?: string; files?: Record<string, string> } = {}) {
+			const { agent, registry, write } = createAgent();
+			registry.window!.results = [text('Done.')];
+			for (const [path, content] of Object.entries(options.files ?? {})) {
+				await write(path, content);
+			}
+			const project = URI.file('/project');
+			const { session, chat } = newChat();
+			const watched = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [project], ...options.model ? { model: { id: options.model } } : {} });
+			await agent.chats.sendMessage(chat, 'What is this?', [project], attachments, 'turn-1');
+			return { agent, registry, session, chat, ...watched };
+		}
+
+		test('a file is text in the message of the user, after the prompt: its path, then its content', async () => {
+			const { registry } = await send([file('/project/src/a.ts')], { files: { '/project/src/a.ts': 'export const a = 1;' } });
+
+			assert.deepStrictEqual(sentParts(registry), [
+				{ type: 'text', text: 'What is this?' },
+				{ type: 'text', text: `Attached file: ${fsPath('/project/src/a.ts')}\n\`\`\`\nexport const a = 1;\n\`\`\`` },
+			]);
+		});
+
+		test('a file longer than a page of read_file is cut there, and the model is told how to read the rest', async () => {
+			const { registry } = await send([file('/project/big.txt')], { files: { '/project/big.txt': 'x'.repeat(150_000) } });
+
+			const [, attached] = texts(sentParts(registry));
+			assert.ok(attached.startsWith(`Attached file: ${fsPath('/project/big.txt')}\n\`\`\`\n${'x'.repeat(100_000)}\n\`\`\``), 'the first 100,000 characters');
+			assert.ok(attached.endsWith('(This file is cut here: the first 100000 of its 150000 characters are shown. read_file with page_number 2 gives the rest.)'), attached.slice(-200));
+			assert.strictEqual(attached.length < 100_400, true);
+		});
+
+		test('a selection keeps its path and its lines, and only those are sent', async () => {
+			const files = { '/project/a.ts': 'line 1\nline 2\nline 3\nline 4' };
+			const range = (startLine: number, startCharacter: number, endLine: number, endCharacter: number) => ({ start: { line: startLine, character: startCharacter }, end: { line: endLine, character: endCharacter } });
+
+			// from the start of line 2 to the start of line 4: lines 2 and 3, as the editor numbers them
+			let { registry } = await send([file('/project/a.ts', { displayKind: 'selection', selection: { range: range(1, 0, 3, 0) } })], { files });
+			assert.strictEqual(texts(sentParts(registry))[1], `Attached selection of ${fsPath('/project/a.ts')} (lines 2-3):\n\`\`\`\nline 2\nline 3\n\`\`\``);
+
+			// a part of one line
+			({ registry } = await send([file('/project/a.ts', { displayKind: 'selection', selection: { range: range(2, 5, 2, 6) } })], { files }));
+			assert.strictEqual(texts(sentParts(registry))[1], `Attached selection of ${fsPath('/project/a.ts')} (line 3):\n\`\`\`\n3\n\`\`\``);
+
+			// the text the editor had when the user attached it, which the file on disk may not have
+			({ registry } = await send([file('/project/a.ts', { displayKind: 'selection', selection: { range: range(1, 0, 2, 6) }, _meta: { 'copilot.attachmentDetail': { type: 'selection', text: 'unsaved 2\nunsaved 3' } } })], { files }));
+			assert.strictEqual(texts(sentParts(registry))[1], `Attached selection of ${fsPath('/project/a.ts')} (lines 2-3):\n\`\`\`\nunsaved 2\nunsaved 3\n\`\`\``);
+		});
+
+		test('a folder is its listing: the folders first, then the files', async () => {
+			const { registry } = await send([file('/project/dir', { displayKind: 'directory' })], { files: { '/project/dir/b.ts': '', '/project/dir/sub/c.ts': '', '/project/dir/a.ts': '' } });
+
+			assert.deepStrictEqual(texts(sentParts(registry)).slice(1), [`Attached folder: ${fsPath('/project/dir')}\n\`\`\`\nsub/\na.ts\nb.ts\n\`\`\``]);
+		});
+
+		test('pasted text is text too, and what cannot be used is said, not dropped', async () => {
+			const embedded = (label: string, contentType: string, content: string): MessageAttachment => ({ type: MessageAttachmentKind.EmbeddedResource, label, contentType, data: encodeBase64(VSBuffer.fromString(content)) });
+			const { registry } = await send([
+				embedded('notes.txt', 'text/plain', 'remember this'),
+				{ type: MessageAttachmentKind.Simple, label: 'Page', modelRepresentation: 'The page says hi.' },
+				{ type: MessageAttachmentKind.Simple, label: 'a command' },
+				embedded('doc.pdf', 'application/pdf', '%PDF'),
+				file('/project/missing.ts'),
+				file('/project/bin.dat'),
+				{ type: MessageAttachmentKind.Annotations, label: 'Comments', resource: 'ahp-session:/x/annotations' },
+			], { files: { '/project/bin.dat': 'PK\u0000\u0001' } });
+
+			const [, notes, page, pdf, missing, binary, comments, ...others] = texts(sentParts(registry));
+			assert.strictEqual(notes, 'Attached "notes.txt":\n```\nremember this\n```');
+			assert.strictEqual(page, 'Attached context "Page":\n```\nThe page says hi.\n```');
+			assert.strictEqual(pdf, 'The user attached "doc.pdf" (application/pdf), which this agent cannot read.');
+			assert.ok(missing.startsWith(`The user attached the file "missing.ts" (${fsPath('/project/missing.ts')}), but it could not be read: `), missing);
+			assert.strictEqual(binary, `The user attached the file ${fsPath('/project/bin.dat')}, which is binary: it is not shown.`);
+			assert.strictEqual(comments, 'The user attached review comments ("Comments"), which this agent cannot read.');
+			assert.deepStrictEqual(others, [], 'a command has nothing for the model');
+		});
+
+		suite('images', () => {
+			const embeddedImage = (data = png, contentType = 'image/png'): MessageAttachment => ({ type: MessageAttachmentKind.EmbeddedResource, label: 'shot.png', displayKind: 'image', contentType, data });
+
+			test('are sent as media to a model that sees images, from the data of the message or from a file', async () => {
+				const fromFile = file('/project/photo.png', { displayKind: 'image', _meta: toHostSnapshotAttachmentMeta('image/png') });
+				const { registry } = await send([embeddedImage(), fromFile], { files: { '/project/photo.png': 'fake-png-bytes' } });
+
+				assert.deepStrictEqual(sentParts(registry).slice(1), [
+					{ type: 'text', text: 'Attached image: shot.png' }, { type: 'image', mimeType: 'image/png', data: png },
+					{ type: 'text', text: 'Attached image: photo.png' }, { type: 'image', mimeType: 'image/png', data: png },
+				]);
+			});
+
+			test('are said to a model that cannot see them, which is sent no image', async () => {
+				const { registry } = await send([embeddedImage()], { model: 'openRouter/qwen/qwen3-coder' });
+
+				assert.deepStrictEqual(sentParts(registry), [
+					{ type: 'text', text: 'What is this?' },
+					{ type: 'text', text: 'The user attached the image "shot.png", but the model cannot see images, so you cannot see it. If the request depends on it, tell the user.' },
+				]);
+			});
+
+			test('that cannot be sent (a type no provider takes, too large) are said too', async () => {
+				const { registry } = await send([embeddedImage(png, 'image/svg+xml'), embeddedImage('A'.repeat(7_000_000))]);
+
+				assert.deepStrictEqual(texts(sentParts(registry)).slice(1), [
+					'The user attached the image "shot.png", which is image/svg+xml: only PNG, JPEG, WebP and GIF images can be sent to the model, so you cannot see it.',
+					'The user attached the image "shot.png", which is larger than 5 MB: it is not sent, so you cannot see it.',
+				]);
+			});
+
+			test('stay in the history, and a model that cannot see them is sent a note in their place', async () => {
+				const { agent, registry, session, chat, data } = await send([embeddedImage()]);
+				registry.window!.results = [text('Still here.')];
+
+				await agent.chats.changeModel(chat, { id: 'openRouter/qwen/qwen3-coder' }, session);
+				await agent.chats.sendMessage(chat, 'And now?', [URI.file('/project')], undefined, 'turn-2');
+
+				assert.deepStrictEqual(texts(sentParts(registry, 1)), ['What is this?', 'Attached image: shot.png', IMAGE_NOT_SEEN_NOTE]);
+				const kept = JSON.parse(data[data.length - 1].providerData as string);
+				assert.deepStrictEqual(kept.history[0].content[2], { type: 'image', mimeType: 'image/png', data: png }, 'the history keeps the image');
+				assert.strictEqual((await agent.chats.getMessages(chat, session))[0].message.text, 'What is this?');
+			});
+		});
+
+		test('stay with the turn: a restored chat shows them, and the model goes on from them', async () => {
+			const resource = file('/project/src/a.ts', { range: { start: { line: 0, character: 8 }, end: { line: 0, character: 16 } } });
+			const embedded: MessageAttachment = { type: MessageAttachmentKind.EmbeddedResource, label: 'notes.txt', displayKind: 'document', contentType: 'text/plain', data: encodeBase64(VSBuffer.fromString('remember this')) };
+			const { agent, session, chat, data } = await send([resource, embedded], { files: { '/project/src/a.ts': 'export const a = 1;' } });
+
+			const turns = await agent.chats.getMessages(chat, session);
+			assert.strictEqual(turns[0].message.text, 'What is this?', 'the message is what the user typed');
+			const expected = [resource, { type: MessageAttachmentKind.Simple, label: 'notes.txt', displayKind: 'document' }];
+			assert.deepStrictEqual(turns[0].message.attachments, expected, 'an embedded attachment is kept without its data');
+
+			const restored = createAgent();
+			restored.registry.window!.results = [text('Back.')];
+			await restored.agent.materializeChat(chat, session, data[data.length - 1].providerData);
+			assert.deepStrictEqual((await restored.agent.chats.getMessages(chat, session))[0].message.attachments, expected);
+			await restored.agent.chats.sendMessage(chat, 'And now?', [URI.file('/project')], undefined, 'turn-2');
+			assert.deepStrictEqual(texts(sentParts(restored.registry)), [
+				'What is this?',
+				`Attached file: ${fsPath('/project/src/a.ts')}\n\`\`\`\nexport const a = 1;\n\`\`\``,
+				'Attached "notes.txt":\n```\nremember this\n```',
+			], 'what the model was sent is what it is sent again');
+		});
+
+		test('a chat saved before attachments still loads', async () => {
+			const { agent } = createAgent();
+			const { session, chat } = newChat();
+			const providerData = JSON.stringify({
+				history: [
+					{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Hi' }] },
+					{ type: 'message', role: 'assistant', content: [{ type: 'text', text: 'Hello' }] },
+				],
+				turnIds: ['turn-1'],
+				createdAt: 1,
+			});
+
+			await agent.materializeChat(chat, session, providerData);
+
+			const turns = await agent.chats.getMessages(chat, session);
+			assert.deepStrictEqual(turns.map(t => [t.id, t.message.text, t.message.attachments]), [['turn-1', 'Hi', undefined]]);
+		});
+
+		test('count in the context window: a conversation they make too long is made smaller', async () => {
+			// a model with a window of 1,000 tokens: the history may take 800 before it is made smaller
+			const tiny: IByokLmModelInfo = { vendor: 'tiny', id: 'tiny-1', name: 'tiny-1', maxContextWindowTokens: 1_000 };
+			const { agent, registry, write } = createAgent();
+			registry.setModels([gemini, openRouter, tiny]);
+			await write('/project/big.txt', 'x'.repeat(3_000));
+			registry.window!.results = [text('First answer.'), text('- The user said one.'), text('Second answer.')];
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [URI.file('/project')], model: { id: 'tiny/tiny-1' } });
+
+			await agent.chats.sendMessage(chat, 'one', [URI.file('/project')], undefined, 'turn-1');
+			await agent.chats.sendMessage(chat, 'two', [URI.file('/project')], [file('/project/big.txt')], 'turn-2');
+
+			assert.strictEqual(registry.window!.requests.length, 3, 'the older messages were summarized before the request');
+			assert.strictEqual(registry.window!.requests[1].instructions, summarizeThread_systemMessage);
+		});
+	});
+
 	suite('a reply the model cut at its output limit', () => {
 		const cut = (partial: string): IByokLmChatResult => ({ ...text(partial), reachedOutputLimit: true });
 		const CONTINUE_PROMPT = 'Continue from exactly where you stopped.';

@@ -5,6 +5,7 @@
 
 import type { IByokLmChatResult, IByokLmInputItem, IByokLmOutputItem, IByokLmReasoningItem, IByokLmTool } from '../../../../platform/agentHost/common/agentHostByokLm.js';
 import { InternalToolInfo } from './prompt/prompts.js';
+import type { ChatMedia } from './prepareLLMMessages.js';
 import { AnthropicReasoning, LLMUsage, OnFinalMessage, RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { ToolName } from './toolsServiceTypes.js';
 
@@ -13,9 +14,9 @@ import { ToolName } from './toolsServiceTypes.js';
  * Responses-like items, see `kodiaAgentHostLm.ts`) and Kodia's LLM service.
  */
 
-/** Kodia's simple messages (`IConvertToLLMMessageService.prepareLLMSimpleMessages`), without media. */
+/** Kodia's simple messages (`IConvertToLLMMessageService.prepareLLMSimpleMessages`): a user's message carries the images attached to it. */
 export type KodiaAgentSimpleMessage =
-	| { role: 'user'; content: string }
+	| { role: 'user'; content: string; media?: ChatMedia[] }
 	| { role: 'assistant'; content: string; anthropicReasoning: AnthropicReasoning[] | null }
 	| { role: 'tool'; content: string; id: string; name: ToolName; rawParams: RawToolParamsObj };
 
@@ -69,13 +70,15 @@ export function toSimpleMessages(input: readonly IByokLmInputItem[]): KodiaAgent
 	for (const item of input) {
 		switch (item.type) {
 			case 'message': {
-				const text = item.content.map(part => part.type === 'text' ? part.text : '').join('');
 				if (item.role === 'assistant') {
-					messages.push({ role: 'assistant', content: text, anthropicReasoning: reasoning });
+					messages.push({ role: 'assistant', content: item.content.map(part => part.type === 'text' ? part.text : '').join(''), anthropicReasoning: reasoning });
 					reasoning = null;
 					inResponse = true;
 				} else if (item.role === 'user') {
-					messages.push({ role: 'user', content: text });
+					// the prompt, then each of the attachments the agent put after it, as a text part
+					const text = item.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n\n');
+					const media = item.content.flatMap((part): ChatMedia[] => part.type === 'image' ? [{ kind: 'image', mimeType: part.mimeType, dataBase64: part.data }] : []);
+					messages.push({ role: 'user', content: text, ...media.length ? { media } : {} });
 					inResponse = false;
 				}
 				break;

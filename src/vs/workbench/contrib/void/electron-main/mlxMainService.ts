@@ -4,9 +4,12 @@
  *--------------------------------------------------------------------------------------*/
 
 import { spawn, type ChildProcess } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
 import { promisify } from 'util';
-import { exec as _exec } from 'child_process';
+import { exec as _exec, execFile as _execFile } from 'child_process';
 import { isMacintosh } from '../../../../base/common/platform.js';
+import { IMlxInstall, newestMlxInstall, pythonOfScript, versionFromOutput, wellKnownPythons } from '../common/mlxInstalls.js';
 import {
 	MLX_DEFAULT_MODEL,
 	MLX_DEFAULT_PORT,
@@ -15,6 +18,7 @@ import {
 } from '../common/mlxTypes.js';
 
 const exec = promisify(_exec);
+const execFile = promisify(_execFile);
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -123,22 +127,73 @@ export class MlxMainService implements IMlxMainService {
 		return null;
 	}
 
+	/**
+	 * The command that starts the newest mlx-lm of this Mac: the installs on the PATH and in the usual places are looked at
+	 * (see mlxInstalls.ts), and the one with the newest version wins, as a new model can need a recent mlx-lm. The Python
+	 * found on the PATH is the one of a tie, and the one that is tried when none of them has mlx-lm.
+	 */
 	private async _resolveMlxServerCommand(pythonPath: string): Promise<MlxServerCommand | null> {
-		try {
-			const { stdout } = await exec('which mlx_lm.server', { timeout: 5_000 });
-			const path = stdout.trim();
-			if (path) {
-				return { command: path, baseArgs: [] };
-			}
-		} catch {
-			// fall through
-		}
+		const best = newestMlxInstall(await this._findMlxInstalls(pythonPath));
+		return best ? { command: best.python, baseArgs: ['-m', 'mlx_lm.server'] } : null;
+	}
 
+	private async _findMlxInstalls(pythonPath: string): Promise<IMlxInstall[]> {
+		const candidates: string[] = [pythonPath];
+		for (const command of ['python3', 'python']) {
+			candidates.push(...await this._whichAll(command));
+		}
+		// the Python an `mlx_lm.server` on the PATH runs on
+		for (const script of await this._whichAll('mlx_lm.server')) {
+			try {
+				const python = pythonOfScript(await fs.promises.readFile(script, { encoding: 'utf8', flag: 'r' }));
+				if (python) {
+					candidates.push(...python.startsWith('/') ? [python] : await this._whichAll(python));
+				}
+			} catch {
+				// a binary, or unreadable: not a script to read
+			}
+		}
+		let frameworkVersions: string[] = [];
 		try {
-			await exec(`"${pythonPath}" -m mlx_lm.server --help`, { timeout: 10_000 });
-			return { command: pythonPath, baseArgs: ['-m', 'mlx_lm.server'] };
+			frameworkVersions = (await fs.promises.readdir('/Library/Frameworks/Python.framework/Versions')).filter(name => /^\d/.test(name));
 		} catch {
-			return null;
+			// no python.org install
+		}
+		candidates.push(...wellKnownPythons(os.homedir(), frameworkVersions));
+
+		const installs: IMlxInstall[] = [];
+		const seen = new Set<string>();
+		for (const candidate of candidates) {
+			let real: string;
+			try {
+				real = await fs.promises.realpath(candidate);
+			} catch {
+				continue; // not there
+			}
+			if (seen.has(real)) {
+				continue;
+			}
+			seen.add(real);
+			try {
+				const { stdout } = await execFile(candidate, ['-c', 'import importlib.metadata as m; print(m.version("mlx-lm"))'], { timeout: 10_000 });
+				const version = versionFromOutput(stdout);
+				if (version) {
+					installs.push({ python: candidate, version });
+				}
+			} catch {
+				// no mlx-lm on this Python
+			}
+		}
+		return installs;
+	}
+
+	/** Every place `command` is found on the PATH, the first one first. */
+	private async _whichAll(command: string): Promise<string[]> {
+		try {
+			const { stdout } = await exec(`which -a ${command}`, { timeout: 5_000 });
+			return stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'));
+		} catch {
+			return [];
 		}
 	}
 

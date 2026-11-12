@@ -39,6 +39,16 @@ suite('kodiaAgentHostLmMessages', () => {
 		]);
 	});
 
+	test('sends the images attached to a message of the user as media, after its prompt and attachments as one text', () => {
+		assert.deepStrictEqual(toSimpleMessages([
+			{ type: 'message', role: 'user', content: [{ type: 'text', text: 'What is this?' }, { type: 'text', text: 'Attached file: a.ts' }, { type: 'text', text: 'Attached image: shot.png' }, { type: 'image', mimeType: 'image/png', data: 'AAAA' }] },
+			{ type: 'message', role: 'assistant', content: [{ type: 'text', text: 'A ' }, { type: 'text', text: 'file.' }] },
+		]), [
+			{ role: 'user', content: 'What is this?\n\nAttached file: a.ts\n\nAttached image: shot.png', media: [{ kind: 'image', mimeType: 'image/png', dataBase64: 'AAAA' }] },
+			{ role: 'assistant', content: 'A file.', anthropicReasoning: null },
+		]);
+	});
+
 	test('leaves out a tool call without a result', () => {
 		assert.deepStrictEqual(toSimpleMessages([
 			{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Hi' }] },

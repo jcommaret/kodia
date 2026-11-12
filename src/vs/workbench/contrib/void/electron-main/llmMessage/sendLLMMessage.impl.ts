@@ -24,7 +24,7 @@ import { geminiParametersOfTool, jsonSchemaOfTool } from '../../common/toolSchem
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
 import { mlxMaxOutputTokens, withOutputLimitNotice } from '../../common/outputLimit.js';
-import { mlxErrorWithHint } from '../../common/mlxInstalls.js';
+import { mlxErrorWithHint, withoutEndOfTurnTokens } from '../../common/mlxInstalls.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
 import { createHash } from 'crypto';
 
@@ -688,6 +688,8 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 
 	let fullReasoningSoFar = ''
 	let fullTextSoFar = ''
+	// mlx_lm.server writes the model's end-of-turn token at the end of a reply
+	const shownText = (text: string) => providerName === 'mlx' ? withoutEndOfTurnTokens(text) : text
 
 	// one entry per parallel tool call; deltas name the call they extend by `index`
 	const streamedToolCalls: StreamedToolCall[] = []
@@ -737,7 +739,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 
 				// call onText
 				onText({
-					fullText: fullTextSoFar,
+					fullText: shownText(fullTextSoFar),
 					fullReasoning: fullReasoningSoFar,
 					toolCall: streamingToolCallOf(streamedToolCalls),
 				})
@@ -749,7 +751,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 				onError({ message: 'Kodia: Response from model was empty.', fullError: null })
 			}
 			else {
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage });
+				onFinalMessage({ fullText: shownText(fullTextSoFar), fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage });
 			}
 		})
 		// when error/fail - this catches errors of both .create() and .then(for await)

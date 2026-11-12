@@ -97,3 +97,12 @@ export function mlxErrorWithHint(message: string): string {
 		? `${message}\nThe mlx-lm that serves this model is too old for the "${unsupported[1]}" architecture. Update it with: python3 -m pip install --upgrade mlx-lm, then stop the running mlx_lm.server so that Kodia starts the new one.`
 		: message;
 }
+
+// mlx_lm.server ends a reply with the model's end-of-turn token as text (Qwen's `<|im_end|>`, Llama's `<|eot_id|>`...)
+// instead of stopping before it: the chat showed it at the end of every answer.
+const END_OF_TURN_TOKENS = /(?:<\|im_end\|>|<\|endoftext\|>|<\|eot_id\|>|<\|end_of_text\|>|<\|end\|>|<\/s>)+\s*$/;
+
+/** The reply without the end-of-turn tokens that end it: whatever comes before them is left as it is. */
+export function withoutEndOfTurnTokens(text: string): string {
+	return text.replace(END_OF_TURN_TOKENS, '');
+}

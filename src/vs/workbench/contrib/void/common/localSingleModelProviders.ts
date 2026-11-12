@@ -6,11 +6,6 @@
 import { defaultModelsOfProvider } from './modelCapabilities.js';
 import { ProviderName, VoidStatefulModelInfo } from './voidSettingsTypes.js';
 
-/** One loaded model per endpoint (mlx_lm.server). */
-export const singleAutodetectedLocalProviders = ['mlx'] as const satisfies ProviderName[]
-
-export type SingleAutodetectedLocalProvider = typeof singleAutodetectedLocalProviders[number]
-
 /** Map legacy / alias API ids to one canonical name per provider (avoids duplicate list entries). */
 export const canonicalModelNameForProvider = (providerName: ProviderName, modelName: string): string => {
 	const lower = modelName.toLowerCase()
@@ -85,26 +80,9 @@ export const dedupeProviderModels = (providerName: ProviderName, models: VoidSta
 	return deduped
 }
 
+// A recent mlx_lm.server lists every model of the Hugging Face cache, not the one it was started with, and loads the one a
+// request names: Kodia lists them all, as for the other local servers, instead of the first of them, which was not the one
+// the user started (Qwen2.5-Coder) but whichever the cache listed first.
 export const normalizeAutodetectedModelNamesForProvider = (providerName: ProviderName, modelNames: string[]): string[] => {
-	if (providerName === 'mlx') {
-		const unique = [...new Set(modelNames.map(n => canonicalModelNameForProvider(providerName, n)))]
-		return unique.length > 0 ? [unique[0]] : []
-	}
-	return modelNames.map(n => canonicalModelNameForProvider(providerName, n))
-}
-
-export const consolidateSingleAutodetectedProviderModels = (
-	providerName: SingleAutodetectedLocalProvider,
-	mergedModels: VoidStatefulModelInfo[],
-): VoidStatefulModelInfo[] => {
-	const customModels = mergedModels.filter(m => m.type === 'custom')
-	const autodetected = mergedModels.find(m => m.type === 'autodetected')
-	if (!autodetected) {
-		return customModels
-	}
-	const primary: VoidStatefulModelInfo = { ...autodetected, type: 'autodetected' }
-	return dedupeProviderModels(providerName, [
-		primary,
-		...customModels.filter(m => canonicalModelNameForProvider(providerName, m.modelName).toLowerCase() !== primary.modelName.toLowerCase()),
-	])
+	return [...new Set(modelNames.map(n => canonicalModelNameForProvider(providerName, n)))]
 }

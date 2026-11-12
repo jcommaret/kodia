@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { compareVersions, mlxErrorWithHint, newestMlxInstall, pythonOfScript, versionFromOutput, wellKnownPythons } from '../../common/mlxInstalls.js';
+import { compareVersions, mlxErrorWithHint, newestMlxInstall, pythonOfScript, versionFromOutput, wellKnownPythons, withoutEndOfTurnTokens } from '../../common/mlxInstalls.js';
 
 suite('Kodia - the mlx-lm installs of a Mac', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -61,5 +61,15 @@ suite('Kodia - the mlx-lm installs of a Mac', () => {
 		assert.ok(hinted.startsWith('Error: (KodiaModelError) Error: 404 Model type qwen3_5 not supported.'));
 		assert.ok(hinted.includes('"qwen3_5" architecture') && hinted.includes('pip install --upgrade mlx-lm'));
 		assert.strictEqual(mlxErrorWithHint('Error: connect ECONNREFUSED 127.0.0.1:8080'), 'Error: connect ECONNREFUSED 127.0.0.1:8080');
+	});
+
+	test('drops the end-of-turn token the server writes at the end of a reply, and only there', () => {
+		assert.strictEqual(withoutEndOfTurnTokens('It should work.<|im_end|>'), 'It should work.');
+		assert.strictEqual(withoutEndOfTurnTokens('It should work.<|im_end|>\n'), 'It should work.');
+		assert.strictEqual(withoutEndOfTurnTokens('Done.<|eot_id|><|end_of_text|>'), 'Done.');
+		assert.strictEqual(withoutEndOfTurnTokens('Done.</s>'), 'Done.');
+		// a token in the middle is the model's text, as in an answer about tokens
+		assert.strictEqual(withoutEndOfTurnTokens('Qwen ends a turn with <|im_end|> and then stops.'), 'Qwen ends a turn with <|im_end|> and then stops.');
+		assert.strictEqual(withoutEndOfTurnTokens('No token here.'), 'No token here.');
 	});
 });

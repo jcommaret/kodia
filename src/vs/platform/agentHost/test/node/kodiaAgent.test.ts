@@ -176,7 +176,7 @@ suite('KodiaAgent', () => {
 		const request = registry.window!.requests[0];
 		assert.strictEqual(request.vendor, 'openRouter');
 		assert.strictEqual(request.modelId, 'qwen/qwen3-coder');
-		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory']);
+		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show']);
 		assert.deepStrictEqual(request.input, [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Hi' }] }]);
 		assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatTurnComplete]);
 
@@ -349,7 +349,7 @@ suite('KodiaAgent', () => {
 	});
 
 	test('has only its own tools when the window offers no MCP tools, or can\'t list them', async () => {
-		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory'];
+		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show'];
 		for (const mcp of [undefined, { tools: [issueSearch], result: { isError: false, output: '' }, calls: [], listError: new Error('MCP is not ready.') }]) {
 			const { agent, registry } = createAgent();
 			registry.window!.mcp = mcp;
@@ -655,7 +655,7 @@ suite('KodiaAgent', () => {
 	});
 	suite('the editor tools, which an editor window runs', () => {
 
-		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory'];
+		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show'];
 		const definition: IKodiaMcpToolResult = { isError: false, output: 'src/a.ts:12\n```\nfunction a() {}\n```' };
 		const editorWindow = (result = definition) => { const window = new FakeKodiaWindow(); window.editor = { names: [...editorToolNames], result, calls: [] }; return window; };
 		const agentsWindow = () => { const window = new FakeKodiaWindow(); window.editor = { names: [], result: definition, calls: [] }; return window; };

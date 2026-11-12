@@ -33,6 +33,7 @@ import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
 import { projectMemoryPrompt } from '../../../kodia/common/projectMemory.js';
 import { summarizeThread_systemMessage, summarizeThread_userMessage, summaryTranscriptMaxChars, transcriptForSummary } from '../../../kodia/common/threadSummary.js';
 import { editorToolNames, isEditorToolName } from '../../../kodia/common/toolCatalog.js';
+import { GIT_FUNCTION_TOOLS, gitToolNames } from './kodiaGitTools.js';
 import { approvalOfTool, describeKodiaToolCall, editorFunctionTools, editorToolArguments, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
 
 /**
@@ -486,7 +487,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 			const autoApprove = await this._autoApprove(connection);
 			// and the editor tools (language server, lint errors), when an editor window is open to run them
 			const editor = await this._editorTools(connection);
-			const tools = [...KODIA_TOOLS, ...editorFunctionTools(editor?.names ?? []), ...[...mcpTools.values()].map(mcpFunctionTool)];
+			const tools = [...KODIA_TOOLS, ...GIT_FUNCTION_TOOLS, ...editorFunctionTools(editor?.names ?? []), ...[...mcpTools.values()].map(mcpFunctionTool)];
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				await this._fitContext(connection, session, model, signal);
 				if (signal.aborted) {
@@ -695,7 +696,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 			return new Map();
 		}
 		try {
-			const ownTools = new Set<string>([...KODIA_TOOLS.map(tool => tool.name), ...editorToolNames]);
+			const ownTools = new Set<string>([...KODIA_TOOLS.map(tool => tool.name), ...gitToolNames, ...editorToolNames]);
 			return new Map((await connection.listMcpTools()).filter(tool => !ownTools.has(tool.name)).map(tool => [tool.name, tool]));
 		} catch (err) {
 			this._logService.warn(`[Kodia] Could not list the MCP tools of the Kodia window: ${err}`);

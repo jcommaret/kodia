@@ -48,7 +48,7 @@ const sections: { id: SectionId, label: string, Section: React.ComponentType, ke
 		id: 'instructions', label: 'Instructions & Context', Section: InstructionsSection, keywordsOfGroup: {
 			'Instructions': ['prompt', 'system prompt', 'rules', 'guidelines', 'custom instructions'],
 			'Rules files': ['rules', '.voidrules', 'agents.md', 'claude.md', '.cursorrules', '.windsurfrules'],
-			'Frameworks': ['guidelines', 'karpathy', 'clean code', 'books', 'download'],
+			'Frameworks': ['guidelines', 'karpathy', 'bmad', 'clean code', 'books', 'download'],
 			'Skills': ['skill.md', 'superpowers', 'bmad', '.claude/skills', '.agents/skills', '.kodia/skills'],
 			'Project memory': ['memory', 'notes', '.kodia/memory.md', 'write_project_memory'],
 			'Advanced': ['system message', 'disable system message'],

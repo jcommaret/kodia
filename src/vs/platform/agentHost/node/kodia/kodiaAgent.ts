@@ -158,6 +158,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 			this._terminals.shutdownChat(chat);
 			this._chats.deleteAndDispose(chat.toString());
 		},
+		// A command a terminal of the chat left running shows as background work in the chat's state, which idle eviction
+		// would drop while the command goes on: the chat is not released until it ends.
+		canReleaseChat: async chat => !this._terminals.hasBackgroundWork(chat),
 		// The backing is plain data; keep it so a later send continues the chat.
 		releaseChat: async () => { },
 		sendMessage: (chat, prompt, workingDirectoriesOrDirectory, attachments, turnId) => {
@@ -183,6 +186,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 	) {
 		super();
 		this._terminals = this._register(new KodiaTerminals(terminalManager, this._logService));
+		// a command a terminal left running goes on after its tool call: the chat shows it, outside of any turn
+		this._register(this._terminals.onDidChangeBackgroundWork(({ chat, action }) => this._onDidChatProgress.fire({ kind: 'action', resource: chat, action })));
 		this._publishModels();
 		this._register(this._bridge.onDidChangeModels(() => this._publishModels()));
 	}

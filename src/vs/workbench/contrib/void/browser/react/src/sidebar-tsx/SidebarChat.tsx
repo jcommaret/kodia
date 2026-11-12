@@ -1399,12 +1399,17 @@ const AssistantMessageComponent = ({ chatMessage, isCheckpointGhost, isCommitted
 	const hasReasoning = !!reasoningStr
 	const isDoneReasoning = !!chatMessage.displayContent
 	const thread = chatThreadsService.getCurrentThread()
-
+	const isThreadRunning = !!useChatThreadsStreamState(thread.id)?.isRunning
 
 	const chatMessageLocation: ChatMessageLocation = {
 		threadId: thread.id,
 		messageIdx: messageIdx,
 	}
+
+	// a reply the model cut at its output limit can be continued, while it is the last thing in the thread
+	let lastMessageIdx = thread.messages.length - 1
+	while (lastMessageIdx >= 0 && thread.messages[lastMessageIdx].role === 'checkpoint') lastMessageIdx -= 1
+	const canContinue = !!chatMessage.reachedOutputLimit && isCommitted && !isThreadRunning && messageIdx === lastMessageIdx
 
 	const isEmpty = !chatMessage.displayContent && !chatMessage.reasoning
 	if (isEmpty) return null
@@ -1439,9 +1444,36 @@ const AssistantMessageComponent = ({ chatMessage, isCheckpointGhost, isCommitted
 				</ProseWrapper>
 			</div>
 		}
+
+		{/* the model stopped at its output limit */}
+		{canContinue &&
+			<div className={`${isCheckpointGhost ? 'opacity-50' : ''} mt-2 mb-1`}>
+				<button
+					type='button'
+					onClick={() => { chatThreadsService.addUserMessageAndStreamResponse({ userMessage: CONTINUE_MESSAGE, threadId: thread.id }) }}
+					className={`
+						flex items-center gap-1.5
+						px-3 py-1.5
+						bg-[var(--vscode-button-background)]
+						text-[var(--vscode-button-foreground)]
+						hover:bg-[var(--vscode-button-hoverBackground)]
+						rounded
+						text-sm font-semibold
+						cursor-pointer
+						shadow-md
+					`}
+				>
+					Continue
+					<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></svg>
+				</button>
+			</div>
+		}
 	</>
 
 }
+
+// what the Continue button sends: the model finishes its reply from where it stopped
+const CONTINUE_MESSAGE = 'Continue from exactly where you stopped.'
 
 const ReasoningWrapper = ({ isDoneReasoning, isStreaming, children }: { isDoneReasoning: boolean, isStreaming: boolean, children: React.ReactNode }) => {
 	const isDone = isDoneReasoning || !isStreaming

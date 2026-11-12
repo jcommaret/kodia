@@ -118,7 +118,8 @@ export type LLMUsage = {
 // toolCall: the call currently being streamed (the latest one, when a turn makes several) — for display only
 export type OnText = (p: { fullText: string; fullReasoning: string; toolCall?: RawToolCallObj }) => void
 // toolCalls: every call of the turn, in the order the model made them (models can call several tools at once)
-export type OnFinalMessage = (p: { fullText: string; fullReasoning: string; toolCalls?: RawToolCallObj[]; anthropicReasoning: AnthropicReasoning[] | null; usage?: LLMUsage }) => void // id is tool_use_id
+// reachedOutputLimit: the model stopped at its output limit, in the middle of its reply: the chat offers to continue it
+export type OnFinalMessage = (p: { fullText: string; fullReasoning: string; toolCalls?: RawToolCallObj[]; anthropicReasoning: AnthropicReasoning[] | null; usage?: LLMUsage; reachedOutputLimit?: boolean }) => void // id is tool_use_id
 export type OnError = (p: { message: string; fullError: Error | null }) => void
 export type OnAbort = () => void
 export type AbortRef = { current: (() => void) | null }

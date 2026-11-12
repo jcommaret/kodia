@@ -667,7 +667,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 	// a reply that stops at the model's output limit says so (after the wrappers below have taken the reasoning and the tools out of it)
 	let reachedOutputLimit = false
 	const onFinalMessageWithNotice = onFinalMessage
-	onFinalMessage = message => onFinalMessageWithNotice({ ...message, fullText: withOutputLimitNotice(message.fullText, reachedOutputLimit) })
+	onFinalMessage = message => onFinalMessageWithNotice({ ...message, fullText: withOutputLimitNotice(message.fullText, reachedOutputLimit), ...(reachedOutputLimit ? { reachedOutputLimit } : {}) })
 
 	// open source models - manually parse think tokens
 	const { needsManualParse: needsManualReasoningParse, nameOfFieldInDelta: nameOfReasoningFieldInDelta } = providerReasoningIOSettings?.output ?? {}
@@ -939,7 +939,7 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 	// a reply that stops at the model's output limit says so
 	let reachedOutputLimit = false
 	const onFinalMessageWithNotice = onFinalMessage
-	onFinalMessage = message => onFinalMessageWithNotice({ ...message, fullText: withOutputLimitNotice(message.fullText, reachedOutputLimit) })
+	onFinalMessage = message => onFinalMessageWithNotice({ ...message, fullText: withOutputLimitNotice(message.fullText, reachedOutputLimit), ...(reachedOutputLimit ? { reachedOutputLimit } : {}) })
 
 	// manually parse out tool results if XML
 	if (!specialToolFormat) {
@@ -1293,7 +1293,7 @@ const sendGeminiChat = async ({
 			if (!fullTextSoFar && !fullReasoningSoFar && toolCalls.length === 0) {
 				onError({ message: 'Kodia: Response from model was empty.', fullError: null })
 			} else {
-				onFinalMessage({ fullText: withOutputLimitNotice(fullTextSoFar, reachedOutputLimit), fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage });
+				onFinalMessage({ fullText: withOutputLimitNotice(fullTextSoFar, reachedOutputLimit), fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage, ...(reachedOutputLimit ? { reachedOutputLimit } : {}) });
 			}
 		})
 		.catch(error => {

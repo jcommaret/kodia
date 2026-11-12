@@ -18,11 +18,12 @@ import { FileService } from '../../../files/common/fileService.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentChatDataChange, type IAgentToolPendingConfirmationSignal } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import { buildDefaultChatUri, ResponsePartKind, ToolCallConfirmationReason } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
+import { editorToolNames } from '../../../kodia/common/toolCatalog.js';
 import { CLEARED_TOOL_RESULT, summarizedThreadMessage, summarizeThread_systemMessage } from '../../../kodia/common/threadSummary.js';
 
 /** A Kodia window: replays scripted results and records each request and its token. */
@@ -42,6 +43,19 @@ class FakeKodiaWindow implements IByokLmBridgeConnection {
 	get getAutoApprove() {
 		const setting = this.autoApprove;
 		return setting && (async () => { if (setting instanceof Error) { throw setting; } return setting; });
+	}
+
+	/** The editor tools this window runs: an editor window offers them, the Agents Window an empty list; undefined for an older window. */
+	editor: { names: string[]; result: IKodiaMcpToolResult; calls: { name: string; argsJson: string }[]; listError?: Error } | undefined;
+
+	get listEditorTools() {
+		const editor = this.editor;
+		return editor && (async () => { if (editor.listError) { throw editor.listError; } return editor.names; });
+	}
+
+	get callEditorTool() {
+		const editor = this.editor;
+		return editor && (async (name: string, argsJson: string) => { editor.calls.push({ name, argsJson }); return editor.result; });
 	}
 
 	get listMcpTools() {
@@ -70,10 +84,13 @@ class FakeBridgeRegistry implements IByokLmBridgeRegistry {
 	private readonly _listeners = new Set<() => void>();
 	models: IByokLmModelInfo[] = [];
 	window: FakeKodiaWindow | undefined = new FakeKodiaWindow();
+	/** The other windows that serve the models: the one serving the turn is `window`. */
+	others: FakeKodiaWindow[] = [];
 
 	register(): IDisposable { return toDisposable(() => { }); }
 	getModels(): readonly IByokLmModelInfo[] { return this.window ? this.models : []; }
 	getServingConnection(): IByokLmBridgeConnection | undefined { return this.window; }
+	getServingConnections(): readonly IByokLmBridgeConnection[] { return this.window ? [this.window, ...this.others] : []; }
 	onDidChangeModels(listener: () => void): IDisposable {
 		this._listeners.add(listener);
 		return toDisposable(() => this._listeners.delete(listener));
@@ -634,6 +651,118 @@ suite('KodiaAgent', () => {
 			assert.deepStrictEqual(approvalRequests(signals), []);
 			const ready = readyOf(signals, 'call-1');
 			assert.ok(ready && ready.type === ActionType.ChatToolCallReady && ready.confirmed === ToolCallConfirmationReason.NotNeeded);
+		});
+	});
+	suite('the editor tools, which an editor window runs', () => {
+
+		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory'];
+		const definition: IKodiaMcpToolResult = { isError: false, output: 'src/a.ts:12\n```\nfunction a() {}\n```' };
+		const editorWindow = (result = definition) => { const window = new FakeKodiaWindow(); window.editor = { names: [...editorToolNames], result, calls: [] }; return window; };
+		const agentsWindow = () => { const window = new FakeKodiaWindow(); window.editor = { names: [], result: definition, calls: [] }; return window; };
+		const call = (name: string, args: object, callId = 'call-1') => ({ output: [{ type: 'function_call' as const, callId, name, argumentsJson: JSON.stringify(args) }] });
+		const readyOf = (signals: readonly AgentSignal[], toolCallId: string) => signals.filter((s): s is IAgentActionSignal => s.kind === 'action')
+			.map(s => s.action).find(a => a.type === ActionType.ChatToolCallReady && a.toolCallId === toolCallId);
+		const approvalRequests = (signals: readonly AgentSignal[]) => signals.filter((s): s is IAgentToolPendingConfirmationSignal => s.kind === 'pending_confirmation');
+
+		async function runTurn(registry: FakeBridgeRegistry, agent: KodiaAgent, prompt = 'Where is a defined?') {
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+			await agent.chats.sendMessage(chat, prompt, [cwd], undefined, 'turn-1');
+			return signals;
+		}
+
+		test('offers them after its own tools, and runs one in the editor window, without asking and with the path made absolute', async () => {
+			const { agent, registry } = createAgent();
+			const window = registry.window = editorWindow();
+			window.results = [call('go_to_definition', { uri: 'src/a.ts', line: 12, symbol: 'a' }), text('It is in a.ts.')];
+
+			const signals = await runTurn(registry, agent);
+
+			const tools = window.requests[0].tools!;
+			assert.deepStrictEqual(tools.map(t => t.name), [...ownTools, ...editorToolNames]);
+			const definitionTool = tools.find(t => t.name === 'go_to_definition')! as IByokLmFunctionTool;
+			assert.deepStrictEqual((definitionTool.parametersSchema as { required: string[] }).required, ['uri', 'line', 'symbol']);
+			assert.deepStrictEqual((definitionTool.parametersSchema as { properties: { line: { type: string } } }).properties.line.type, 'integer');
+			assert.deepStrictEqual(window.editor!.calls, [{ name: 'go_to_definition', argsJson: JSON.stringify({ uri: URI.joinPath(cwd, 'src/a.ts').fsPath, line: 12, symbol: 'a' }) }]);
+			assert.deepStrictEqual(window.requests[1].input.at(-1), { type: 'function_call_output', callId: 'call-1', output: definition.output });
+			assert.deepStrictEqual(approvalRequests(signals), []);
+			const ready = readyOf(signals, 'call-1');
+			assert.ok(ready && ready.type === ActionType.ChatToolCallReady && ready.confirmed === ToolCallConfirmationReason.NotNeeded, 'a tool that only reads is never asked about');
+			assert.ok(ready.type === ActionType.ChatToolCallReady && ready.invocationMessage === 'Find the definition of "a" in src/a.ts:12');
+		});
+
+		test('an absolute path is sent as it is, and a tool without a path is sent as it is', async () => {
+			const { agent, registry } = createAgent();
+			const window = registry.window = editorWindow();
+			const absolute = URI.joinPath(cwd, 'lib', 'b.ts').fsPath;
+			window.results = [call('read_lint_errors', { uri: absolute }), call('search_symbols', { query: 'getUser' }, 'call-2'), text('Done.')];
+
+			await runTurn(registry, agent);
+
+			assert.deepStrictEqual(window.editor!.calls, [
+				{ name: 'read_lint_errors', argsJson: JSON.stringify({ uri: absolute }) },
+				{ name: 'search_symbols', argsJson: '{"query":"getUser"}' },
+			]);
+		});
+
+		test('asks the other windows when the one serving the model has no editor, as the Agents Window has none', async () => {
+			const { agent, registry } = createAgent();
+			const agents = registry.window = agentsWindow();
+			const editor = editorWindow();
+			registry.others = [editor];
+			agents.results = [call('find_references', { uri: 'src/a.ts', line: 3, symbol: 'a' }), text('Used twice.')];
+
+			await runTurn(registry, agent);
+
+			assert.deepStrictEqual(agents.requests[0].tools!.map(t => t.name), [...ownTools, ...editorToolNames], 'the model runs in the Agents Window, the tools in the editor window');
+			assert.deepStrictEqual(editor.editor!.calls.map(c => c.name), ['find_references']);
+			assert.deepStrictEqual(agents.editor!.calls, []);
+			assert.strictEqual(editor.requests.length, 0, 'the editor window only runs the tool');
+		});
+
+		test('has only its own tools when no window can run them: the Agents Window alone, an older window, or one that can\'t be asked', async () => {
+			for (const window of [agentsWindow(), new FakeKodiaWindow(), (() => { const w = editorWindow(); w.editor!.listError = new Error('Not ready.'); return w; })()]) {
+				const { agent, registry } = createAgent();
+				registry.window = window;
+				window.results = [text('Done.')];
+
+				await runTurn(registry, agent);
+
+				assert.deepStrictEqual(window.requests[0].tools?.map(t => t.name), ownTools);
+			}
+		});
+
+		test('a tool that fails tells the model why, and a long result is cut', async () => {
+			const { agent, registry } = createAgent();
+			const window = registry.window = editorWindow({ isError: true, output: 'No contents; File does not exist.' });
+			window.results = [call('read_lint_errors', { uri: 'missing.ts' }), text('It is missing.')];
+			const signals = await runTurn(registry, agent);
+			assert.deepStrictEqual(window.requests[1].input.at(-1), { type: 'function_call_output', callId: 'call-1', output: 'No contents; File does not exist.' });
+			const complete = signals.filter((s): s is IAgentActionSignal => s.kind === 'action').map(s => s.action).find(a => a.type === ActionType.ChatToolCallComplete);
+			assert.ok(complete && complete.type === ActionType.ChatToolCallComplete && complete.result.success === false);
+
+			const long = createAgent();
+			const longWindow = long.registry.window = editorWindow({ isError: false, output: 'x'.repeat(150_000) });
+			longWindow.results = [call('search_symbols', { query: 'x' }), text('Many.')];
+			await runTurn(long.registry, long.agent);
+			const output = (longWindow.requests[1].input.at(-1) as { output: string }).output;
+			assert.strictEqual(output.length, 100_000 + '\n(The output is cut here.)'.length);
+		});
+
+		test('an MCP tool never takes the name of an editor tool, whether or not an editor window is open', async () => {
+			for (const window of [editorWindow(), new FakeKodiaWindow()]) {
+				const { agent, registry } = createAgent();
+				registry.window = window;
+				window.mcp = { tools: [{ ...issueSearch, name: 'go_to_definition' }, issueSearch], result: { isError: false, output: '' }, calls: [] };
+				window.results = [text('Done.')];
+
+				await runTurn(registry, agent);
+
+				const names = window.requests[0].tools!.map(t => t.name);
+				assert.strictEqual(names.filter(n => n === 'go_to_definition').length, window.editor ? 1 : 0);
+				assert.strictEqual(names.at(-1), 'a1b2_search');
+			}
 		});
 	});
 });

@@ -29,6 +29,10 @@ export interface IKodiaAgentHostLmHandler extends IAgentHostByokLmHandler {
 	callMcpTool(name: string, argsJson: string, token: CancellationToken): Promise<IKodiaMcpToolResult>;
 	/** What the user lets run without asking, in Kodia's settings. */
 	getAutoApprove(token: CancellationToken): Promise<IKodiaAutoApprove>;
+	/** The names of the editor tools this window can run: all of them in an editor window, none in the Agents Window. */
+	listEditorTools(token: CancellationToken): Promise<string[]>;
+	/** Runs one editor tool. A failure is a result with `isError`, not a rejection. */
+	callEditorTool(name: string, argsJson: string, token: CancellationToken): Promise<IKodiaMcpToolResult>;
 }
 
 export const IKodiaAgentHostLmHandler = createDecorator<IKodiaAgentHostLmHandler>('kodiaAgentHostLmHandler');

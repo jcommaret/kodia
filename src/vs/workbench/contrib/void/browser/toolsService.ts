@@ -31,6 +31,7 @@ import { IProjectMemoryService } from '../common/projectMemoryService.js'
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
 import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
+import { IKodiaEditorToolsService } from '../common/kodiaEditorToolsService.js'
 
 
 // tool use for AI
@@ -241,6 +242,7 @@ export class ToolsService implements IToolsService {
 		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
 		@ITextModelService textModelService: ITextModelService,
 		@IMainProcessService mainProcessService: IMainProcessService,
+		@IKodiaEditorToolsService editorToolsService: IKodiaEditorToolsService,
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
 		const webFetchService = ProxyChannel.toService<IKodiaWebFetchService>(mainProcessService.getChannel('void-channel-webFetch'))
@@ -851,8 +853,20 @@ export class ToolsService implements IToolsService {
 			},
 		}
 
-
-
+		// The Kodia agent of the Agents Window asks an editor window to run these: the same validation, call and text as the chat's.
+		editorToolsService.provide({
+			call: async (name, params) => {
+				try {
+					const validated = this.validateParams[name](params)
+					// The language server only reports on a file this window has loaded, and the agent writes to disk: load it, as the chat's other tools do.
+					if ('uri' in validated) await modelOfFile(validated.uri)
+					const { result } = await this.callTool[name](validated as never)
+					return { isError: false, output: this.stringOfResult[name](validated as never, await result as never) }
+				} catch (err) {
+					return { isError: true, output: err instanceof Error ? err.message : String(err) }
+				}
+			},
+		})
 	}
 
 

@@ -13,7 +13,8 @@ import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { getRandomTestPath } from '../../../../base/test/node/testUtils.js';
 import { DIVIDER, FINAL, ORIGINAL } from '../../../kodia/common/searchReplaceBlocks.js';
-import { approvalOfTool, describeKodiaToolCall, executeKodiaTool, IKodiaToolContext, KODIA_TOOLS, needsApproval, toolDisplayName } from '../../node/kodia/kodiaTools.js';
+import { editorToolNames } from '../../../kodia/common/toolCatalog.js';
+import { approvalOfTool, describeKodiaToolCall, editorFunctionTools, editorToolArguments, executeKodiaTool, IKodiaToolContext, KODIA_TOOLS, needsApproval, toolDisplayName } from '../../node/kodia/kodiaTools.js';
 
 const block = (orig: string, final: string) => `${ORIGINAL}\n${orig}\n${DIVIDER}\n${final}\n${FINAL}`;
 
@@ -62,6 +63,45 @@ suite('Kodia agent tools', () => {
 		assert.strictEqual(needsApproval('edit_file'), true);
 		assert.strictEqual(needsApproval('read_file'), false);
 		assert.strictEqual(needsApproval('an_mcp_tool'), false, 'the agent asks for an MCP tool by its own rule');
+	});
+
+	test('offers the editor tools an editor window names, with the chat\'s parameters, and none of them needs approval', () => {
+		const tools = editorFunctionTools(['go_to_definition', 'not_a_tool', 'read_lint_errors']);
+		assert.deepStrictEqual(tools.map(t => t.name), ['go_to_definition', 'read_lint_errors'], 'a name the agent does not know is not offered');
+		assert.deepStrictEqual(editorFunctionTools([]), []);
+
+		const definition = tools[0].parametersSchema as { properties: { [name: string]: { type: string } }, required: string[] };
+		assert.deepStrictEqual(Object.keys(definition.properties), ['uri', 'line', 'symbol']);
+		assert.deepStrictEqual(definition.required, ['uri', 'line', 'symbol']);
+		assert.strictEqual(definition.properties.line.type, 'integer');
+		assert.deepStrictEqual((tools[1].parametersSchema as { required: string[] }).required, ['uri']);
+
+		for (const tool of editorFunctionTools(editorToolNames)) {
+			assert.notStrictEqual(toolDisplayName(tool.name), tool.name, `${tool.name} has a display name`);
+			assert.strictEqual(approvalOfTool(tool.name), undefined, `${tool.name} only reads`);
+			assert.strictEqual(needsApproval(tool.name), false);
+		}
+		assert.deepStrictEqual(editorFunctionTools(editorToolNames).map(t => t.name), ['go_to_definition', 'find_references', 'search_symbols', 'read_lint_errors']);
+	});
+
+	test('describes an editor tool call, and makes the path in its arguments absolute for the window that runs it', () => {
+		const wd = ctx.workingDirectory;
+		const described = (name: string, args: object) => describeKodiaToolCall(name, JSON.stringify(args), wd).invocationMessage;
+		assert.strictEqual(described('go_to_definition', { uri: 'src/a.ts', line: 12, symbol: 'a' }), 'Find the definition of "a" in src/a.ts:12');
+		assert.strictEqual(described('find_references', { uri: 'src/a.ts', line: '3', symbol: 'a' }), 'Find the references to "a" in src/a.ts:3');
+		assert.strictEqual(described('find_references', { uri: 'src/a.ts', symbol: 'a' }), 'Find the references to "a" in src/a.ts');
+		assert.strictEqual(described('search_symbols', { query: 'getUser' }), 'Search the symbols for "getUser"');
+		assert.strictEqual(described('read_lint_errors', { uri: 'src/a.ts' }), 'Read the lint errors of src/a.ts');
+
+		const absolute = join(dir, 'src', 'a.ts');
+		assert.strictEqual(editorToolArguments('{"uri":"src/a.ts","line":12,"symbol":"a"}', wd), JSON.stringify({ uri: absolute, line: 12, symbol: 'a' }), 'a relative path is from the agent\'s working directory, the other arguments stay');
+		assert.strictEqual(editorToolArguments(JSON.stringify({ uri: absolute }), wd), JSON.stringify({ uri: absolute }));
+		assert.strictEqual(editorToolArguments(JSON.stringify({ uri: URI.file(absolute).toString() }), wd), JSON.stringify({ uri: absolute }), 'a file: URI is a path');
+		assert.strictEqual(editorToolArguments('{"query":"getUser"}', wd), '{"query":"getUser"}', 'no path, nothing to make absolute');
+		assert.strictEqual(editorToolArguments('{"uri":"  "}', wd), '{"uri":"  "}');
+		for (const notArguments of ['not json', '[1]', 'null', '"a.ts"']) {
+			assert.strictEqual(editorToolArguments(notArguments, wd), notArguments, 'the window says they are invalid');
+		}
 	});
 
 	test('read_file reads a file as the chat shows it, a range of its lines, or a page', async () => {

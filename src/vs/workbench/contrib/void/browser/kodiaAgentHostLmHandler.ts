@@ -9,10 +9,12 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import type { IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../../../platform/agentHost/common/agentHostByokLm.js';
 import { IKodiaAgentHostLmHandler } from '../../../../platform/agentHost/common/kodiaAgentHostLm.js';
+import { editorToolNames, isEditorToolName } from '../../../../platform/kodia/common/toolCatalog.js';
 import { toInternalTool, toOutput, toSimpleMessages, toUsage } from '../common/kodiaAgentHostLmMessages.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { toolsXMLSystemPrompt } from '../common/prompt/prompts.js';
 import { joinUserInstructions } from '../common/instructionsFrameworks.js';
+import { editorToolParams, IKodiaEditorToolsService } from '../common/kodiaEditorToolsService.js';
 import { coerceMcpArguments, mcpToolsOfServers } from '../common/kodiaMcpTools.js';
 import { IMCPService } from '../common/mcpService.js';
 import { IMlxService } from '../common/mlxService.js';
@@ -37,6 +39,7 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 		@ILLMMessageService private readonly _llmMessageService: ILLMMessageService,
 		@IMlxService private readonly _mlxService: IMlxService,
 		@IMCPService private readonly _mcpService: IMCPService,
+		@IKodiaEditorToolsService private readonly _editorTools: IKodiaEditorToolsService,
 	) {
 		super();
 		this.onDidChangeModels = this._voidSettingsService.onDidChangeState;
@@ -65,6 +68,27 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 		} catch (err) {
 			return { isError: true, output: err instanceof Error ? err.message : String(err) };
 		}
+	}
+
+	// The language server's tools and the lint errors: an editor window runs them, as its chat does. The Agents Window has
+	// no editor, so it offers none and the agent asks another window.
+	async listEditorTools(): Promise<string[]> {
+		return this._editorTools.tools ? [...editorToolNames] : [];
+	}
+
+	async callEditorTool(name: string, argsJson: string): Promise<IKodiaMcpToolResult> {
+		const tools = this._editorTools.tools;
+		if (!tools) {
+			return { isError: true, output: `"${name}" needs an editor window, and this window has none.` };
+		}
+		if (!isEditorToolName(name)) {
+			return { isError: true, output: `No editor tool named "${name}".` };
+		}
+		const params = editorToolParams(argsJson);
+		if (!params) {
+			return { isError: true, output: `Invalid JSON arguments for tool "${name}".` };
+		}
+		return tools.call(name, params);
 	}
 
 	// What the user switched on in Kodia's settings ("Auto-approve"), as the chat honors it: the agent asks about the rest.

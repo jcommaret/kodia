@@ -249,6 +249,13 @@ export interface IByokLmBridgeConnection {
 	callMcpTool?(name: string, argsJson: string, token?: CancellationToken): Promise<IKodiaMcpToolResult>;
 	/** Kodia: the kinds of tool call the user lets run without asking, in Kodia's settings, when the window offers them. */
 	getAutoApprove?(token?: CancellationToken): Promise<IKodiaAutoApprove>;
+	/**
+	 * Kodia: the names of the editor tools (the language server's, the lint errors; see `editorTools` in `toolCatalog.ts`)
+	 * this window can run for the Kodia agent. An editor window can; the Agents Window has no editor, so it says none.
+	 */
+	listEditorTools?(token?: CancellationToken): Promise<string[]>;
+	/** Kodia: runs one of those editor tools in that window. `token` cancels the wait. */
+	callEditorTool?(name: string, argsJson: string, token?: CancellationToken): Promise<IKodiaMcpToolResult>;
 }
 
 /**
@@ -277,6 +284,7 @@ export interface IKodiaMcpTool {
 	readonly inputSchema?: object;
 }
 
+/** What a Kodia window answers for a tool it ran for the Kodia agent: an MCP tool or an editor tool. */
 export interface IKodiaMcpToolResult {
 	readonly isError: boolean;
 	/** Text fed back to the model. */

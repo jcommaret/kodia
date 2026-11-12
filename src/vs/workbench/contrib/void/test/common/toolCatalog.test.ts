@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { jsonSchemaOfSharedTool, nextPageNote, SharedTool, sharedToolNames, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
+import { editorToolNames, editorTools, isEditorToolName, jsonSchemaOfSharedTool, nextPageNote, SharedTool, sharedToolNames, sharedTools } from '../../../../../platform/kodia/common/toolCatalog.js';
 import { availableTools, builtinTools } from '../../common/prompt/prompts.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolName } from '../../common/toolsServiceTypes.js';
 
@@ -48,6 +48,38 @@ suite('Kodia - the tools the chat and the Agents window\'s agent share', () => {
 		for (const name of ['go_to_definition', 'find_references', 'search_symbols', 'read_lint_errors', 'run_persistent_command', 'open_persistent_terminal', 'kill_persistent_terminal', 'read_project_memory']) {
 			assert.ok(!(sharedToolNames as string[]).includes(name), name);
 		}
+	});
+
+	test('the chat tells a model what the catalog says of the editor tools, and offers them all', () => {
+		assert.deepStrictEqual(editorToolNames, ['go_to_definition', 'find_references', 'search_symbols', 'read_lint_errors']);
+		const offered = new Set((availableTools('agent', undefined) ?? []).map(tool => tool.name));
+		for (const name of editorToolNames) {
+			const catalog: SharedTool = editorTools[name];
+			const chat = builtinTools[name];
+			assert.strictEqual(chat.name, name);
+			assert.strictEqual(chat.description, catalog.description, `${name}'s description`);
+			assert.deepStrictEqual(Object.keys(chat.params), Object.keys(catalog.params), `${name}'s parameters`);
+			for (const [paramName, param] of Object.entries(catalog.params)) {
+				assert.strictEqual((chat.params as { [paramName: string]: { description: string } })[paramName].description, param.description, `${name}.${paramName}`);
+			}
+			assert.ok(offered.has(name), `${name} is offered by the chat in Agent mode`);
+			assert.strictEqual(approvalTypeOfBuiltinToolName[name], undefined, `${name} only reads`);
+			assert.ok(!(sharedToolNames as string[]).includes(name), `${name} is not one the agent runs itself`);
+			assert.ok(isEditorToolName(name));
+		}
+		assert.ok(!isEditorToolName('read_file') && !isEditorToolName('toString') && !isEditorToolName('a1b2_search'));
+	});
+
+	test('the editor tools\' schema: every parameter is required, and a line is a number', () => {
+		for (const name of editorToolNames) {
+			const catalog: SharedTool = editorTools[name];
+			const schema = jsonSchemaOfSharedTool(catalog);
+			assert.deepStrictEqual(schema.required, Object.keys(catalog.params), name);
+			assert.ok(Object.values(schema.properties).every(param => param.description.length > 0));
+		}
+		assert.deepStrictEqual(jsonSchemaOfSharedTool(editorTools.go_to_definition).properties.line.type, 'integer');
+		assert.deepStrictEqual(jsonSchemaOfSharedTool(editorTools.find_references).required, ['uri', 'line', 'symbol']);
+		assert.deepStrictEqual(jsonSchemaOfSharedTool(editorTools.search_symbols).required, ['query']);
 	});
 
 	test('a required parameter is a parameter, and a parameter is a string unless it is a number or a flag', () => {

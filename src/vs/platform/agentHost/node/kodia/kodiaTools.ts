@@ -11,7 +11,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { MAX_PROJECT_MEMORY_TOKENS, memoryTooLongMessage, memoryWithSection, PROJECT_MEMORY_FILE_HEADER, PROJECT_MEMORY_FILE_PATH } from '../../../kodia/common/projectMemory.js';
 import { applySearchReplaceBlocks } from '../../../kodia/common/searchReplaceBlocks.js';
-import { jsonSchemaOfSharedTool, nextPageNote, SharedTool, SharedToolApproval, SharedToolName, sharedToolNames, sharedTools } from '../../../kodia/common/toolCatalog.js';
+import { EditorToolName, editorTools, isEditorToolName, jsonSchemaOfSharedTool, nextPageNote, SharedTool, SharedToolApproval, SharedToolName, sharedToolNames, sharedTools } from '../../../kodia/common/toolCatalog.js';
 import { fetchWebPage } from '../../../kodia/node/webFetch.js';
 import type { IByokLmFunctionTool } from '../../common/agentHostByokLm.js';
 
@@ -38,8 +38,8 @@ export interface IKodiaToolResult {
  * The local toolset the Kodia agent offers its models, in the bridge's wire shape: the tools of Kodia's chat that
  * don't need the editor, with the chat's names, parameters and descriptions (see `toolCatalog.ts`), so a skill, a rule
  * or a model's habit means the same in both. Not here: the language server's tools (go_to_definition, find_references,
- * search_symbols, read_lint_errors) and persistent terminals, which need an editor window. The project memory is in the
- * agent's instructions, as in the chat, so there is no read_project_memory.
+ * search_symbols, read_lint_errors), which need an editor window: see {@link editorFunctionTools}. Nor persistent
+ * terminals. The project memory is in the agent's instructions, as in the chat, so there is no read_project_memory.
  */
 export const KODIA_TOOLS: IByokLmFunctionTool[] = sharedToolNames.map(name => ({
 	type: 'function',
@@ -48,7 +48,20 @@ export const KODIA_TOOLS: IByokLmFunctionTool[] = sharedToolNames.map(name => ({
 	parametersSchema: jsonSchemaOfSharedTool(sharedTools[name]),
 }));
 
-const DISPLAY_NAMES: Readonly<Record<SharedToolName, string>> = {
+/**
+ * The editor tools, as the bridge's wire shape, for the names an editor window says it can run (see
+ * `listEditorTools`): the chat's names, parameters and descriptions, like {@link KODIA_TOOLS}.
+ */
+export function editorFunctionTools(names: readonly string[]): IByokLmFunctionTool[] {
+	return names.filter(isEditorToolName).map(name => ({
+		type: 'function',
+		name,
+		description: editorTools[name].description,
+		parametersSchema: jsonSchemaOfSharedTool(editorTools[name]),
+	}));
+}
+
+const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName, string>> = {
 	read_file: 'Read File',
 	ls_dir: 'List Directory',
 	get_dir_tree: 'Directory Tree',
@@ -62,6 +75,10 @@ const DISPLAY_NAMES: Readonly<Record<SharedToolName, string>> = {
 	run_command: 'Run Command',
 	fetch_url: 'Fetch Web Page',
 	write_project_memory: 'Save Project Memory',
+	go_to_definition: 'Go to Definition',
+	find_references: 'Find References',
+	search_symbols: 'Search Symbols',
+	read_lint_errors: 'Read Lint Errors',
 };
 
 function isSharedToolName(name: string): name is SharedToolName {
@@ -69,7 +86,7 @@ function isSharedToolName(name: string): name is SharedToolName {
 }
 
 export function toolDisplayName(name: string): string {
-	return isSharedToolName(name) ? DISPLAY_NAMES[name] : name;
+	return isSharedToolName(name) || isEditorToolName(name) ? DISPLAY_NAMES[name] : name;
 }
 
 /**
@@ -173,9 +190,38 @@ export function describeKodiaToolCall(name: string, argsJson: string, workingDir
 			const verb = { read_file: 'Read', ls_dir: 'List', get_dir_tree: 'Show the tree of', search_in_file: 'Search in', create_file_or_folder: 'Create', delete_file_or_folder: 'Delete', edit_file: 'Edit', rewrite_file: 'Rewrite' }[name];
 			return { invocationMessage: `${verb} ${shown(target)}${lines}`, toolInput: argsJson, path: target };
 		}
+		case 'go_to_definition':
+		case 'find_references': {
+			const verb = name === 'go_to_definition' ? 'Find the definition of' : 'Find the references to';
+			const line = toPositiveInt(args.line);
+			return { invocationMessage: `${verb} "${toStr(args.symbol)}" in ${shown(resolveToolPath(args.uri, root))}${line ? `:${line}` : ''}`, toolInput: argsJson };
+		}
+		case 'search_symbols':
+			return { invocationMessage: `Search the symbols for "${toStr(args.query)}"`, toolInput: argsJson };
+		case 'read_lint_errors':
+			return { invocationMessage: `Read the lint errors of ${shown(resolveToolPath(args.uri, root))}`, toolInput: argsJson };
 		default:
 			return { invocationMessage: toolDisplayName(name), toolInput: argsJson };
 	}
+}
+
+/**
+ * The arguments of an editor tool call with its path made absolute. The editor window that runs the tool has no idea
+ * of the agent's working directory, and the model gives a path relative to it as readily as an absolute one. Arguments
+ * that are not a JSON object are left as they are: the window says they are invalid.
+ */
+export function editorToolArguments(argsJson: string, workingDirectory: URI | undefined): string {
+	let args: unknown;
+	try {
+		args = argsJson ? JSON.parse(argsJson) : {};
+	} catch {
+		return argsJson;
+	}
+	if (!args || typeof args !== 'object' || Array.isArray(args)) {
+		return argsJson;
+	}
+	const record = args as Record<string, unknown>;
+	return typeof record.uri === 'string' && record.uri.trim() ? JSON.stringify({ ...record, uri: resolveToolPath(record.uri, toolRoot(workingDirectory)) }) : argsJson;
 }
 
 const MAX_OUTPUT_BYTES = 1024 * 1024;

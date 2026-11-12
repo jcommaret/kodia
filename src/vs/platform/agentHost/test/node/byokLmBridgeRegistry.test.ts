@@ -227,4 +227,22 @@ suite('ByokLmBridgeRegistry', () => {
 
 		reg.dispose();
 	});
+	test('lists every serving window, the one that serves first, and not a window that never pushed', () => {
+		const registry = new ByokLmBridgeRegistry();
+		const empty = pushable();
+		const populated = pushable();
+		const nonServing = pushable();
+		const regs = [registry.register('agents', empty.connection), registry.register('editor', populated.connection), registry.register('no-handler', nonServing.connection)];
+		assert.deepStrictEqual(registry.getServingConnections(), []);
+
+		empty.push([]);
+		populated.push([{ vendor: 'acme', id: 'claude' }]);
+
+		assert.deepStrictEqual(registry.getServingConnections(), [populated.connection, empty.connection]);
+		assert.strictEqual(registry.getServingConnections()[0], registry.getServingConnection());
+
+		for (const reg of regs) {
+			reg.dispose();
+		}
+	});
 });

@@ -1148,7 +1148,7 @@ suite('KodiaAgent', () => {
 				const { agent, registry, session, chat, data } = await send([embeddedImage()]);
 				registry.window!.results = [text('Still here.')];
 
-				await agent.chats.changeModel(chat, { id: 'openRouter/qwen/qwen3-coder' });
+				await agent.chats.changeModel(chat, { id: 'openRouter/qwen/qwen3-coder' }, session);
 				await agent.chats.sendMessage(chat, 'And now?', [URI.file('/project')], undefined, 'turn-2');
 
 				assert.deepStrictEqual(texts(sentParts(registry, 1)), ['What is this?', 'Attached image: shot.png', IMAGE_NOT_SEEN_NOTE]);

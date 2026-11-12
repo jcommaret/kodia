@@ -23,6 +23,7 @@ import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js
 import { geminiParametersOfTool, jsonSchemaOfTool } from '../../common/toolSchema.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
+import { mlxMaxOutputTokens, withOutputLimitNotice } from '../../common/outputLimit.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
 import { createHash } from 'crypto';
 
@@ -659,7 +660,14 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		...nativeToolsObj,
 		...reasoningAndExtraPayload,
 		// max_completion_tokens: maxTokens,
+		// mlx_lm.server answers at most 512 tokens when none is asked
+		...(providerName === 'mlx' ? { max_tokens: mlxMaxOutputTokens(reservedOutputTokenSpace) } : {}),
 	}
+
+	// a reply that stops at the model's output limit says so (after the wrappers below have taken the reasoning and the tools out of it)
+	let reachedOutputLimit = false
+	const onFinalMessageWithNotice = onFinalMessage
+	onFinalMessage = message => onFinalMessageWithNotice({ ...message, fullText: withOutputLimitNotice(message.fullText, reachedOutputLimit), ...(reachedOutputLimit ? { reachedOutputLimit } : {}) })
 
 	// open source models - manually parse think tokens
 	const { needsManualParse: needsManualReasoningParse, nameOfFieldInDelta: nameOfReasoningFieldInDelta } = providerReasoningIOSettings?.output ?? {}
@@ -700,6 +708,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 			for await (const chunk of response) {
 				// usually only on the last chunk (Groq nests it under x_groq)
 				usage = openAICompatibleUsage(chunk.usage ?? (chunk as { x_groq?: { usage?: unknown } }).x_groq?.usage) ?? usage
+				if (chunk.choices[0]?.finish_reason === 'length') reachedOutputLimit = true
 
 				// message (delta.content is usually a string, but Mistral magistral returns an array of content chunks)
 				const { text: newText, reasoning: newReasoningFromContent } = parseOpenAICompatibleDeltaContent(chunk.choices[0]?.delta?.content)
@@ -927,6 +936,11 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 
 	}, betas.length ? { headers: { 'anthropic-beta': betas.join(',') } } : undefined)
 
+	// a reply that stops at the model's output limit says so
+	let reachedOutputLimit = false
+	const onFinalMessageWithNotice = onFinalMessage
+	onFinalMessage = message => onFinalMessageWithNotice({ ...message, fullText: withOutputLimitNotice(message.fullText, reachedOutputLimit), ...(reachedOutputLimit ? { reachedOutputLimit } : {}) })
+
 	// manually parse out tool results if XML
 	if (!specialToolFormat) {
 		const { newOnText, newOnFinalMessage } = extractXMLToolsWrapper(onText, onFinalMessage, chatMode, mcpTools, tools)
@@ -1007,6 +1021,7 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 			.map(rawToolCallObjOfAnthropicParams)
 			.filter((t): t is RawToolCallObj => t !== null)
 
+		reachedOutputLimit = response.stop_reason === 'max_tokens'
 		onFinalMessage({ fullText, fullReasoning, anthropicReasoning, toolCalls, usage: anthropicUsage(response.usage) })
 	})
 	// on error
@@ -1224,6 +1239,9 @@ const sendGeminiChat = async ({
 
 	let usage: LLMUsage | undefined
 
+	// a reply that stops at the model's output limit says so
+	let reachedOutputLimit = false
+
 
 	genAI.models.generateContentStream({
 		model: modelName,
@@ -1242,6 +1260,7 @@ const sendGeminiChat = async ({
 				// message
 				const newText = chunk.text ?? ''
 				fullTextSoFar += newText
+				if (chunk.candidates?.[0]?.finishReason === 'MAX_TOKENS') reachedOutputLimit = true
 
 				// usage — cumulative, so the last chunk has the totals. promptTokenCount includes cached tokens.
 				const m = chunk.usageMetadata
@@ -1274,7 +1293,7 @@ const sendGeminiChat = async ({
 			if (!fullTextSoFar && !fullReasoningSoFar && toolCalls.length === 0) {
 				onError({ message: 'Kodia: Response from model was empty.', fullError: null })
 			} else {
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage });
+				onFinalMessage({ fullText: withOutputLimitNotice(fullTextSoFar, reachedOutputLimit), fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage, ...(reachedOutputLimit ? { reachedOutputLimit } : {}) });
 			}
 		})
 		.catch(error => {

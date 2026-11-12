@@ -179,7 +179,7 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 						onDelta({ ...text ? { text } : {}, ...reasoning ? { reasoning } : {} });
 					}
 				},
-				onFinalMessage: final => settle({ output: toOutput(final), usage: toUsage(final.usage) }),
+				onFinalMessage: final => settle({ output: toOutput(final), usage: toUsage(final.usage), ...(final.reachedOutputLimit ? { reachedOutputLimit: true } : {}) }),
 				onError: ({ message }) => settle({ output: [], error: message }),
 				onAbort: () => settle({ output: [], error: 'Cancelled' }),
 			});

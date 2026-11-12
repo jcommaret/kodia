@@ -140,6 +140,8 @@ export interface IByokLmChatResult {
 		readonly reasoningTokens?: number;
 	};
 	readonly error?: string;
+	/** Kodia: the model stopped at its output limit, in the middle of its reply. */
+	readonly reachedOutputLimit?: boolean;
 }
 
 /**

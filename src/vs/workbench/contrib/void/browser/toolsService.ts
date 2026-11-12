@@ -32,6 +32,9 @@ import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
 import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
 import { IKodiaEditorToolsService } from '../common/kodiaEditorToolsService.js'
+import { waitUntil, whenEventSettles } from '../common/languageServerWait.js'
+import { IEditorService } from '../../../services/editor/common/editorService.js'
+import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js'
 
 
 // tool use for AI
@@ -141,6 +144,14 @@ const validateLine = (lineUnknown: unknown) => {
 // --- language-server (LSP) tools ---
 
 const LANGUAGE_SERVER_TIMEOUT_MS = 20_000
+// An extension that serves a language starts when its first file loads, and registers its providers a moment later
+const LANGUAGE_SERVER_START_MS = 10_000
+// A language that got none in that time is not waited for again until this long has passed
+const UNSERVED_LANGUAGE_MS = 60_000
+// A language server analyzes a file it was just given a few seconds later (the first time, while it loads the project): the first diagnostics, then the rest of them
+const FIRST_DIAGNOSTICS_MS = 8_000
+const WARM_DIAGNOSTICS_MS = 2_000
+const DIAGNOSTICS_SETTLE_MS = 800
 const MAX_LANGUAGE_SERVER_RESULTS = 50
 const DEFINITION_SNIPPET_LINES = 5
 
@@ -243,6 +254,8 @@ export class ToolsService implements IToolsService {
 		@ITextModelService textModelService: ITextModelService,
 		@IMainProcessService mainProcessService: IMainProcessService,
 		@IKodiaEditorToolsService editorToolsService: IKodiaEditorToolsService,
+		@IEditorService editorService: IEditorService,
+		@IEditorGroupsService editorGroupsService: IEditorGroupsService,
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
 		const webFetchService = ProxyChannel.toService<IKodiaWebFetchService>(mainProcessService.getChannel('void-channel-webFetch'))
@@ -257,11 +270,27 @@ export class ToolsService implements IToolsService {
 			return page
 		}
 
+		const unservedSince = new Map<string, number>()
+		// Files the agent asked the lint errors of, which this window put in a tab and no language server has analyzed yet
+		const awaitingDiagnostics = new Set<string>()
+		const warmLanguages = new Set<string>()
+
 		const modelOfFile = async (uri: URI) => {
 			await voidModelService.initializeModel(uri)
 			const { model } = await voidModelService.getModelSafe(uri)
 			if (model === null) { throw new Error(`No contents; File does not exist.`) }
 			return model
+		}
+
+		// Whether a language server serves this file, once it has had time to start if this file just woke it up
+		const whenServed = async (model: ITextModel, isServed: () => boolean) => {
+			if (isServed()) return true
+			const languageId = model.getLanguageId()
+			const failedAt = unservedSince.get(languageId)
+			if (languageId === 'plaintext' || (failedAt !== undefined && Date.now() - failedAt < UNSERVED_LANGUAGE_MS)) return false
+			if (await waitUntil(isServed, LANGUAGE_SERVER_START_MS)) return true
+			unservedSince.set(languageId, Date.now())
+			return false
 		}
 
 		// The code at each location, `nLines` lines from its start. Each file is loaded once and released
@@ -565,7 +594,7 @@ export class ToolsService implements IToolsService {
 				const model = await modelOfFile(uri)
 				const position = positionOfSymbol(model, line, symbol)
 				const registry = languageFeaturesService.definitionProvider
-				if (!registry.has(model)) return { result: { locations: [], hasLanguageServer: false } }
+				if (!await whenServed(model, () => registry.has(model))) return { result: { locations: [], hasLanguageServer: false } }
 
 				const links = await withLanguageServerTimeout(token => getDefinitionsAtPosition(registry, model, position, false, token))
 				// targetSelectionRange is the symbol's name; range can span a whole class
@@ -578,7 +607,7 @@ export class ToolsService implements IToolsService {
 				const model = await modelOfFile(uri)
 				const position = positionOfSymbol(model, line, symbol)
 				const registry = languageFeaturesService.referenceProvider
-				if (!registry.has(model)) return { result: { locations: [], totalCount: 0, hasLanguageServer: false } }
+				if (!await whenServed(model, () => registry.has(model))) return { result: { locations: [], totalCount: 0, hasLanguageServer: false } }
 
 				const links = await withLanguageServerTimeout(token => getReferencesAtPosition(registry, model, position, false, false, token))
 				const references = uniqueByLine(links)
@@ -611,7 +640,16 @@ export class ToolsService implements IToolsService {
 
 			read_lint_errors: async ({ uri }) => {
 				await timeout(1000)
-				const { lintErrors } = this._getLintErrors(uri)
+				let { lintErrors } = this._getLintErrors(uri)
+				// A file this window just put in a tab is analyzed a moment later (and the first time, once the language server has loaded the project): wait for those diagnostics
+				if (!lintErrors && awaitingDiagnostics.delete(uri.toString())) {
+					const languageId = voidModelService.getModel(uri).model?.getLanguageId() ?? 'plaintext'
+					if (languageId !== 'plaintext') {
+						await whenEventSettles(this.markerService.onMarkerChanged, uris => uris.some(changed => changed.toString() === uri.toString()), warmLanguages.has(languageId) ? WARM_DIAGNOSTICS_MS : FIRST_DIAGNOSTICS_MS, DIAGNOSTICS_SETTLE_MS)
+						warmLanguages.add(languageId)
+						lintErrors = this._getLintErrors(uri).lintErrors
+					}
+				}
 				return { result: { lintErrors } }
 			},
 
@@ -854,16 +892,33 @@ export class ToolsService implements IToolsService {
 		}
 
 		// The Kodia agent of the Agents Window asks an editor window to run these: the same validation, call and text as the chat's.
+		// The TypeScript language server only reports the errors of the files that are in a tab, so the file the agent asks the
+		// errors of is put in one, behind the user's own, and taken out again. A file the user has open is already analyzed.
+		const inATab = async (uri: URI): Promise<(() => Promise<void>) | undefined> => {
+			if (editorService.findEditors(uri).length) return undefined
+			await editorService.openEditor({ resource: uri, options: { inactive: true, preserveFocus: true, pinned: true } })
+			const opened = editorService.findEditors(uri)
+			awaitingDiagnostics.add(uri.toString())
+			return async () => {
+				awaitingDiagnostics.delete(uri.toString())
+				for (const { groupId, editor } of opened) await editorGroupsService.getGroup(groupId)?.closeEditor(editor)
+			}
+		}
+
 		editorToolsService.provide({
 			call: async (name, params) => {
+				let release: (() => Promise<void>) | undefined
 				try {
 					const validated = this.validateParams[name](params)
 					// The language server only reports on a file this window has loaded, and the agent writes to disk: load it, as the chat's other tools do.
 					if ('uri' in validated) await modelOfFile(validated.uri)
+					if (name === 'read_lint_errors' && 'uri' in validated) release = await inATab(validated.uri)
 					const { result } = await this.callTool[name](validated as never)
 					return { isError: false, output: this.stringOfResult[name](validated as never, await result as never) }
 				} catch (err) {
 					return { isError: true, output: err instanceof Error ? err.message : String(err) }
+				} finally {
+					await release?.().catch(() => undefined)
 				}
 			},
 		})

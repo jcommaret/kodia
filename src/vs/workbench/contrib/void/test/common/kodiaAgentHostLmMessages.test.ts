@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { toInternalTool, toOutput, toSimpleMessages, toUsage } from '../../common/kodiaAgentHostLmMessages.js';
+import { appendedText, toInternalTool, toOutput, toSimpleMessages, toUsage } from '../../common/kodiaAgentHostLmMessages.js';
 
 suite('kodiaAgentHostLmMessages', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -77,5 +77,15 @@ suite('kodiaAgentHostLmMessages', () => {
 	test('counts cached input tokens as input', () => {
 		assert.deepStrictEqual(toUsage({ input: 10, output: 5, cacheRead: 100, cacheWrite: 20 }), { inputTokens: 130, outputTokens: 5 });
 		assert.strictEqual(toUsage(undefined), undefined);
+	});
+
+	test('a streamed text adds what it grew by, and nothing when it did not grow or changed', () => {
+		assert.strictEqual(appendedText('', 'Hel'), 'Hel');
+		assert.strictEqual(appendedText('Hel', 'Hello'), 'lo');
+		assert.strictEqual(appendedText('Hello', 'Hello'), '');
+		assert.strictEqual(appendedText('Hello', ''), '');
+		// a parser that took back what it had shown: no delta can say so, the final result has the text
+		assert.strictEqual(appendedText('Hello <th', 'Hello '), '');
+		assert.strictEqual(appendedText('Hello', 'Jello!'), '');
 	});
 });

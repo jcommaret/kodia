@@ -17,7 +17,7 @@ import { IFileService } from '../../../files/common/files.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClient, IAgent, IAgentChatConfigCompletionsParams, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, IAgentChats, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSpawnChatEvent } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatDelta, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
 import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { KODIA_AGENT_PROVIDER_ID, KODIA_AGENT_RESOURCE } from '../../common/kodiaAgentHostLm.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
@@ -28,6 +28,7 @@ import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirm
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { IAgentHostTerminalManager } from '../agentHostTerminalManager.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
+import { KodiaReplyStream } from './kodiaReplyStream.js';
 import { chooseKeepIdx, clearOldToolResults, estimateHistoryTokens, IKodiaCompaction, modelHistory, tokensOfChars, transcriptMessages } from './kodiaContext.js';
 import { readProjectMemory, readProjectRules, readProjectSkills } from './kodiaProjectContext.js';
 import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
@@ -514,7 +515,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 				if (signal.aborted) {
 					return;
 				}
-				const result = await this._chat(connection, session, model, instructions, tools, signal);
+				// what the model writes is shown as it comes, when the window streams it
+				const reply = new KodiaReplyStream(turnId, fire);
+				const result = await this._chat(connection, session, model, instructions, tools, signal, delta => { if (!signal.aborted) { reply.append(delta); } });
 				if (signal.aborted) {
 					return;
 				}
@@ -538,12 +541,12 @@ export class KodiaAgent extends Disposable implements IAgent {
 						session.history.push({ type: 'message', role: 'assistant', content: item.content });
 						const text = item.content.map(part => part.text).join('');
 						if (text) {
-							fire({ type: ActionType.ChatResponsePart, turnId, part: { kind: ResponsePartKind.Markdown, id: generateUuid(), content: text } });
+							reply.completeText(text);
 						}
 					} else {
 						session.history.push(item);
 						if (item.type === 'reasoning' && item.summary.length) {
-							fire({ type: ActionType.ChatResponsePart, turnId, part: { kind: ResponsePartKind.Reasoning, id: generateUuid(), content: item.summary.join('\n') } });
+							reply.completeReasoning(item.summary.join('\n'));
 						} else if (item.type === 'function_call') {
 							toolCalls.push(item);
 						}
@@ -805,19 +808,23 @@ export class KodiaAgent extends Disposable implements IAgent {
 		}
 	}
 
-	/** One model request, run by the serving Kodia window and cancelled with the turn. */
-	private async _chat(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, instructions: string, tools: IByokLmFunctionTool[], signal: AbortSignal): Promise<IByokLmChatResult> {
+	/**
+	 * One model request, run by the serving Kodia window and cancelled with the turn. `onDelta` gets the text and the
+	 * reasoning as the model writes them, before the result, if the window streams: an older one answers at the end.
+	 */
+	private async _chat(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, instructions: string, tools: IByokLmFunctionTool[], signal: AbortSignal, onDelta: (delta: IByokLmChatDelta) => void): Promise<IByokLmChatResult> {
 		const cts = new CancellationTokenSource();
 		const onAbort = () => cts.cancel();
 		signal.addEventListener('abort', onAbort, { once: true });
 		try {
-			return await connection.chat({
+			const request = {
 				vendor: model.vendor,
 				modelId: model.modelId,
 				instructions,
 				input: modelHistory(session.history, session.compaction),
 				tools,
-			}, cts.token);
+			};
+			return await (connection.chatStream ? connection.chatStream(request, onDelta, cts.token) : connection.chat(request, cts.token));
 		} finally {
 			signal.removeEventListener('abort', onAbort);
 			cts.dispose();

@@ -5,7 +5,7 @@
 
 import type { CancellationToken } from '../../../base/common/cancellation.js';
 import { createDecorator } from '../../instantiation/common/instantiation.js';
-import type { IAgentHostByokLmHandler, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from './agentHostByokLm.js';
+import type { IAgentHostByokLmHandler, IByokLmChatDelta, IByokLmChatRequest, IByokLmChatResult, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from './agentHostByokLm.js';
 
 /**
  * Kodia: the Kodia agent runs, in the Agents Window, every model shown in
@@ -23,6 +23,8 @@ export const KODIA_AGENT_HOST_LM_CHANNEL = 'kodiaAgentHostLm';
  * agent runs with no editor window open.
  */
 export interface IKodiaAgentHostLmHandler extends IAgentHostByokLmHandler {
+	/** Runs a model request like {@link chat}, and reports the text and the reasoning to `onDelta` as the model writes them. */
+	chatStream(request: IByokLmChatRequest, onDelta: (delta: IByokLmChatDelta) => void, token: CancellationToken): Promise<IByokLmChatResult>;
 	/** The tools of the MCP servers that are on. */
 	listMcpTools(token: CancellationToken): Promise<IKodiaMcpTool[]>;
 	/** Runs one MCP tool, by the name {@link listMcpTools} gave it. A failure is a result with `isError`, not a rejection. */

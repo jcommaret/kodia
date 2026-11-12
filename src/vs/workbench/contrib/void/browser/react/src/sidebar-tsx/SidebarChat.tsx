@@ -1447,20 +1447,24 @@ const AssistantMessageComponent = ({ chatMessage, isCheckpointGhost, isCommitted
 
 		{/* the model stopped at its output limit */}
 		{canContinue &&
-			<div className={`${isCheckpointGhost ? 'opacity-50' : ''} mt-1`}>
+			<div className={`${isCheckpointGhost ? 'opacity-50' : ''} mt-2 mb-1`}>
 				<button
 					type='button'
 					onClick={() => { chatThreadsService.addUserMessageAndStreamResponse({ userMessage: CONTINUE_MESSAGE, threadId: thread.id }) }}
 					className={`
-						px-2 py-1
-						bg-[var(--vscode-button-secondaryBackground)]
-						text-[var(--vscode-button-secondaryForeground)]
-						hover:bg-[var(--vscode-button-secondaryHoverBackground)]
+						flex items-center gap-1.5
+						px-3 py-1.5
+						bg-[var(--vscode-button-background)]
+						text-[var(--vscode-button-foreground)]
+						hover:bg-[var(--vscode-button-hoverBackground)]
 						rounded
-						text-sm font-medium
+						text-sm font-semibold
+						cursor-pointer
+						shadow-md
 					`}
 				>
 					Continue
+					<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></svg>
 				</button>
 			</div>
 		}

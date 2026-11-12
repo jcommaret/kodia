@@ -12,6 +12,7 @@ import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { MAX_PROJECT_MEMORY_TOKENS, memoryTooLongMessage, memoryWithSection, PROJECT_MEMORY_FILE_HEADER, PROJECT_MEMORY_FILE_PATH } from '../../../kodia/common/projectMemory.js';
 import { applySearchReplaceBlocks } from '../../../kodia/common/searchReplaceBlocks.js';
 import { EditorToolName, editorTools, isEditorToolName, jsonSchemaOfSharedTool, nextPageNote, SharedTool, SharedToolApproval, SharedToolName, sharedToolNames, sharedTools } from '../../../kodia/common/toolCatalog.js';
+import { describeTodoList, parseTodoItems, TODO_TOOL_NAME } from './kodiaTodoTool.js';
 import { fetchWebPage } from '../../../kodia/node/webFetch.js';
 import type { IByokLmFunctionTool } from '../../common/agentHostByokLm.js';
 
@@ -38,8 +39,8 @@ export interface IKodiaToolResult {
  * The local toolset the Kodia agent offers its models, in the bridge's wire shape: the tools of Kodia's chat that
  * don't need the editor, with the chat's names, parameters and descriptions (see `toolCatalog.ts`), so a skill, a rule
  * or a model's habit means the same in both. Not here: the language server's tools (go_to_definition, find_references,
- * search_symbols, read_lint_errors), which need an editor window: see {@link editorFunctionTools}. Nor persistent
- * terminals. The project memory is in the agent's instructions, as in the chat, so there is no read_project_memory.
+ * search_symbols, read_lint_errors), which need an editor window: see {@link editorFunctionTools}. Nor the task
+ * list, which is the agent's own: see `kodiaTodoTool.ts`. Nor persistent terminals. The project memory is in the agent's instructions, as in the chat, so there is no read_project_memory.
  */
 export const KODIA_TOOLS: IByokLmFunctionTool[] = sharedToolNames.map(name => ({
 	type: 'function',
@@ -61,7 +62,7 @@ export function editorFunctionTools(names: readonly string[]): IByokLmFunctionTo
 	}));
 }
 
-const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName, string>> = {
+const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName | typeof TODO_TOOL_NAME, string>> = {
 	read_file: 'Read File',
 	ls_dir: 'List Directory',
 	get_dir_tree: 'Directory Tree',
@@ -79,6 +80,7 @@ const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName, string>> =
 	find_references: 'Find References',
 	search_symbols: 'Search Symbols',
 	read_lint_errors: 'Read Lint Errors',
+	todo_write: 'Update Task List',
 };
 
 function isSharedToolName(name: string): name is SharedToolName {
@@ -86,7 +88,7 @@ function isSharedToolName(name: string): name is SharedToolName {
 }
 
 export function toolDisplayName(name: string): string {
-	return isSharedToolName(name) || isEditorToolName(name) ? DISPLAY_NAMES[name] : name;
+	return isSharedToolName(name) || isEditorToolName(name) || name === TODO_TOOL_NAME ? DISPLAY_NAMES[name] : name;
 }
 
 /**
@@ -200,6 +202,10 @@ export function describeKodiaToolCall(name: string, argsJson: string, workingDir
 			return { invocationMessage: `Search the symbols for "${toStr(args.query)}"`, toolInput: argsJson };
 		case 'read_lint_errors':
 			return { invocationMessage: `Read the lint errors of ${shown(resolveToolPath(args.uri, root))}`, toolInput: argsJson };
+		case TODO_TOOL_NAME: {
+			const parsed = parseTodoItems(args);
+			return { invocationMessage: 'items' in parsed ? `Update the task list (${describeTodoList(parsed.items).summary})` : toolDisplayName(name), toolInput: argsJson };
+		}
 		default:
 			return { invocationMessage: toolDisplayName(name), toolInput: argsJson };
 	}
@@ -483,6 +489,10 @@ export async function executeKodiaTool(name: string, argsJson: string, ctx: IKod
 				await fs.promises.writeFile(target, memory, 'utf8');
 				const nearLimit = tokenCount > MAX_PROJECT_MEMORY_TOKENS * 0.8 ? ` That's close to the ~${MAX_PROJECT_MEMORY_TOKENS}-token limit: condense or delete outdated sections soon.` : '';
 				return { success: true, output: `${content.trim() ? `Section "${section}" saved` : `Section "${section}" deleted`}. The project memory is now ${tokenCount} tokens.${nearLimit}`, didWrite: true, path: target };
+			}
+			case TODO_TOOL_NAME: {
+				const parsed = parseTodoItems(args);
+				return 'items' in parsed ? { success: true, output: describeTodoList(parsed.items).text } : { success: false, output: parsed.error };
 			}
 			default:
 				return { success: false, output: `Unknown tool: ${name}` };

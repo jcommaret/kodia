@@ -74,6 +74,15 @@ export const builtinInstructionsFrameworks: readonly BuiltinInstructionsFramewor
 		homepage: 'https://github.com/SuperClaude-Org/SuperClaude_Framework',
 		sourceURL: 'https://raw.githubusercontent.com/SuperClaude-Org/SuperClaude_Framework/master/src/superclaude/core/PRINCIPLES.md',
 	},
+	{
+		id: 'bmad',
+		name: 'BMad Method',
+		group: 'Agent behavior',
+		description: 'The guide to the BMad Method: the smallest path from an idea to reviewed code, and which of its skills fits each step. Long (about 21,000 characters with every request). Its workflows are skills to install apart: npx skills add bmad-code-org/BMAD-METHOD --skill \'*\'',
+		homepage: 'https://github.com/bmad-code-org/BMAD-METHOD',
+		// BMAD has no guidelines file: its AGENTS.md is for contributors to its repository, and this is what its `bmad` skill answers from
+		sourceURL: 'https://raw.githubusercontent.com/bmad-code-org/BMAD-METHOD/main/skills/method/bmod-method/help/help.md',
+	},
 	bookFramework('clean-code', 'Clean Code', 'Robert C. Martin: readable code, precise names, small functions, no hidden side effects.'),
 	bookFramework('clean-architecture', 'Clean Architecture', 'Robert C. Martin: business rules independent of frameworks, databases and delivery, dependencies pointing inward.'),
 	bookFramework('a-philosophy-of-software-design', 'A Philosophy of Software Design', 'John Ousterhout: deep modules, information hiding, less cognitive load.'),

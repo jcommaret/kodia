@@ -86,6 +86,7 @@ export type ChatMessage =
 		// both optional: absent on messages stored before they existed
 		modelSelection?: ModelSelection; // the model that produced this message — its anthropicReasoning signatures are only valid for that model
 		usage?: LLMUsage; // tokens of the request that produced this message
+		reachedOutputLimit?: true; // the model stopped at its output limit, in the middle of this reply: the chat offers to continue it
 	}
 	| ToolMessage<ToolName>
 	| DecorativeCanceledTool

@@ -1399,12 +1399,17 @@ const AssistantMessageComponent = ({ chatMessage, isCheckpointGhost, isCommitted
 	const hasReasoning = !!reasoningStr
 	const isDoneReasoning = !!chatMessage.displayContent
 	const thread = chatThreadsService.getCurrentThread()
-
+	const isThreadRunning = !!useChatThreadsStreamState(thread.id)?.isRunning
 
 	const chatMessageLocation: ChatMessageLocation = {
 		threadId: thread.id,
 		messageIdx: messageIdx,
 	}
+
+	// a reply the model cut at its output limit can be continued, while it is the last thing in the thread
+	let lastMessageIdx = thread.messages.length - 1
+	while (lastMessageIdx >= 0 && thread.messages[lastMessageIdx].role === 'checkpoint') lastMessageIdx -= 1
+	const canContinue = !!chatMessage.reachedOutputLimit && isCommitted && !isThreadRunning && messageIdx === lastMessageIdx
 
 	const isEmpty = !chatMessage.displayContent && !chatMessage.reasoning
 	if (isEmpty) return null
@@ -1439,9 +1444,32 @@ const AssistantMessageComponent = ({ chatMessage, isCheckpointGhost, isCommitted
 				</ProseWrapper>
 			</div>
 		}
+
+		{/* the model stopped at its output limit */}
+		{canContinue &&
+			<div className={`${isCheckpointGhost ? 'opacity-50' : ''} mt-1`}>
+				<button
+					type='button'
+					onClick={() => { chatThreadsService.addUserMessageAndStreamResponse({ userMessage: CONTINUE_MESSAGE, threadId: thread.id }) }}
+					className={`
+						px-2 py-1
+						bg-[var(--vscode-button-secondaryBackground)]
+						text-[var(--vscode-button-secondaryForeground)]
+						hover:bg-[var(--vscode-button-secondaryHoverBackground)]
+						rounded
+						text-sm font-medium
+					`}
+				>
+					Continue
+				</button>
+			</div>
+		}
 	</>
 
 }
+
+// what the Continue button sends: the model finishes its reply from where it stopped
+const CONTINUE_MESSAGE = 'Continue from exactly where you stopped.'
 
 const ReasoningWrapper = ({ isDoneReasoning, isStreaming, children }: { isDoneReasoning: boolean, isStreaming: boolean, children: React.ReactNode }) => {
 	const isDone = isDoneReasoning || !isStreaming

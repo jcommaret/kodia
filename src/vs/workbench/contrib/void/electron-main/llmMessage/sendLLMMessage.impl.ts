@@ -24,6 +24,7 @@ import { geminiParametersOfTool, jsonSchemaOfTool } from '../../common/toolSchem
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
 import { mlxMaxOutputTokens, withOutputLimitNotice } from '../../common/outputLimit.js';
+import { mlxErrorWithHint } from '../../common/mlxInstalls.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
 import { createHash } from 'crypto';
 
@@ -754,7 +755,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		// when error/fail - this catches errors of both .create() and .then(for await)
 		.catch(error => {
 			if (error instanceof OpenAI.APIError && error.status === 401) { onError({ message: invalidApiKeyMessage(providerName), fullError: error }); }
-			else { onError({ message: error + '', fullError: error }); }
+			else { onError({ message: providerName === 'mlx' ? mlxErrorWithHint(error + '') : error + '', fullError: error }); }
 		})
 }
 

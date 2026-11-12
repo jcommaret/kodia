@@ -130,3 +130,12 @@ export function toOutput({ fullText, fullReasoning, toolCalls, anthropicReasonin
 export function toUsage(usage: LLMUsage | undefined): IByokLmChatResult['usage'] {
 	return usage ? { inputTokens: usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0), outputTokens: usage.output } : undefined;
 }
+
+/**
+ * What `full`, the whole text so far, adds to `sent`, the part already reported: the delta of a model that streams
+ * its text. Nothing when `full` has not grown, or is not a continuation of `sent` (the window's parsers of think tags
+ * and XML tool calls hold back what they can't place yet, and a delta only appends).
+ */
+export function appendedText(sent: string, full: string): string {
+	return full.length > sent.length && full.startsWith(sent) ? full.slice(sent.length) : '';
+}

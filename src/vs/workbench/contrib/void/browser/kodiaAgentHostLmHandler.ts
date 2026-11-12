@@ -7,10 +7,10 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
-import type { IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../../../platform/agentHost/common/agentHostByokLm.js';
+import type { IByokLmChatDelta, IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../../../platform/agentHost/common/agentHostByokLm.js';
 import { IKodiaAgentHostLmHandler } from '../../../../platform/agentHost/common/kodiaAgentHostLm.js';
 import { editorToolNames, isEditorToolName } from '../../../../platform/kodia/common/toolCatalog.js';
-import { toInternalTool, toOutput, toSimpleMessages, toUsage } from '../common/kodiaAgentHostLmMessages.js';
+import { appendedText, toInternalTool, toOutput, toSimpleMessages, toUsage } from '../common/kodiaAgentHostLmMessages.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { toolsXMLSystemPrompt } from '../common/prompt/prompts.js';
 import { joinUserInstructions } from '../common/instructionsFrameworks.js';
@@ -117,6 +117,11 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 	}
 
 	async chat(request: IByokLmChatRequest, token: CancellationToken): Promise<IByokLmChatResult> {
+		return this.chatStream(request, () => { }, token);
+	}
+
+	// `onText` of Kodia's LLM service holds the whole text and reasoning so far: the agent is sent what each adds.
+	async chatStream(request: IByokLmChatRequest, onDelta: (delta: IByokLmChatDelta) => void, token: CancellationToken): Promise<IByokLmChatResult> {
 		if (!(providerNames as readonly string[]).includes(request.vendor)) {
 			return { output: [], error: `Unknown Kodia provider: ${request.vendor}` };
 		}
@@ -143,6 +148,8 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 
 		return new Promise<IByokLmChatResult>(resolve => {
 			let requestId: string | null = null;
+			let sentText = '';
+			let sentReasoning = '';
 			const cancellation = token.onCancellationRequested(() => {
 				if (requestId) {
 					this._llmMessageService.abort(requestId);
@@ -163,7 +170,15 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 				modelSelectionOptions: optionsOfModelSelection.Chat[modelSelection.providerName]?.[modelSelection.modelName],
 				overridesOfModel,
 				logging: { loggingName: 'Agents Window' },
-				onText: () => { },
+				onText: ({ fullText, fullReasoning }) => {
+					const text = appendedText(sentText, fullText);
+					const reasoning = appendedText(sentReasoning, fullReasoning);
+					if (text || reasoning) {
+						sentText += text;
+						sentReasoning += reasoning;
+						onDelta({ ...text ? { text } : {}, ...reasoning ? { reasoning } : {} });
+					}
+				},
 				onFinalMessage: final => settle({ output: toOutput(final), usage: toUsage(final.usage), ...(final.reachedOutputLimit ? { reachedOutputLimit: true } : {}) }),
 				onError: ({ message }) => settle({ output: [], error: message }),
 				onAbort: () => settle({ output: [], error: 'Cancelled' }),

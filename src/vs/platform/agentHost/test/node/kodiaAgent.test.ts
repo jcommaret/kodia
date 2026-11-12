@@ -7,6 +7,7 @@ import assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { CancellationError } from '../../../../base/common/errors.js';
 import { Event } from '../../../../base/common/event.js';
 import { isWindows } from '../../../../base/common/platform.js';
 import { join } from '../../../../base/common/path.js';
@@ -19,10 +20,10 @@ import { FileService } from '../../../files/common/fileService.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentChatDataChange, type IAgentToolPendingConfirmationSignal } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmContentPart, IByokLmFunctionTool, IByokLmMessageItem, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatDelta, IByokLmChatRequest, IByokLmChatResult, IByokLmContentPart, IByokLmFunctionTool, IByokLmMessageItem, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
 import { toHostSnapshotAttachmentMeta } from '../../common/meta/agentSnapshotAttachmentMeta.js';
 import { BackgroundWorkKind, TerminalClaimKind } from '../../common/state/protocol/state.js';
-import { ActionType } from '../../common/state/sessionActions.js';
+import { ActionType, type ChatAction } from '../../common/state/sessionActions.js';
 import { buildDefaultChatUri, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type ChatInputAnswer, type ChatInputRequest, type MessageAttachment } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
@@ -61,6 +62,35 @@ class FakeKodiaWindow implements IByokLmBridgeConnection {
 	get callEditorTool() {
 		const editor = this.editor;
 		return editor && (async (name: string, argsJson: string) => { editor.calls.push({ name, argsJson }); return editor.result; });
+	}
+
+	/**
+	 * A window that streams: it reports the deltas of each reply, one list per request, as the model writes them, then
+	 * answers with the next result, once `gate` is open. A cancelled request rejects, as the connection does. Undefined
+	 * for a window that doesn't stream (an older one), which answers at the end.
+	 */
+	stream: { replies: IByokLmChatDelta[][]; gate?: Promise<void> } | undefined;
+	/** The delta callback of the latest streamed request, which a window may call late. */
+	latestOnDelta: ((delta: IByokLmChatDelta) => void) | undefined;
+
+	get chatStream() {
+		const stream = this.stream;
+		return stream && (async (request: IByokLmChatRequest, onDelta: (delta: IByokLmChatDelta) => void, token?: CancellationToken): Promise<IByokLmChatResult> => {
+			this.requests.push(JSON.parse(JSON.stringify(request)));
+			this.tokens.push(token ?? CancellationToken.None);
+			this.latestOnDelta = onDelta;
+			for (const delta of stream.replies.shift() ?? []) {
+				onDelta(delta);
+			}
+			let cancelled!: (error: Error) => void;
+			const listener = token?.onCancellationRequested(() => cancelled(new CancellationError()));
+			try {
+				await Promise.race([stream.gate, new Promise<never>((_, reject) => cancelled = reject)]);
+			} finally {
+				listener?.dispose();
+			}
+			return this.results.shift() ?? { output: [] };
+		});
 	}
 
 	get listMcpTools() {
@@ -449,6 +479,169 @@ suite('KodiaAgent', () => {
 		await turn;
 
 		assert.deepStrictEqual(actionTypes(signals), [], 'the host records the cancellation itself');
+	});
+
+	suite('a reply that streams', () => {
+		/** The model's reasoning and text arrive in pieces, and the request ends when the test opens the gate. */
+		function streamingWindow(registry: FakeBridgeRegistry, ...replies: IByokLmChatDelta[][]) {
+			let open!: () => void;
+			registry.window!.stream = { replies, gate: new Promise<void>(resolve => open = resolve) };
+			return { open };
+		}
+
+		function reply(reasoning: string, answer: string, usage = { inputTokens: 10, outputTokens: 5 }): IByokLmChatResult {
+			return {
+				output: [
+					...reasoning ? [{ type: 'reasoning' as const, summary: [reasoning] }] : [],
+					{ type: 'message', content: [{ type: 'text', text: answer }] },
+				],
+				usage,
+			};
+		}
+
+		const waitFor = async (condition: () => boolean) => {
+			while (!condition()) {
+				await new Promise(resolve => setTimeout(resolve, 0));
+			}
+		};
+
+		const actionsOf = (signals: readonly AgentSignal[]): ChatAction[] => signals.filter((s): s is IAgentActionSignal => s.kind === 'action').map(s => s.action as ChatAction);
+
+		test('shows the reasoning and the text as the model writes them, before the request ends', async () => {
+			const { agent, registry } = createAgent();
+			const { open } = streamingWindow(registry, [{ reasoning: 'Let me ' }, { reasoning: 'think.' }, { text: 'Hel' }, { text: 'lo' }]);
+			registry.window!.results = [reply('Let me think.', 'Hello')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+			await waitFor(() => signals.length === 4);
+
+			// the window has not answered yet: this is what the Agents window shows while the model writes
+			const [reasoningPart, reasoningDelta, textPart, textDelta] = actionsOf(signals);
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatResponsePart, ActionType.ChatReasoning, ActionType.ChatResponsePart, ActionType.ChatDelta]);
+			assert.ok(reasoningPart.type === ActionType.ChatResponsePart && reasoningPart.part.kind === ResponsePartKind.Reasoning && reasoningPart.part.content === 'Let me ');
+			assert.ok(reasoningDelta.type === ActionType.ChatReasoning && reasoningDelta.partId === (reasoningPart as { part: { id: string } }).part.id && reasoningDelta.content === 'think.');
+			assert.ok(textPart.type === ActionType.ChatResponsePart && textPart.part.kind === ResponsePartKind.Markdown && textPart.part.content === 'Hel');
+			assert.ok(textDelta.type === ActionType.ChatDelta && textDelta.partId === (textPart as { part: { id: string } }).part.id && textDelta.content === 'lo');
+			assert.ok(textDelta.turnId === 'turn-1' && reasoningDelta.turnId === 'turn-1');
+
+			open();
+			await turn;
+
+			// the result adds nothing the stream showed, and the turn ends as it does without a stream
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatResponsePart, ActionType.ChatReasoning, ActionType.ChatResponsePart, ActionType.ChatDelta, ActionType.ChatUsage, ActionType.ChatTurnComplete]);
+		});
+
+		test('shows at the end what the stream stopped short of, and nothing of what it showed', async () => {
+			const { agent, registry } = createAgent();
+			const { open } = streamingWindow(registry, [{ reasoning: 'Hm' }, { text: 'Hel' }]);
+			open();
+			registry.window!.results = [reply('Hmm.', 'Hello!')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			// the reasoning, then the text, as the result lists them, each in the part the stream made
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatResponsePart, ActionType.ChatResponsePart, ActionType.ChatUsage, ActionType.ChatReasoning, ActionType.ChatDelta, ActionType.ChatTurnComplete]);
+			const [reasoningPart, textPart, , reasoningRest, textRest] = actionsOf(signals);
+			assert.ok(reasoningRest.type === ActionType.ChatReasoning && reasoningRest.partId === (reasoningPart as { part: { id: string } }).part.id && reasoningRest.content === 'm.');
+			assert.ok(textRest.type === ActionType.ChatDelta && textRest.partId === (textPart as { part: { id: string } }).part.id && textRest.content === 'lo!');
+		});
+
+		test('a reply that the stream did not show at all is shown whole at the end', async () => {
+			const { agent, registry } = createAgent();
+			const { open } = streamingWindow(registry, []);
+			open();
+			registry.window!.results = [text('Hello!')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatTurnComplete]);
+		});
+
+		test('keeps the text it showed when the result is not a continuation of it, as a part only grows', async () => {
+			const { agent, registry } = createAgent();
+			const { open } = streamingWindow(registry, [{ text: 'Hello <th' }]);
+			open();
+			registry.window!.results = [text('Hello')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatResponsePart, ActionType.ChatUsage, ActionType.ChatTurnComplete]);
+		});
+
+		test('each round of tool calls shows its own text', async () => {
+			const { agent, registry } = createAgent();
+			const { open } = streamingWindow(registry, [{ text: 'Let me ' }, { text: 'look.' }], [{ text: 'Do' }, { text: 'ne.' }]);
+			open();
+			registry.window!.results = [
+				{ output: [{ type: 'message', content: [{ type: 'text', text: 'Let me look.' }] }, { type: 'function_call', callId: 'call-1', name: 'ls_dir', argumentsJson: '{}' }] },
+				text('Done.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'What is here?', [cwd], undefined, 'turn-1');
+
+			assert.deepStrictEqual(actionTypes(signals), [
+				ActionType.ChatResponsePart, ActionType.ChatDelta,
+				ActionType.ChatToolCallStart, ActionType.ChatToolCallReady, ActionType.ChatToolCallComplete,
+				ActionType.ChatResponsePart, ActionType.ChatDelta,
+				ActionType.ChatUsage, ActionType.ChatTurnComplete,
+			]);
+			const [first, , , , , second] = actionsOf(signals);
+			assert.ok(first.type === ActionType.ChatResponsePart && second.type === ActionType.ChatResponsePart && first.part.kind === ResponsePartKind.Markdown && second.part.kind === ResponsePartKind.Markdown && first.part.id !== second.part.id);
+		});
+
+		test('stopping the turn cancels the request, leaves what was shown, and shows nothing more', async () => {
+			const { agent, registry } = createAgent();
+			streamingWindow(registry, [{ text: 'Hel' }]);
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+			await waitFor(() => signals.length === 1);
+			await agent.chats.abort(chat, session);
+			assert.strictEqual(registry.window!.tokens[0].isCancellationRequested, true);
+			// the window may still write what it had in flight
+			registry.window!.latestOnDelta!({ text: 'lo' });
+			await turn;
+
+			// the host records the cancellation itself; the part shown stays in the turn it cancels
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatResponsePart]);
+		});
+
+		test('the history is the same as without a stream: the next request is sent the same conversation', async () => {
+			const sent: IByokLmChatRequest['input'][] = [];
+			for (const streaming of [false, true]) {
+				const { agent, registry } = createAgent();
+				if (streaming) {
+					streamingWindow(registry, [{ reasoning: 'Let me ' }, { reasoning: 'think.' }, { text: 'Hel' }, { text: 'lo' }]).open();
+				}
+				registry.window!.results = [reply('Let me think.', 'Hello'), text('Again!')];
+				const { session, chat } = newChat();
+				await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+				await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+				await agent.chats.sendMessage(chat, 'And?', [cwd], undefined, 'turn-2');
+
+				sent.push(registry.window!.requests[1].input);
+			}
+			assert.deepStrictEqual(sent[1], sent[0]);
+			assert.deepStrictEqual(sent[0].map(item => item.type === 'message' ? item.role : item.type), ['user', 'reasoning', 'assistant', 'user']);
+		});
 	});
 
 	suite('a conversation that outgrows the model\'s context window', () => {

@@ -258,7 +258,29 @@ export interface IByokLmBridgeConnection {
 	listEditorTools?(token?: CancellationToken): Promise<string[]>;
 	/** Kodia: runs one of those editor tools in that window. `token` cancels the wait. */
 	callEditorTool?(name: string, argsJson: string, token?: CancellationToken): Promise<IKodiaMcpToolResult>;
+	/**
+	 * Kodia: like {@link chat}, and `onDelta` is called with the text and the reasoning as the model writes them, before
+	 * the result that holds them all. Absent when the window can't stream (an older one): `chat` answers at the end then.
+	 */
+	chatStream?(request: IByokLmChatRequest, onDelta: (delta: IByokLmChatDelta) => void, token?: CancellationToken): Promise<IByokLmChatResult>;
 }
+
+/**
+ * Kodia: what a model has written since the last delta of the same request: text of its reply and/or of its
+ * reasoning, to append to what came before. The result of the request holds the whole of both.
+ */
+export interface IByokLmChatDelta {
+	readonly text?: string;
+	readonly reasoning?: string;
+}
+
+/**
+ * Kodia: what the window's `chatStream` event carries (see `KodiaAgentHostLmChannel`): the deltas of a request, then
+ * its result, which ends the stream.
+ */
+export type IKodiaChatStreamEvent =
+	| { readonly delta: IByokLmChatDelta }
+	| { readonly result: IByokLmChatResult };
 
 /**
  * Kodia: which kinds of tool call the user has switched on for automatic approval in Kodia's settings (the chat's

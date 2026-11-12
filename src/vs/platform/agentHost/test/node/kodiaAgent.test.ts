@@ -20,7 +20,7 @@ import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesy
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentChatDataChange, type IAgentToolPendingConfirmationSignal } from '../../common/agent.js';
 import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
-import { TerminalClaimKind } from '../../common/state/protocol/state.js';
+import { BackgroundWorkKind, TerminalClaimKind } from '../../common/state/protocol/state.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import { buildDefaultChatUri, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type ChatInputAnswer, type ChatInputRequest } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
@@ -933,6 +933,68 @@ suite('KodiaAgent', () => {
 			assert.strictEqual(terminals.created.length, 2);
 			assert.deepStrictEqual(terminals.disposed, [terminals.created[1].uri]);
 			assert.ok(terminals.terminals.has(terminals.created[0].uri), 'the terminal of the first turn is still there');
+		});
+
+		test('shows a command left running as background work of the chat, outside of the turn, and holds the chat until it ends', async () => {
+			const { agent, registry, terminals } = createAgent();
+			const window = registry.window!;
+			window.autoApprove = { terminal: true };
+			window.results = [
+				call('open_persistent_terminal', {}, 'call-1'),
+				call('run_persistent_command', { command: 'npm run dev', persistent_terminal_id: '1' }, 'call-2'),
+				text('The server runs.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			terminals.shell = (terminal, command) => {
+				terminal.start(command);
+				terminal.print('ready on :3000\r\n');
+				// the user lets the command go on in the background: the call returns, the command does not end
+				terminal.onDidChangeClaim.fire({ kind: TerminalClaimKind.Session, session: parseRequiredSessionUriFromChatUri(chat), chat: chat.toString(), turnId: 'turn-1' });
+			};
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+			const backgroundWork = () => signals.filter((s): s is IAgentActionSignal => s.kind === 'action' && (s.action.type === ActionType.ChatBackgroundWorkSet || s.action.type === ActionType.ChatBackgroundWorkRemoved));
+			assert.strictEqual(await agent.chats.canReleaseChat!(chat, session), true, 'nothing runs');
+
+			await agent.chats.sendMessage(chat, 'Start the dev server', [cwd], undefined, 'turn-1');
+
+			const [set, ...others] = backgroundWork();
+			assert.deepStrictEqual(others, []);
+			assert.strictEqual(set.resource.toString(), chat.toString());
+			assert.ok(set.action.type === ActionType.ChatBackgroundWorkSet);
+			assert.deepStrictEqual({ ...set.action.work, startedAt: undefined }, { kind: BackgroundWorkKind.Shell, id: 'shell:1', label: 'npm run dev', command: 'npm run dev', terminal: terminals.created[0].uri, startedAt: undefined });
+			assert.strictEqual(await agent.chats.canReleaseChat!(chat, session), false, 'its state shows the command: idle eviction would drop it');
+
+			terminals.created[0].finish(0);
+
+			const [, removed, ...rest] = backgroundWork();
+			assert.deepStrictEqual(rest, []);
+			assert.deepStrictEqual([removed.resource.toString(), removed.action], [chat.toString(), { type: ActionType.ChatBackgroundWorkRemoved, id: 'shell:1' }]);
+			assert.strictEqual(await agent.chats.canReleaseChat!(chat, session), true);
+		});
+
+		test('takes the background work away with the chat', async () => {
+			const { agent, registry, terminals } = createAgent();
+			const window = registry.window!;
+			window.autoApprove = { terminal: true };
+			window.results = [
+				call('open_persistent_terminal', {}, 'call-1'),
+				call('run_persistent_command', { command: 'npm run dev', persistent_terminal_id: '1' }, 'call-2'),
+				text('The server runs.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			terminals.shell = (terminal, command) => {
+				terminal.start(command);
+				terminal.onDidChangeClaim.fire({ kind: TerminalClaimKind.Session, session: parseRequiredSessionUriFromChatUri(chat), chat: chat.toString(), turnId: 'turn-1' });
+			};
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+			await agent.chats.sendMessage(chat, 'Start the dev server', [cwd], undefined, 'turn-1');
+
+			await agent.chats.disposeChat(chat, session);
+
+			const work = signals.filter((s): s is IAgentActionSignal => s.kind === 'action').map(s => s.action).filter(a => a.type === ActionType.ChatBackgroundWorkSet || a.type === ActionType.ChatBackgroundWorkRemoved);
+			assert.deepStrictEqual(work.map(a => a.type), [ActionType.ChatBackgroundWorkSet, ActionType.ChatBackgroundWorkRemoved]);
 		});
 
 		test('kills the terminals when the agent shuts down', async () => {

@@ -11,9 +11,10 @@ import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession } from '../../common/agent.js';
-import { TerminalClaimKind } from '../../common/state/protocol/state.js';
+import { BackgroundWorkKind, TerminalClaimKind } from '../../common/state/protocol/state.js';
+import { ActionType } from '../../common/state/sessionActions.js';
 import { buildDefaultChatUri, parseRequiredSessionUriFromChatUri } from '../../common/state/sessionState.js';
-import { IKodiaTerminalCall, KodiaTerminals, PERSISTENT_TERMINAL_FUNCTION_TOOLS } from '../../node/kodia/kodiaTerminals.js';
+import { IKodiaBackgroundWorkChange, IKodiaTerminalCall, KodiaTerminals, PERSISTENT_TERMINAL_FUNCTION_TOOLS } from '../../node/kodia/kodiaTerminals.js';
 import { FakeTerminal, FakeTerminalManager } from './kodiaFakeTerminalManager.js';
 
 suite('KodiaTerminals', () => {
@@ -26,9 +27,23 @@ suite('KodiaTerminals', () => {
 	// a command is waited for 30 ms instead of 5 s
 	function create() {
 		const manager = store.add(new FakeTerminalManager());
-		const terminals = store.add(new KodiaTerminals(manager, new NullLogService(), { commandWaitMs: 30, settleMs: 10 }));
+		const terminals = store.add(new KodiaTerminals(manager, new NullLogService(), { commandWaitMs: 30, settleMs: 10, workCheckMs: 15 }));
 		return { manager, terminals };
 	}
+
+	/** The background work the terminals publish, as the actions the agent forwards to the chat. */
+	function watchWork(terminals: KodiaTerminals): IKodiaBackgroundWorkChange[] {
+		const changes: IKodiaBackgroundWorkChange[] = [];
+		store.add(terminals.onDidChangeBackgroundWork(change => changes.push(change)));
+		return changes;
+	}
+
+	const summary = (changes: readonly IKodiaBackgroundWorkChange[]) => changes.map(({ chat: c, action }) => [c.toString() === chat.toString() ? 'chat' : 'other chat', action.type === ActionType.ChatBackgroundWorkSet ? `set ${action.work.id}` : `removed ${action.id}`]);
+	const waitFor = async (condition: () => boolean) => {
+		for (let i = 0; i < 200 && !condition(); i++) {
+			await new Promise(resolve => setTimeout(resolve, 5));
+		}
+	};
 
 	const callOf = (overrides?: Partial<IKodiaTerminalCall>): IKodiaTerminalCall => ({ chat, turnId: 'turn-1', toolCallId: 'call-1', workingDirectory, signal: new AbortController().signal, ...overrides });
 
@@ -406,6 +421,264 @@ suite('KodiaTerminals', () => {
 			assert.deepStrictEqual(await kill(terminals, '4'), { success: false, output: 'Kill Terminal: Terminal with ID 4 did not exist. The terminals that are open: 1.' });
 			assert.deepStrictEqual(await kill(terminals, '1', callOf({ chat: otherChat })), { success: false, output: 'Kill Terminal: Terminal with ID 1 did not exist. No terminal is open.' });
 			assert.deepStrictEqual(manager.disposed, [], 'a terminal of another chat is not closed');
+		});
+	});
+
+	suite('the end of the output in zsh', () => {
+
+		/** What zsh draws before its prompt: a "%" in reverse video, and the blanks and carriage returns that hide it on a real screen. */
+		const zshMark = `\x1b[1m\x1b[7m%\x1b[27m\x1b[1m\x1b[0m${' '.repeat(79)}\r \r`;
+
+		/** A shell that prints what a command prints, and then draws its end-of-line mark when `mark` is set. */
+		function prints(manager: FakeTerminalManager, printed: string, mark = true) {
+			manager.defaultShell = '/bin/zsh';
+			manager.shell = (terminal, command) => {
+				terminal.start(command);
+				terminal.print(printed);
+				if (mark) {
+					terminal.print(zshMark);
+				}
+				terminal.finish(0);
+			};
+		}
+
+		test('leaves out the "%" that zsh draws, a line of its own when the output ends with a newline', async () => {
+			const { manager, terminals } = create();
+			prints(manager, 'done\r\n');
+			await open(terminals);
+
+			const result = await run(terminals, 'make');
+
+			assert.strictEqual(result.output, 'done\n(exit code 0)');
+			assert.strictEqual(result.terminal?.preview, 'done', 'and the window does not show it either');
+		});
+
+		test('leaves it out when it comes after the last line, which has no newline', async () => {
+			const { manager, terminals } = create();
+			prints(manager, 'a\r\nb');
+			await open(terminals);
+
+			assert.strictEqual((await run(terminals, `printf 'a\\nb'`)).output, 'a\nb\n(exit code 0)');
+		});
+
+		test('says there was no output when the mark is all there is', async () => {
+			const { manager, terminals } = create();
+			prints(manager, '');
+			await open(terminals);
+
+			assert.strictEqual((await run(terminals, 'true')).output, '(no output)\n(exit code 0)');
+		});
+
+		test('leaves an output that really ends in "%" as it is, with the mark after it or not', async () => {
+			const { manager, terminals } = create();
+			await open(terminals);
+
+			prints(manager, 'coverage 100%\r\n');
+			assert.strictEqual((await run(terminals, 'make coverage')).output, 'coverage 100%\n(exit code 0)');
+			prints(manager, 'coverage 100%\r\n', false);
+			assert.strictEqual((await run(terminals, 'make coverage')).output, 'coverage 100%\n(exit code 0)', 'when no mark is drawn, nothing is left out');
+			prints(manager, 'coverage 100%', true);
+			assert.strictEqual((await run(terminals, 'printf coverage')).output, 'coverage 100%\n(exit code 0)', 'the "%" the output ends with is its own, and the one the mark adds goes');
+		});
+
+		test('leaves out the mark alone, and not a line of "%" the command printed before it', async () => {
+			const { manager, terminals } = create();
+			await open(terminals);
+
+			prints(manager, '%\r\n');
+			assert.strictEqual((await run(terminals, 'echo %')).output, '%\n(exit code 0)');
+			prints(manager, 'a\r\n%\r\n', false);
+			assert.strictEqual((await run(terminals, 'printf')).output, 'a\n%\n(exit code 0)', 'a line of "%" is the command\'s when no mark is drawn');
+		});
+	});
+
+	suite('background work', () => {
+
+		test('a command left running after the wait is shell work of the chat, with the command and its terminal', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals);
+			assert.strictEqual(changes.length, 0, 'an idle terminal is none');
+
+			const before = Date.now();
+			await run(terminals, 'npm run dev');
+
+			assert.strictEqual(changes.length, 1);
+			const { chat: changed, action } = changes[0];
+			assert.strictEqual(changed.toString(), chat.toString());
+			assert.ok(action.type === ActionType.ChatBackgroundWorkSet);
+			const { startedAt, ...work } = action.work;
+			assert.deepStrictEqual(work, { kind: BackgroundWorkKind.Shell, id: 'shell:1', label: 'npm run dev', command: 'npm run dev', terminal: terminalOf(manager).uri });
+			assert.ok(new Date(startedAt).getTime() >= before - 1000 && new Date(startedAt).getTime() <= Date.now(), `started when the command was typed: ${startedAt}`);
+			assert.ok(terminals.hasBackgroundWork(chat));
+			assert.ok(!terminals.hasBackgroundWork(otherChat));
+		});
+
+		test('is not published again by the calls that read it', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			await open(terminals);
+			await run(terminals, 'npm run dev');
+			const changes = watchWork(terminals);
+
+			terminalOf(manager).print('GET / 200\r\n');
+			await run(terminals, '');
+
+			assert.deepStrictEqual(changes, []);
+		});
+
+		test('a command that ends within the wait is none', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals);
+
+			await run(terminals, 'echo hi');
+			await run(terminals, 'false');
+
+			assert.deepStrictEqual(changes, []);
+			assert.ok(!terminals.hasBackgroundWork(chat));
+		});
+
+		test('goes when the command ends, and comes back with the next one that is left running', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals);
+			await run(terminals, 'npm run dev');
+
+			terminalOf(manager).finish(0);
+			assert.deepStrictEqual(summary(changes), [['chat', 'set shell:1'], ['chat', 'removed shell:1']]);
+			assert.ok(!terminals.hasBackgroundWork(chat));
+
+			await run(terminals, 'npm run dev');
+			assert.deepStrictEqual(summary(changes), [['chat', 'set shell:1'], ['chat', 'removed shell:1'], ['chat', 'set shell:1']]);
+			assert.strictEqual(changes[2].action.type === ActionType.ChatBackgroundWorkSet && changes[2].action.work.label, 'npm run dev');
+		});
+
+		test('goes when the shell exits', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals);
+			await run(terminals, 'npm run dev');
+
+			terminalOf(manager).exit(137);
+
+			assert.deepStrictEqual(summary(changes), [['chat', 'set shell:1'], ['chat', 'removed shell:1']]);
+			assert.ok(!terminals.hasBackgroundWork(chat));
+		});
+
+		test('goes when the agent kills the terminal', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals);
+			await run(terminals, 'npm run dev');
+
+			await kill(terminals);
+
+			assert.deepStrictEqual(summary(changes), [['chat', 'set shell:1'], ['chat', 'removed shell:1']]);
+		});
+
+		test('goes when the chat, or the turn that opened the terminal, shuts it down, and only for the terminals that go', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals, {}, callOf({ turnId: 'turn-1' }));
+			await open(terminals, {}, callOf({ turnId: 'turn-2' }));
+			await open(terminals, {}, callOf({ chat: otherChat }));
+			await run(terminals, 'npm run dev', '1');
+			await run(terminals, 'npm run dev', '2');
+			await run(terminals, 'npm run dev', '1', callOf({ chat: otherChat }));
+			changes.length = 0;
+
+			terminals.shutdownChat(chat, 'turn-2');
+			assert.deepStrictEqual(summary(changes), [['chat', 'removed shell:2']]);
+			assert.ok(terminals.hasBackgroundWork(chat), 'the first terminal still runs its command');
+
+			terminals.shutdownChat(chat);
+			assert.deepStrictEqual(summary(changes), [['chat', 'removed shell:2'], ['chat', 'removed shell:1']]);
+			assert.ok(!terminals.hasBackgroundWork(chat));
+			assert.ok(terminals.hasBackgroundWork(otherChat), 'another chat\'s work is its own');
+		});
+
+		test('goes when the user closes the terminal, which nothing says', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals);
+			await run(terminals, 'npm run dev');
+
+			manager.disposeTerminal(terminalOf(manager).uri);
+			await waitFor(() => changes.length > 1);
+
+			assert.deepStrictEqual(summary(changes), [['chat', 'set shell:1'], ['chat', 'removed shell:1']]);
+			assert.ok(!terminals.hasBackgroundWork(chat));
+			assert.match((await run(terminals, 'echo hi')).output, /^Terminal with ID 1 does not exist/);
+		});
+
+		test('stops looking at the terminals when no command is left running', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			await open(terminals);
+			await run(terminals, 'npm run dev');
+			terminalOf(manager).finish(0);
+			await new Promise(resolve => setTimeout(resolve, 50));
+			// the terminal the user closes with nothing running in it is not the work of anything: it is found when it is used
+			manager.disposeTerminal(terminalOf(manager).uri);
+			const changes = watchWork(terminals);
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			assert.deepStrictEqual(changes, []);
+		});
+
+		test('is none when nothing could say when the command ends', async () => {
+			const { manager, terminals } = create();
+			manager.commandDetectionSupported = false;
+			manager.shell = (terminal, command) => {
+				if (!command.startsWith('echo "<<<')) {
+					terminal.print(`${command}\r\nready\r\n`);
+				}
+			};
+			const changes = watchWork(terminals);
+			await open(terminals);
+
+			await run(terminals, 'npm run dev');
+
+			assert.deepStrictEqual(changes, []);
+		});
+
+		test('is a command that goes on in the terminal of an earlier turn when the user stops the turn that waited for it', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals, {}, callOf({ turnId: 'turn-1' }));
+			const abort = new AbortController();
+			setTimeout(() => abort.abort(), 5);
+
+			await run(terminals, 'npm run dev', '1', callOf({ turnId: 'turn-2', signal: abort.signal }));
+
+			assert.deepStrictEqual(summary(changes), [['chat', 'set shell:1']]);
+			terminalOf(manager).finish(0);
+			assert.deepStrictEqual(summary(changes), [['chat', 'set shell:1'], ['chat', 'removed shell:1']]);
+		});
+
+		test('is none when the turn that is stopped opened the terminal, which goes with it', async () => {
+			const { manager, terminals } = create();
+			withDevServer(manager);
+			const changes = watchWork(terminals);
+			await open(terminals, {}, callOf({ turnId: 'turn-2' }));
+			const abort = new AbortController();
+			setTimeout(() => abort.abort(), 5);
+
+			await run(terminals, 'npm run dev', '1', callOf({ turnId: 'turn-2', signal: abort.signal }));
+			terminals.shutdownChat(chat, 'turn-2');
+
+			assert.deepStrictEqual(changes, []);
+			// the wait that was left ends by itself
+			await new Promise(resolve => setTimeout(resolve, 60));
 		});
 	});
 

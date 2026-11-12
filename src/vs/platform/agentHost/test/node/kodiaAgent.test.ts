@@ -503,7 +503,7 @@ suite('KodiaAgent', () => {
 			}
 		};
 
-		const actionsOf = (signals: readonly AgentSignal[]): ChatAction[] => signals.filter((s): s is IAgentActionSignal => s.kind === 'action').map(s => s.action);
+		const actionsOf = (signals: readonly AgentSignal[]): ChatAction[] => signals.filter((s): s is IAgentActionSignal => s.kind === 'action').map(s => s.action as ChatAction);
 
 		test('shows the reasoning and the text as the model writes them, before the request ends', async () => {
 			const { agent, registry } = createAgent();

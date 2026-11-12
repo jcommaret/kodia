@@ -287,7 +287,7 @@ export function editorToolArguments(argsJson: string, workingDirectory: URI | un
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 120_000;
 // as in Kodia's chat: ~25k tokens a page of a file or a web page, and each result stays in the history
-const MAX_PAGE_CHARS = 100_000;
+export const MAX_PAGE_CHARS = 100_000;
 const MAX_CHILDREN_PAGE = 500;
 const MAX_TREE_CHARS = 20_000;
 const MAX_SEARCH_LINES = 100;

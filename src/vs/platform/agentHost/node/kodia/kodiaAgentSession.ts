@@ -8,7 +8,7 @@ import { basename } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import type { IAgentSessionProjectInfo } from '../../common/agent.js';
 import type { IByokLmInputItem } from '../../common/agentHostByokLm.js';
-import type { ModelSelection } from '../../common/state/protocol/state.js';
+import type { MessageAttachment, ModelSelection } from '../../common/state/protocol/state.js';
 import type { IKodiaCompaction } from './kodiaContext.js';
 
 /**
@@ -21,12 +21,27 @@ interface IKodiaChatBacking {
 	readonly history: IByokLmInputItem[];
 	/** The id of each user turn in {@link history}, in order, so a restored chat keeps them. */
 	readonly turnIds: string[];
+	/** What the user attached to the message of a turn, by turn id, so a restored chat shows it. Absent from a chat saved before attachments. */
+	readonly attachments?: { readonly [turnId: string]: MessageAttachment[] };
 	readonly model?: ModelSelection;
 	readonly workingDirectory?: string;
 	/** What the model is not sent, once the history outgrew its context window (see kodiaContext.ts). */
 	readonly compaction?: IKodiaCompaction;
 	readonly createdAt: number;
 	readonly modifiedAt?: number;
+}
+
+// the attachments of the turns read back from storage: anything else is none
+function readAttachments(value: unknown): { [turnId: string]: MessageAttachment[] } {
+	const attachments: { [turnId: string]: MessageAttachment[] } = {};
+	if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+		for (const [turnId, turnAttachments] of Object.entries(value)) {
+			if (Array.isArray(turnAttachments) && turnAttachments.length > 0) {
+				attachments[turnId] = turnAttachments;
+			}
+		}
+	}
+	return attachments;
 }
 
 // a compaction read back from storage: anything else is no compaction
@@ -46,6 +61,9 @@ export class KodiaAgentSession extends Disposable {
 	history: IByokLmInputItem[];
 
 	turnIds: string[];
+
+	/** What the user attached to the message of a turn, by turn id: what the model was sent of it is in the history. */
+	attachments: { [turnId: string]: MessageAttachment[] };
 
 	model: ModelSelection | undefined;
 
@@ -81,6 +99,7 @@ export class KodiaAgentSession extends Disposable {
 		init: {
 			readonly history?: IByokLmInputItem[];
 			readonly turnIds?: string[];
+			readonly attachments?: { [turnId: string]: MessageAttachment[] };
 			readonly model?: ModelSelection;
 			readonly workingDirectory?: URI;
 			readonly compaction?: IKodiaCompaction;
@@ -93,6 +112,7 @@ export class KodiaAgentSession extends Disposable {
 		super();
 		this.history = init.history ?? [];
 		this.turnIds = init.turnIds ?? [];
+		this.attachments = init.attachments ?? {};
 		this.model = init.model;
 		this.workingDirectory = init.workingDirectory;
 		this.project = init.project ?? projectForWorkingDirectory(init.workingDirectory);
@@ -117,6 +137,7 @@ export class KodiaAgentSession extends Disposable {
 		return new KodiaAgentSession(chat, {
 			history: backing.history,
 			turnIds: Array.isArray(backing.turnIds) ? backing.turnIds : [],
+			attachments: readAttachments(backing.attachments),
 			model: backing.model,
 			workingDirectory: backing.workingDirectory ? URI.parse(backing.workingDirectory) : undefined,
 			compaction: isCompaction(backing.compaction) ? backing.compaction : undefined,
@@ -130,6 +151,7 @@ export class KodiaAgentSession extends Disposable {
 		const backing: IKodiaChatBacking = {
 			history: this.history,
 			turnIds: this.turnIds,
+			...(Object.keys(this.attachments).length > 0 ? { attachments: this.attachments } : {}),
 			...(this.model ? { model: this.model } : {}),
 			...(this.workingDirectory ? { workingDirectory: this.workingDirectory.toString() } : {}),
 			...(this.compaction ? { compaction: this.compaction } : {}),

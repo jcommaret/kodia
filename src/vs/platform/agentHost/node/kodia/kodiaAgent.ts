@@ -17,7 +17,7 @@ import { IFileService } from '../../../files/common/files.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClient, IAgent, IAgentChatConfigCompletionsParams, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, IAgentChats, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSpawnChatEvent } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmMessageItem, IByokLmModelInfo, IKodiaAutoApprove, IKodiaMcpTool, IKodiaMcpToolResult } from '../../common/agentHostByokLm.js';
 import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { KODIA_AGENT_PROVIDER_ID, KODIA_AGENT_RESOURCE } from '../../common/kodiaAgentHostLm.js';
 import { ChatInputRequestPurpose, withChatInputRequestPurpose } from '../../common/meta/agentChatInputRequestMeta.js';
@@ -30,7 +30,8 @@ import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, 
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { IAgentHostTerminalManager } from '../agentHostTerminalManager.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
-import { chooseKeepIdx, clearOldToolResults, estimateHistoryTokens, IKodiaCompaction, modelHistory, tokensOfChars, transcriptMessages } from './kodiaContext.js';
+import { resolveAttachments } from './kodiaAttachments.js';
+import { chooseKeepIdx, clearOldToolResults, estimateHistoryTokens, IKodiaCompaction, modelHistory, tokensOfChars, transcriptMessages, withoutImages } from './kodiaContext.js';
 import { readProjectMemory, readProjectRules, readProjectSkills } from './kodiaProjectContext.js';
 import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
 import { projectMemoryPrompt } from '../../../kodia/common/projectMemory.js';
@@ -377,21 +378,26 @@ export class KodiaAgent extends Disposable implements IAgent {
 			}
 		}
 		const turns: Turn[] = [];
-		let current: { id: string; text: string; responseParts: ResponsePart[] } | undefined;
+		let current: { id: string; text: string; attachments: MessageAttachment[] | undefined; responseParts: ResponsePart[] } | undefined;
 		let userTurn = 0;
 		const finish = () => {
 			if (current) {
-				turns.push({ id: current.id, message: { text: current.text, origin: { kind: MessageKind.User } }, responseParts: current.responseParts, usage: undefined, state: TurnState.Complete });
+				turns.push({ id: current.id, message: { text: current.text, origin: { kind: MessageKind.User }, ...current.attachments ? { attachments: current.attachments } : {} }, responseParts: current.responseParts, usage: undefined, state: TurnState.Complete });
 			}
 		};
 		for (const item of session.history) {
 			switch (item.type) {
 				case 'message': {
-					const text = item.content.map(part => part.type === 'text' ? part.text : '').join('');
 					if (item.role === 'user') {
 						finish();
-						current = { id: session.turnIds[userTurn++] ?? generateUuid(), text, responseParts: [] };
-					} else if (item.role === 'assistant' && current && text) {
+						const id = session.turnIds[userTurn++] ?? generateUuid();
+						// what the user typed is the first part of the message: what they attached follows it
+						const first = item.content[0];
+						current = { id, text: first?.type === 'text' ? first.text : '', attachments: session.attachments[id], responseParts: [] };
+						break;
+					}
+					const text = item.content.map(part => part.type === 'text' ? part.text : '').join('');
+					if (item.role === 'assistant' && current && text) {
 						current.responseParts.push({ kind: ResponsePartKind.Markdown, id: generateUuid(), content: text });
 					}
 					break;
@@ -462,7 +468,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 
 	// #region Turn loop
 
-	private async _sendMessage(chat: URI, prompt: string, workingDirectories: readonly URI[] | undefined, _attachments: readonly MessageAttachment[] | undefined, turnId: string | undefined): Promise<void> {
+	private async _sendMessage(chat: URI, prompt: string, workingDirectories: readonly URI[] | undefined, attachments: readonly MessageAttachment[] | undefined, turnId: string | undefined): Promise<void> {
 		const chatKey = chat.toString();
 		await this._chatSequencer.queue(chatKey, async () => {
 			const session = this._chats.get(chatKey);
@@ -485,11 +491,11 @@ export class KodiaAgent extends Disposable implements IAgent {
 					project: session.project,
 				});
 			}
-			await this._runTurn(session, prompt, turnId ?? generateUuid());
+			await this._runTurn(session, prompt, attachments, turnId ?? generateUuid());
 		});
 	}
 
-	private async _runTurn(session: KodiaAgentSession, prompt: string, turnId: string): Promise<void> {
+	private async _runTurn(session: KodiaAgentSession, prompt: string, attachments: readonly MessageAttachment[] | undefined, turnId: string): Promise<void> {
 		const startedAt = Date.now();
 		const fire = (action: ChatAction) => this._onDidChatProgress.fire({ kind: 'action', resource: session.chat, action });
 		const fireError = (errorType: string, message: string) => fire({ type: ActionType.ChatError, turnId, duration: Date.now() - startedAt, part: createErrorResponsePart({ errorType, message }) });
@@ -508,9 +514,15 @@ export class KodiaAgent extends Disposable implements IAgent {
 		const signal = session.abortSignal;
 		const toolCtx = { workingDirectory: session.workingDirectory, signal };
 		const usage = { inputTokens: 0, outputTokens: 0 };
-		session.contextTokens = (session.contextTokens ?? estimateHistoryTokens(modelHistory(session.history, session.compaction))) + tokensOfChars(prompt.length);
-		session.history.push({ type: 'message', role: 'user', content: [{ type: 'text', text: prompt }] });
+		// what the user attached goes to the model after their prompt, and stays in the history with it, so it counts in the context
+		const { parts, stored } = await resolveAttachments(attachments, { fileService: this._fileService, supportsVision: this._supportsVision(model) });
+		const userMessage: IByokLmMessageItem = { type: 'message', role: 'user', content: [{ type: 'text', text: prompt }, ...parts] };
+		session.contextTokens = (session.contextTokens ?? estimateHistoryTokens(modelHistory(session.history, session.compaction))) + estimateHistoryTokens([userMessage]);
+		session.history.push(userMessage);
 		session.turnIds.push(turnId);
+		if (stored.length > 0) {
+			session.attachments[turnId] = stored;
+		}
 
 		try {
 			// read once a turn: the rules and skills don't change between its rounds
@@ -827,6 +839,11 @@ export class KodiaAgent extends Disposable implements IAgent {
 		}
 	}
 
+	/** Whether a Kodia model accepts images, as the window says: not when it doesn't say. */
+	private _supportsVision(model: { readonly vendor: string; readonly modelId: string }): boolean {
+		return this._bridge.getModels().find(m => m.vendor === model.vendor && m.id === model.modelId)?.supportsVision === true;
+	}
+
 	/** One model request, run by the serving Kodia window and cancelled with the turn. */
 	private async _chat(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, instructions: string, tools: IByokLmFunctionTool[], signal: AbortSignal): Promise<IByokLmChatResult> {
 		const cts = new CancellationTokenSource();
@@ -837,7 +854,8 @@ export class KodiaAgent extends Disposable implements IAgent {
 				vendor: model.vendor,
 				modelId: model.modelId,
 				instructions,
-				input: modelHistory(session.history, session.compaction),
+				// an image attached while another model ran is a note for one that can't see it
+				input: this._supportsVision(model) ? modelHistory(session.history, session.compaction) : withoutImages(modelHistory(session.history, session.compaction)),
 				tools,
 			}, cts.token);
 		} finally {

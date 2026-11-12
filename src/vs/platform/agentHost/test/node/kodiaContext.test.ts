@@ -7,7 +7,7 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import type { IByokLmInputItem } from '../../common/agentHostByokLm.js';
 import { CLEARED_TOOL_RESULT, summarizedThreadMessage } from '../../../kodia/common/threadSummary.js';
-import { chooseKeepIdx, clearOldToolResults, estimateHistoryTokens, latestUserIdx, modelHistory, tokensOfChars, transcriptMessages } from '../../node/kodia/kodiaContext.js';
+import { chooseKeepIdx, clearOldToolResults, estimateHistoryTokens, IMAGE_NOT_SEEN_NOTE, latestUserIdx, modelHistory, tokensOfChars, transcriptMessages, withoutImages } from '../../node/kodia/kodiaContext.js';
 
 const user = (text: string): IByokLmInputItem => ({ type: 'message', role: 'user', content: [{ type: 'text', text }] });
 const assistant = (text: string): IByokLmInputItem => ({ type: 'message', role: 'assistant', content: [{ type: 'text', text }] });
@@ -33,6 +33,33 @@ suite('Kodia agent - keeping a long conversation within the context window', () 
 		const withImage: IByokLmInputItem = { type: 'function_call_output', callId: 'c1', output: '', content: [{ type: 'text', text: 'abc' }, { type: 'image', mimeType: 'image/png', data: 'AAAA' }] };
 		assert.strictEqual(estimateHistoryTokens([withImage]), Math.ceil((3 + 3_000) / 3));
 		assert.strictEqual(tokensOfChars(10), 4);
+	});
+
+	test('estimates the attachments of a message with the message, an image by a fixed size', () => {
+		const withAttachments: IByokLmInputItem = { type: 'message', role: 'user', content: [{ type: 'text', text: 'a'.repeat(30) }, { type: 'text', text: 'b'.repeat(60) }, { type: 'image', mimeType: 'image/png', data: 'AAAA' }] };
+		assert.strictEqual(estimateHistoryTokens([withAttachments]), Math.ceil((90 + 3_000) / 3));
+	});
+
+	test('a message of the user is its prompt and its attachments, one a paragraph, for the summary and for the request a summary carries on', () => {
+		const message: IByokLmInputItem = { type: 'message', role: 'user', content: [{ type: 'text', text: 'Fix it' }, { type: 'text', text: 'Attached file: a.ts' }, { type: 'image', mimeType: 'image/png', data: 'AAAA' }] };
+		assert.deepStrictEqual(transcriptMessages([message], 0, 1), [{ role: 'user', content: 'Fix it\n\nAttached file: a.ts' }]);
+		const view = modelHistory([message, assistant('ok')], { clearedBefore: 0, summary: { text: 'S', keepFromIdx: 2 } });
+		assert.deepStrictEqual(view[0], { type: 'message', role: 'user', content: [{ type: 'text', text: summarizedThreadMessage('S', 'Fix it\n\nAttached file: a.ts') }] });
+	});
+
+	test('a model that cannot see images is sent a note in place of each, and the history keeps them', () => {
+		const image = { type: 'image' as const, mimeType: 'image/png' as const, data: 'AAAA' };
+		const history: IByokLmInputItem[] = [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Look' }, image, image] }, assistant('I see.')];
+		const before = JSON.stringify(history);
+
+		assert.deepStrictEqual(withoutImages(history), [
+			{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Look' }, { type: 'text', text: IMAGE_NOT_SEEN_NOTE }, { type: 'text', text: IMAGE_NOT_SEEN_NOTE }] },
+			assistant('I see.'),
+		]);
+		assert.strictEqual(JSON.stringify(history), before);
+		// nothing to change: the history itself
+		const plain = [user('Hi')];
+		assert.strictEqual(withoutImages(plain), plain);
 	});
 
 	test('finds the latest message of the user', () => {

@@ -52,6 +52,7 @@ const refreshBasedOn: { [k in RefreshableProviderName]: (keyof SettingsOfProvide
 	// openAICompatible: ['_didFillInProviderSettings', 'endpoint', 'apiKey'],
 }
 const REFRESH_INTERVAL = 5_000
+const LIST_TIMEOUT = 10_000 // a local server lists its models at once
 // const COOLDOWN_TIMEOUT = 300
 
 const autoOptions = { enableProviderOnSuccess: true, doNotFire: true }
@@ -113,8 +114,8 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 							const prevEnabled = prevVals[0] as boolean
 							const enabled = newVals[0] as boolean
 
-							// if it was just enabled, or there was a change and it wasn't to the enabled state, refresh
-							if ((enabled && !prevEnabled) || (!enabled && !prevEnabled)) {
+							// refresh unless the provider was just switched off: switched on, or its endpoint changed (switched on or not)
+							if (enabled || !prevEnabled) {
 								// if user just clicked enable, refresh
 								this.startRefreshingModels(providerName, autoOptions)
 							}
@@ -150,12 +151,20 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 	}
 
 
+	// Kodia: each refresh of a provider has a number. Only the answer to the latest one counts and polls again: an older
+	// one (a poll still in flight when the user clicks, or when MLX starts) neither overwrites newer models nor starts a
+	// second polling loop.
+	private readonly _generationOfProvider: Record<RefreshableProviderName, number> = { ollama: 0, vLLM: 0, lmStudio: 0, mlx: 0 }
+
 	// start listening for models (and don't stop)
 	startRefreshingModels: IRefreshModelService['startRefreshingModels'] = (providerName, options) => {
 
 		this._clearProviderTimeout(providerName)
+		const generation = ++this._generationOfProvider[providerName]
+		const isLatest = () => generation === this._generationOfProvider[providerName]
 
-		this._setRefreshState(providerName, 'refreshing', options)
+		// a poll keeps the last answer shown meanwhile (see ProviderStatus): only a click shows the spinner
+		if (!options.doNotFire) this._setRefreshState(providerName, 'refreshing')
 
 		const autoPoll = () => {
 			if (this.voidSettingsService.state.globalSettings.autoRefreshModels) {
@@ -164,12 +173,24 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 				this._setTimeoutId(providerName, timeoutId)
 			}
 		}
+
+		// a server that accepts the connection but never answers (a model being loaded, a stuck process) must not stop
+		// the polling for good: it counts as not running, and a late answer is ignored
+		const requestTimeoutId = setTimeout(() => {
+			if (!isLatest()) return
+			this._generationOfProvider[providerName]++
+			this._finish(providerName, 'error', options)
+			autoPoll()
+		}, LIST_TIMEOUT)
+
 		const listFn = providerName === 'ollama' ? this.llmMessageService.ollamaList
 			: this.llmMessageService.openAICompatibleList
 
 		listFn({
 			providerName,
 			onSuccess: ({ models }) => {
+				clearTimeout(requestTimeoutId)
+				if (!isLatest()) return
 				// set the models to the detected models
 				const modelNames = models.map(model => {
 					if (providerName === 'ollama') return (model as OllamaModelResponse).name;
@@ -185,18 +206,29 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 					{ enableProviderOnSuccess: options.enableProviderOnSuccess, hideRefresh: options.doNotFire }
 				)
 
-				if (options.enableProviderOnSuccess) this.voidSettingsService.setSettingOfProvider(providerName, '_didFillInProviderSettings', true)
+				if (options.enableProviderOnSuccess && !this.voidSettingsService.state.settingsOfProvider[providerName]._didFillInProviderSettings) {
+					this.voidSettingsService.setSettingOfProvider(providerName, '_didFillInProviderSettings', true)
+				}
 
-				this._setRefreshState(providerName, 'finished', options)
+				this._finish(providerName, 'finished', options)
 				autoPoll()
 			},
-			onError: ({ error }) => {
-				this._setRefreshState(providerName, 'error', options)
+			onError: () => {
+				clearTimeout(requestTimeoutId)
+				if (!isLatest()) return
+				this._finish(providerName, 'error', options)
 				autoPoll()
 			}
 		})
 
 
+	}
+
+	// a click always shows its answer; a poll only when the answer changed (the server started or stopped), so the
+	// provider's status follows the server without the refresh button flashing every 5 seconds
+	private _finish(providerName: RefreshableProviderName, state: 'finished' | 'error', options: { doNotFire: boolean }) {
+		if (options.doNotFire && this.state[providerName].state === state) return
+		this._setRefreshState(providerName, state)
 	}
 
 	_clearAllTimeouts() {
@@ -217,8 +249,7 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 		this.state[providerName].timeoutId = timeoutId
 	}
 
-	private _setRefreshState(providerName: RefreshableProviderName, state: RefreshableState['state'], options?: { doNotFire: boolean }) {
-		if (options?.doNotFire) return
+	private _setRefreshState(providerName: RefreshableProviderName, state: RefreshableState['state']) {
 		this.state[providerName].state = state
 		this._onDidChangeState.fire(providerName)
 	}

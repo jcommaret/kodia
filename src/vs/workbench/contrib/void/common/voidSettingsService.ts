@@ -568,6 +568,8 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 
 		const normalizedNames = normalizeAutodetectedModelNamesForProvider(providerName, autodetectedModelNames)
 		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: normalizedNames, type: 'autodetected' })
+		// a local server is polled every 5 seconds: only a change is saved (and re-renders the settings)
+		if (JSON.stringify(newModels) === JSON.stringify(models)) return
 		this.setSettingOfProvider(providerName, 'models', newModels)
 
 		// if the models changed, log it

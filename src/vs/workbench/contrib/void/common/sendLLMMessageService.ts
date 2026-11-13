@@ -97,15 +97,19 @@ export class LLMMessageService extends Disposable implements ILLMMessageService 
 		// .list()
 		this._register((this.channel.listen('onSuccess_list_ollama') satisfies Event<EventModelListOnSuccessParams<OllamaModelResponse>>)(e => {
 			this.listHooks.ollama.success[e.requestId]?.(e)
+			this._clearListHooks(e.requestId)
 		}))
 		this._register((this.channel.listen('onError_list_ollama') satisfies Event<EventModelListOnErrorParams<OllamaModelResponse>>)(e => {
 			this.listHooks.ollama.error[e.requestId]?.(e)
+			this._clearListHooks(e.requestId)
 		}))
 		this._register((this.channel.listen('onSuccess_list_openAICompatible') satisfies Event<EventModelListOnSuccessParams<OpenaiCompatibleModelResponse>>)(e => {
 			this.listHooks.openAICompat.success[e.requestId]?.(e)
+			this._clearListHooks(e.requestId)
 		}))
 		this._register((this.channel.listen('onError_list_openAICompatible') satisfies Event<EventModelListOnErrorParams<OpenaiCompatibleModelResponse>>)(e => {
 			this.listHooks.openAICompat.error[e.requestId]?.(e)
+			this._clearListHooks(e.requestId)
 		}))
 
 	}
@@ -199,6 +203,14 @@ export class LLMMessageService extends Disposable implements ILLMMessageService 
 	listProviderModels = async (providerName: ListableProviderName, apiKey: string): Promise<unknown[] | undefined> => {
 		const models: unknown = await this.channel.call('listProviderModels', { providerName, apiKey })
 		return Array.isArray(models) ? models : undefined
+	}
+
+	// a list answers once: its hooks go (local servers are listed every 5 seconds)
+	private _clearListHooks(requestId: string) {
+		delete this.listHooks.ollama.success[requestId]
+		delete this.listHooks.ollama.error[requestId]
+		delete this.listHooks.openAICompat.success[requestId]
+		delete this.listHooks.openAICompat.error[requestId]
 	}
 
 	private _clearChannelHooks(requestId: string) {

@@ -1,8 +1,8 @@
 {
-  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.7.2/Kodia-linux-x64-1.141.0-2.7.2.tar.gz",
-  "name": "1.141.0-2.7.2",
-  "version": "8af1154d0db4e3290fce8f0e676f52d445026e16",
+  "url": "https://github.com/jcommaret/kodia/releases/download/1.141.0-2.7.3/Kodia-linux-x64-1.141.0-2.7.3.tar.gz",
+  "name": "1.141.0-2.7.3",
+  "version": "0e39289998d89244712b46f320a08732f8d393d8",
   "productVersion": "1.141.0.0",
-  "timestamp": 1794576796522,
-  "sha256hash": "e904e6d27e1c750a985b313257879de6cb6ac9aad8efa0aea2f80208b93143fc"
+  "timestamp": 1794696166777,
+  "sha256hash": "1daf56b95225d3a8b969eb5dafaf9dd197045b68378b61a8f0e3d5110d0dbbd4"
 }

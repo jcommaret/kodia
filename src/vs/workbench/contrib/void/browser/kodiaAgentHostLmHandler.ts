@@ -12,6 +12,7 @@ import { IKodiaAgentHostLmHandler } from '../../../../platform/agentHost/common/
 import { editorToolNames, isEditorToolName } from '../../../../platform/kodia/common/toolCatalog.js';
 import { appendedText, toInternalTool, toOutput, toSimpleMessages, toUsage } from '../common/kodiaAgentHostLmMessages.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
+import { withNativeToolsForMlx } from '../common/jsonToolCall.js';
 import { toolsXMLSystemPrompt } from '../common/prompt/prompts.js';
 import { joinUserInstructions } from '../common/instructionsFrameworks.js';
 import { editorToolParams, IKodiaEditorToolsService } from '../common/kodiaEditorToolsService.js';
@@ -130,7 +131,9 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 		if (modelSelection.providerName === 'mlx' && this._voidSettingsService.state.globalSettings.autoSetupMlx) {
 			await this._mlxService.ensureReady({ installIfMissing: false, startServer: true }).catch(() => undefined);
 		}
-		const { overridesOfModel, optionsOfModelSelection, globalSettings } = this._voidSettingsService.state;
+		const { overridesOfModel: settingsOverrides, optionsOfModelSelection, globalSettings } = this._voidSettingsService.state;
+		// a local MLX model with no tool format of its own is offered the tools natively (its calls come back as JSON)
+		const overridesOfModel = withNativeToolsForMlx(modelSelection, settingsOverrides);
 		const tools = request.tools?.flatMap(toInternalTool) ?? [];
 		// Models without native tool calling are taught the XML format in the system message.
 		const { specialToolFormat } = getModelCapabilities(modelSelection.providerName, modelSelection.modelName, overridesOfModel);

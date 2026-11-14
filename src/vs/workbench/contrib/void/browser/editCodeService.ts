@@ -1303,7 +1303,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		let streamRequestIdRef: { current: string | null } = { current: null } // can use this as a proxy to set the diffArea's stream state requestId
 
 		// build messages
-		const quickEditFIMTags = defaultQuickEditFimTags // TODO can eventually let users customize modelFimTags
+		const quickEditFIMTags = defaultQuickEditFimTags
 		const originalFileCode = model.getValue(EndOfLinePreference.LF)
 		const originalCode = startRange === 'fullFile' ? originalFileCode : originalFileCode.split('\n').slice((startRange[0] - 1), (startRange[1] - 1) + 1).join('\n')
 		const language = model.getLanguageId()
@@ -1620,7 +1620,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		// refresh now in case onText takes a while to get 1st message
 		this._refreshStylesAndDiffsInURI(uri)
 
-		// stream style related - TODO replace these with whatever block we're on initially if already started (if add caching of apply S/R blocks)
+		// stream style related
 		let latestStreamLocationMutable: StreamLocationMutable | null = null
 		let shouldUpdateOrigStreamStyle = true
 		let oldBlocks: ExtractedSearchReplaceBlock[] = []
@@ -1950,8 +1950,6 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 	// called on void.acceptDiff
 	public async acceptDiff({ diffid }: { diffid: number }) {
-
-		// TODO could use an ITextModelto do this instead, would be much simpler
 
 		const diff = this.diffOfId[diffid]
 		if (!diff) return

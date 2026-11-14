@@ -9,7 +9,7 @@ import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
 import { VoidButtonBgDarken } from '../util/inputs.js'
 import { useAccessor, useIsOptedOut } from '../util/services.js'
 import { WarningBox } from './WarningBox.js'
-import { IconLoading } from '../sidebar-tsx/SidebarChat.js'
+import { IconLoading } from '../sidebar-tsx/chatIcons.js'
 import Severity from '../../../../../../../base/common/severity.js'
 import { TransferEditorType } from '../../../extensionTransferTypes.js';
 import { OPT_OUT_KEY } from '../../../../common/storageKeys.js';

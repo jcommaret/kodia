@@ -56,6 +56,7 @@ export type BuiltinToolCallParams = {
 	'get_dir_tree': { uri: URI },
 	'search_pathnames_only': { query: string, includePattern: string | null, pageNumber: number },
 	'search_for_files': { query: string, isRegex: boolean, searchInFolder: URI | null, pageNumber: number },
+	'search_codebase': { query: string, searchInFolder: URI | null },
 	'search_in_file': { uri: URI, query: string, isRegex: boolean },
 	'go_to_definition': { uri: URI, line: number, symbol: string },
 	'find_references': { uri: URI, line: number, symbol: string },
@@ -83,6 +84,7 @@ export type BuiltinToolResultType = {
 	'get_dir_tree': { str: string, },
 	'search_pathnames_only': { uris: URI[], hasNextPage: boolean },
 	'search_for_files': { uris: URI[], hasNextPage: boolean },
+	'search_codebase': { passages: { uri: URI, startLine: number, endLine: number, text: string }[] },
 	'search_in_file': { lines: number[]; },
 	// hasLanguageServer: false when no language server answers this request for the file / workspace
 	'go_to_definition': { locations: CodeLocation[], hasLanguageServer: boolean },

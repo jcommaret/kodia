@@ -347,7 +347,8 @@ const prepareOpenAIOrAnthropicMessages = ({
 	let messages: (SimpleLLMMessage | { role: 'system', content: string })[] = deepClone(messages_)
 
 	// ================ system message ================
-	// A COMPLETE HACK: last message is system message for context purposes
+	// The system message joins the list as its first message while the list is fitted to the context window, so it is
+	// counted and trimmed like the others. It is taken back out below, before the conversion to the provider's format.
 
 	const sysMsgParts: string[] = []
 	if (aiInstructions) sysMsgParts.push(`GUIDELINES AND MEMORY (from the user's settings, the project's rules files, and project memory):\n${aiInstructions}`)
@@ -453,12 +454,12 @@ const prepareOpenAIOrAnthropicMessages = ({
 		alreadyTrimmedIdxes.add(trimIdx)
 	}
 
-	// ================ system message hack ================
+	// ================ take the system message back out ================
 	const newSysMsg = messages.shift()!.content
 
 
 	// ================ tools and anthropicReasoning ================
-	// SYSTEM MESSAGE HACK: we shifted (removed) the system message role, so now SimpleLLMMessage[] is valid
+	// the system message is out of the list, so it is a valid SimpleLLMMessage[] again
 
 	let llmChatMessages: AnthropicOrOpenAILLMMessage[] = []
 	if (!specialToolFormat) { // XML tool behavior

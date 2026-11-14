@@ -34,6 +34,7 @@ import { resolveAttachments } from './kodiaAttachments.js';
 import { KodiaReplyStream } from './kodiaReplyStream.js';
 import { chooseKeepIdx, clearOldToolResults, estimateHistoryTokens, IKodiaCompaction, modelHistory, tokensOfChars, transcriptMessages, withoutImages } from './kodiaContext.js';
 import { readProjectMemory, readProjectRules, readProjectSkills } from './kodiaProjectContext.js';
+import { MODEL_REQUEST_ATTEMPTS, MODEL_RETRY_DELAY_MS, shouldRetryModelRequest } from '../../../kodia/common/modelRequestRetry.js';
 import { skillsPrompt } from '../../../kodia/common/projectInstructions.js';
 import { projectMemoryPrompt } from '../../../kodia/common/projectMemory.js';
 import { summarizeThread_systemMessage, summarizeThread_userMessage, summaryTranscriptMaxChars, transcriptForSummary } from '../../../kodia/common/threadSummary.js';
@@ -41,6 +42,7 @@ import { editorToolNames, isEditorToolName } from '../../../kodia/common/toolCat
 import { GIT_FUNCTION_TOOLS, gitToolNames } from './kodiaGitTools.js';
 import { isPersistentTerminalToolName, KodiaTerminals, PERSISTENT_TERMINAL_FUNCTION_TOOLS, persistentTerminalToolNames } from './kodiaTerminals.js';
 import { TODO_FUNCTION_TOOL, TODO_TOOL_NAME } from './kodiaTodoTool.js';
+import { parseSubagentTask, runSubagent, SUBAGENT_FUNCTION_TOOL, SUBAGENT_TOOL_NAME, SUBAGENT_TOOLS, subagentInstructions } from './kodiaSubagent.js';
 import { approvalOfTool, describeKodiaToolCall, editorFunctionTools, editorToolArguments, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
 
 /**
@@ -68,6 +70,29 @@ const TOOL_DENIED_RESULT = 'The user denied this tool call.';
  * A Kodia model's id in the Agents Window: `<provider>/<model>`. Model names
  * may contain `/` (OpenRouter), provider names never do.
  */
+/** Waits `ms`, or until the turn is stopped. */
+function waitOrAbort(ms: number, signal: AbortSignal): Promise<void> {
+	return new Promise(resolve => {
+		const done = () => {
+			clearTimeout(timer);
+			signal.removeEventListener('abort', done);
+			resolve();
+		};
+		const timer = setTimeout(done, ms);
+		signal.addEventListener('abort', done, { once: true });
+	});
+}
+
+/** What the window shows of a sub-agent call: the start of its task. */
+function describeSubagentCall(argumentsJson: string): { readonly invocationMessage: string; readonly toolInput: string } {
+	const parsed = parseSubagentTask(argumentsJson);
+	if ('error' in parsed) {
+		return { invocationMessage: 'Sub-agent', toolInput: argumentsJson };
+	}
+	const firstLine = parsed.task.split('\n')[0];
+	return { invocationMessage: `Sub-agent: ${firstLine.length > 100 ? `${firstLine.slice(0, 100)}…` : firstLine}`, toolInput: parsed.task };
+}
+
 function toAgentModelId(model: IByokLmModelInfo): string {
 	return `${model.vendor}/${model.id}`;
 }
@@ -82,7 +107,8 @@ function instructionsFor(workingDirectory: URI | undefined): string {
 	if (workingDirectory) {
 		lines.push(`The project is at ${workingDirectory.fsPath}; relative paths resolve against it.`);
 	}
-	lines.push('Find files with search_pathnames_only and search_for_files, read just the lines you need of a large file with read_file, and change a file with edit_file: rewrite_file replaces all of one.');
+	lines.push('For a question that takes many reads or searches, hand it to run_subagent and work from its report: your own conversation keeps its room.');
+	lines.push('Find where something is with search_codebase, and files with search_pathnames_only and search_for_files, read just the lines you need of a large file with read_file, and change a file with edit_file: rewrite_file replaces all of one.');
 	return lines.join('\n');
 }
 
@@ -145,6 +171,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 
 	private readonly _models = observableValue<readonly IAgentModelInfo[]>(this, []);
 	readonly models: IObservable<readonly IAgentModelInfo[]> = this._models;
+
+	/** The wait before a failed model request is sent again. The tests shorten it. */
+	retryDelayMs = MODEL_RETRY_DELAY_MS;
 
 	/** Every chat this process knows, keyed by chat URI. */
 	private readonly _chats = this._register(new DisposableMap<string, KodiaAgentSession>());
@@ -534,7 +563,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 			const autoApprove = await this._autoApprove(connection);
 			// and the editor tools (language server, lint errors), when an editor window is open to run them
 			const editor = await this._editorTools(connection);
-			const tools = [...KODIA_TOOLS, ...GIT_FUNCTION_TOOLS, TODO_FUNCTION_TOOL, ...PERSISTENT_TERMINAL_FUNCTION_TOOLS, ...editorFunctionTools(editor?.names ?? []), ...[...mcpTools.values()].map(mcpFunctionTool)];
+			const tools = [...KODIA_TOOLS, ...GIT_FUNCTION_TOOLS, TODO_FUNCTION_TOOL, SUBAGENT_FUNCTION_TOOL, ...PERSISTENT_TERMINAL_FUNCTION_TOOLS, ...editorFunctionTools(editor?.names ?? []), ...[...mcpTools.values()].map(mcpFunctionTool)];
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				await this._fitContext(connection, session, model, signal);
 				if (signal.aborted) {
@@ -542,7 +571,19 @@ export class KodiaAgent extends Disposable implements IAgent {
 				}
 				// what the model writes is shown as it comes, when the window streams it
 				const reply = new KodiaReplyStream(turnId, fire);
-				const result = await this._chat(connection, session, model, instructions, tools, signal, delta => { if (!signal.aborted) { reply.append(delta); } });
+				let result: IByokLmChatResult;
+				// a request that failed is sent again, as in Kodia's chat, unless part of its reply is on screen already
+				for (let attempt = 1; ; attempt++) {
+					result = await this._chat(connection, session, model, instructions, tools, signal, delta => { if (!signal.aborted) { reply.append(delta); } });
+					if (signal.aborted || !result.error || !shouldRetryModelRequest({ attempt, error: result.error, shownReply: reply.hasShown })) {
+						break;
+					}
+					this._logService.warn(`[Kodia] The model request failed, sending it again (${attempt}/${MODEL_REQUEST_ATTEMPTS}): ${result.error}`);
+					await waitOrAbort(this.retryDelayMs, signal);
+					if (signal.aborted) {
+						break;
+					}
+				}
 				if (signal.aborted) {
 					return;
 				}
@@ -595,9 +636,12 @@ export class KodiaAgent extends Disposable implements IAgent {
 					// Registers the call with the host, which is what lets a later
 					// pending_confirmation round-trip through respondToPermissionRequest.
 					const mcpTool = mcpTools.get(call.name);
-					const displayName = mcpTool ? `${mcpTool.displayName} (${mcpTool.serverName})` : toolDisplayName(call.name);
+					const isSubagent = !mcpTool && call.name === SUBAGENT_TOOL_NAME;
+					const displayName = mcpTool ? `${mcpTool.displayName} (${mcpTool.serverName})` : isSubagent ? 'Sub-agent' : toolDisplayName(call.name);
 					fire({ type: ActionType.ChatToolCallStart, turnId, toolCallId: call.callId, toolName: call.name, displayName });
-					const description = mcpTool ? { invocationMessage: displayName, toolInput: call.argumentsJson } : describeKodiaToolCall(call.name, call.argumentsJson, session.workingDirectory);
+					const description = mcpTool ? { invocationMessage: displayName, toolInput: call.argumentsJson }
+						: isSubagent ? describeSubagentCall(call.argumentsJson)
+							: describeKodiaToolCall(call.name, call.argumentsJson, session.workingDirectory);
 					const approvalKind = mcpTool ? 'MCP tools' as const : approvalOfTool(call.name);
 					if (approvalKind && autoApprove[approvalKind] !== true) {
 						// Mutating tools, and every MCP tool, go through the host's permission flow, which
@@ -621,6 +665,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 						});
 					}
 					const res = mcpTool ? await this._callMcpTool(connection, call, signal)
+						: isSubagent ? await this._runSubagent(connection, session, model, call, signal)
 						: editor?.names.includes(call.name) ? await this._callEditorTool(editor.connection, call, session.workingDirectory, signal)
 							: isPersistentTerminalToolName(call.name) ? await this._terminals.execute(call.name, call.argumentsJson, { chat: session.chat, turnId, toolCallId: call.callId, workingDirectory: session.workingDirectory, signal })
 								: await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
@@ -760,7 +805,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 			return new Map();
 		}
 		try {
-			const ownTools = new Set<string>([...KODIA_TOOLS.map(tool => tool.name), ...gitToolNames, TODO_TOOL_NAME, ...persistentTerminalToolNames, ...editorToolNames]);
+			const ownTools = new Set<string>([...KODIA_TOOLS.map(tool => tool.name), ...gitToolNames, TODO_TOOL_NAME, SUBAGENT_TOOL_NAME, ...persistentTerminalToolNames, ...editorToolNames]);
 			return new Map((await connection.listMcpTools()).filter(tool => !ownTools.has(tool.name)).map(tool => [tool.name, tool]));
 		} catch (err) {
 			this._logService.warn(`[Kodia] Could not list the MCP tools of the Kodia window: ${err}`);
@@ -843,6 +888,34 @@ export class KodiaAgent extends Disposable implements IAgent {
 	}
 
 	/** Whether a Kodia model accepts images, as the window says: not when it doesn't say. */
+	/**
+	 * Runs a sub-agent on the task of a `run_subagent` call: the same model, in a conversation of its own, with the
+	 * tools that only read. Its report is the result of the call, and all the agent's conversation keeps of it.
+	 */
+	private async _runSubagent(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, call: IByokLmFunctionCallItem, signal: AbortSignal): Promise<IKodiaToolResult> {
+		const parsed = parseSubagentTask(call.argumentsJson);
+		if ('error' in parsed) {
+			return { success: false, output: parsed.error };
+		}
+		const toolCtx = { workingDirectory: session.workingDirectory, signal };
+		const instructions = subagentInstructions(session.workingDirectory?.fsPath);
+		const cts = new CancellationTokenSource();
+		const onAbort = () => cts.cancel();
+		signal.addEventListener('abort', onAbort, { once: true });
+		try {
+			const { success, output, rounds } = await runSubagent(parsed.task, {
+				signal,
+				chat: input => connection.chat({ vendor: model.vendor, modelId: model.modelId, instructions, input: [...input], tools: [...SUBAGENT_TOOLS] }, cts.token),
+				runTool: async toolCall => (await executeKodiaTool(toolCall.name, toolCall.argumentsJson, toolCtx)).output,
+			});
+			this._logService.info(`[Kodia] A sub-agent ${success ? 'reported' : 'failed'} after ${rounds} request(s).`);
+			return { success, output };
+		} finally {
+			signal.removeEventListener('abort', onAbort);
+			cts.dispose();
+		}
+	}
+
 	private _supportsVision(model: { readonly vendor: string; readonly modelId: string }): boolean {
 		return this._bridge.getModels().find(m => m.vendor === model.vendor && m.id === model.modelId)?.supportsVision === true;
 	}

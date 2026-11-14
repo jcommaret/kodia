@@ -197,6 +197,8 @@ export const builtinTools: {
 
 	search_for_files: sharedTool('search_for_files'),
 
+	search_codebase: sharedTool('search_codebase'),
+
 	// add new search_in_file tool
 	search_in_file: sharedTool('search_in_file'),
 

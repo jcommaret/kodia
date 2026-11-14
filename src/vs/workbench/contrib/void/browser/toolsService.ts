@@ -1,3 +1,5 @@
+import { escapeRegExpCharacters } from '../../../../base/common/strings.js'
+import { describePassages, MAX_SEARCH_CANDIDATE_FILES, MAX_SEARCH_FILE_CHARS, rankPassages, SearchableFile, searchTermsOf } from '../../../../platform/kodia/common/codeSearchRanking.js'
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js'
 import { URI } from '../../../../base/common/uri.js'
 import { IReference } from '../../../../base/common/lifecycle.js'
@@ -374,6 +376,10 @@ export class ToolsService implements IToolsService {
 					pageNumber
 				}
 			},
+			search_codebase: (params: RawToolParamsObj) => {
+				const { query: queryUnknown, search_in_folder: searchInFolderUnknown } = params
+				return { query: validateStr('query', queryUnknown), searchInFolder: validateOptionalURI(searchInFolderUnknown) }
+			},
 			search_in_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, query: queryUnknown, is_regex: isRegexUnknown } = params;
 				const uri = validateURI(uriStr);
@@ -570,6 +576,33 @@ export class ToolsService implements IToolsService {
 
 				const hasNextPage = (data.results.length - 1) - toIdx >= 1
 				return { result: { queryStr, uris, hasNextPage } }
+			},
+			search_codebase: async ({ query: queryStr, searchInFolder }) => {
+				const terms = searchTermsOf(queryStr)
+				if (terms.length === 0) return { result: { passages: [] } }
+				const searchFolders = searchInFolder === null ?
+					workspaceContextService.getWorkspace().folders.map(f => f.uri)
+					: [searchInFolder]
+
+				// the files with the most lines that hold a word of the query, then their passages, ranked
+				const query = queryBuilder.text({ pattern: terms.map(escapeRegExpCharacters).join('|'), isRegExp: true, isCaseSensitive: false }, searchFolders)
+				const data = await searchService.textSearch(query, CancellationToken.None)
+				const candidates = [...data.results]
+					.sort((a, b) => (b.results?.length ?? 0) - (a.results?.length ?? 0) || a.resource.fsPath.localeCompare(b.resource.fsPath))
+					.slice(0, MAX_SEARCH_CANDIDATE_FILES)
+
+				const uriOfPath = new Map<string, URI>()
+				const files: SearchableFile[] = []
+				for (const { resource } of candidates) {
+					try {
+						const content = (await fileService.readFile(resource, { limits: { size: MAX_SEARCH_FILE_CHARS } })).value.toString()
+						uriOfPath.set(resource.fsPath, resource)
+						files.push({ path: resource.fsPath, content })
+					}
+					catch { } // too large, or gone: the others are ranked
+				}
+				const passages = rankPassages(files, queryStr).map(({ path, startLine, endLine, text }) => ({ uri: uriOfPath.get(path)!, startLine, endLine, text }))
+				return { result: { passages } }
 			},
 			search_in_file: async ({ uri, query, isRegex }) => {
 				await voidModelService.initializeModel(uri);
@@ -769,6 +802,9 @@ export class ToolsService implements IToolsService {
 			},
 			search_for_files: (params, result) => {
 				return result.uris.map(uri => uri.fsPath).join('\n') + nextPageStr(result.hasNextPage)
+			},
+			search_codebase: (params, result) => {
+				return describePassages(result.passages.map(passage => ({ ...passage, path: passage.uri.fsPath })), params.query)
 			},
 			search_in_file: (params, result) => {
 				const { model } = voidModelService.getModel(params.uri)

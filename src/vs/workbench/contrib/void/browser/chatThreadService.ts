@@ -27,6 +27,7 @@ import { ChatMessage, CheckpointEntry, CodespanLocationLink, StagingSelectionIte
 import { Position } from '../../../../editor/common/core/position.js';
 import { IMetricsService } from '../common/metricsService.js';
 import { shorten } from '../../../../base/common/labels.js';
+import { MODEL_RETRY_DELAY_MS, shouldRetryModelRequest } from '../../../../platform/kodia/common/modelRequestRetry.js';
 import { IVoidModelService } from '../common/voidModelService.js';
 import { findLast, findLastIdx } from '../../../../base/common/arraysFind.js';
 import { IEditCodeService } from './editCodeServiceInterface.js';
@@ -45,9 +46,14 @@ import { RawMCPToolCall } from '../common/mcpServiceTypes.js';
 
 
 // related to retrying when LLM message has error
-const CHAT_RETRIES = 3
-const RETRY_DELAY = 2500
 
+
+/** The shortest path that tells `uris[idx]` from the other URIs of the list: what a codespan link shows. */
+const shortestDistinctPath = (uris: URI[], idx: number): string => {
+	const displayText = shorten(uris.map(uri => uri.fsPath))[idx]
+	const ellipsisIdx = displayText.lastIndexOf('…/')
+	return ellipsisIdx >= 0 ? displayText.slice(ellipsisIdx + 2) : displayText
+}
 
 const findStagingSelectionIndex = (currentSelections: StagingSelectionItem[] | undefined, newSelection: StagingSelectionItem): number | null => {
 	if (!currentSelections) return null
@@ -384,7 +390,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 	private _convertThreadDataFromStorage(threadsStr: string): ChatThreads {
 		return JSON.parse(threadsStr, (key, value) => {
 			if (value && typeof value === 'object' && value.$mid === 1) { // $mid is the MarshalledId. $mid === 1 means it is a URI
-				return URI.from(value); // TODO URI.revive instead of this?
+				return URI.from(value);
 			}
 			return value;
 		});
@@ -967,10 +973,10 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				// llm res error
 				else if (llmRes.type === 'llmError') {
 					// error, should retry
-					if (nAttempts < CHAT_RETRIES) {
+					if (shouldRetryModelRequest({ attempt: nAttempts, error: llmRes.error?.message })) {
 						shouldRetryLLM = true
 						this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
-						await timeout(RETRY_DELAY)
+						await timeout(MODEL_RETRY_DELAY_MS)
 						if (interruptedWhenIdle) {
 							this._setStreamState(threadId, undefined)
 							return
@@ -1483,7 +1489,7 @@ We only need to do it for files that were edited since `from`, ie files between 
 	generateCodespanLink: IChatThreadService['generateCodespanLink'] = async ({ codespanStr: _codespanStr, threadId }) => {
 
 		// process codespan to understand what we are searching for
-		// TODO account for more complicated patterns eg `ITextEditorService.openEditor()`
+		// only plain names and calls are linked: `name`, `name(args)`. A dotted name is taken for a file
 		const functionOrMethodPattern = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/; // `fUnCt10n_name`
 		const functionParensPattern = /^([^\s(]+)\([^)]*\)$/; // `functionName( args )`
 
@@ -1523,18 +1529,7 @@ We only need to do it for files that were edited since `from`, ie files between 
 			for (const [idx, uri] of prevUris.entries()) {
 				if (doesUriMatchTarget(uri)) {
 
-					// shorten it
-
-					// TODO make this logic more general
-					const prevUriStrs = prevUris.map(uri => uri.fsPath)
-					const shortenedUriStrs = shorten(prevUriStrs)
-					let displayText = shortenedUriStrs[idx]
-					const ellipsisIdx = displayText.lastIndexOf('…/');
-					if (ellipsisIdx >= 0) {
-						displayText = displayText.slice(ellipsisIdx + 2)
-					}
-
-					return { uri, displayText }
+					return { uri, displayText: shortestDistinctPath(prevUris, idx) }
 				}
 			}
 
@@ -1550,18 +1545,7 @@ We only need to do it for files that were edited since `from`, ie files between 
 
 			for (const [idx, uri] of uris.entries()) {
 				if (doesUriMatchTarget(uri)) {
-
-					// TODO make this logic more general
-					const prevUriStrs = prevUris.map(uri => uri.fsPath)
-					const shortenedUriStrs = shorten(prevUriStrs)
-					let displayText = shortenedUriStrs[idx]
-					const ellipsisIdx = displayText.lastIndexOf('…/');
-					if (ellipsisIdx >= 0) {
-						displayText = displayText.slice(ellipsisIdx + 2)
-					}
-
-
-					return { uri, displayText }
+					return { uri, displayText: shortestDistinctPath(uris, idx) }
 				}
 			}
 

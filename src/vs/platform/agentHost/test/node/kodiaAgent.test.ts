@@ -213,7 +213,7 @@ suite('KodiaAgent', () => {
 		const request = registry.window!.requests[0];
 		assert.strictEqual(request.vendor, 'openRouter');
 		assert.strictEqual(request.modelId, 'qwen/qwen3-coder');
-		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show', 'todo_write', ...persistentTerminalToolNames]);
+		assert.deepStrictEqual(request.tools?.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_codebase', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show', 'todo_write', 'run_subagent', ...persistentTerminalToolNames]);
 		assert.deepStrictEqual(request.input, [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'Hi' }] }]);
 		assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatUsage, ActionType.ChatResponsePart, ActionType.ChatTurnComplete]);
 
@@ -386,7 +386,7 @@ suite('KodiaAgent', () => {
 	});
 
 	test('has only its own tools when the window offers no MCP tools, or can\'t list them', async () => {
-		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show', 'todo_write', ...persistentTerminalToolNames];
+		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_codebase', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show', 'todo_write', 'run_subagent', ...persistentTerminalToolNames];
 		for (const mcp of [undefined, { tools: [issueSearch], result: { isError: false, output: '' }, calls: [], listError: new Error('MCP is not ready.') }]) {
 			const { agent, registry } = createAgent();
 			registry.window!.mcp = mcp;
@@ -447,6 +447,174 @@ suite('KodiaAgent', () => {
 
 		await agent.chats.sendMessage(chat, 'Again', [cwd], undefined, 'turn-2');
 		assert.deepStrictEqual(registry.window!.requests[1].input.map(item => item.type === 'message' ? item.role : item.type), ['user', 'user']);
+	});
+
+	suite('a model request that fails', () => {
+		const failed: IByokLmChatResult = { output: [], error: 'fetch failed: ECONNREFUSED' };
+
+		test('is sent again, and the turn goes on from the reply', async () => {
+			const { agent, registry } = createAgent();
+			agent.retryDelayMs = 0;
+			registry.window!.results = [failed, failed, text('Here.')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			assert.strictEqual(registry.window!.requests.length, 3);
+			assert.deepStrictEqual(registry.window!.requests[2].input, registry.window!.requests[0].input, 'the same conversation is sent again');
+			assert.ok(!actionTypes(signals).includes(ActionType.ChatError));
+			assert.strictEqual(actionTypes(signals).at(-1), ActionType.ChatTurnComplete);
+		});
+
+		test('fails the turn after three requests', async () => {
+			const { agent, registry } = createAgent();
+			agent.retryDelayMs = 0;
+			registry.window!.results = [failed, failed, failed, text('Too late.')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			assert.strictEqual(registry.window!.requests.length, 3);
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatError]);
+		});
+
+		test('is not sent again when the provider refuses the key', async () => {
+			const { agent, registry } = createAgent();
+			agent.retryDelayMs = 0;
+			registry.window!.results = [{ output: [], error: '401 Incorrect API key provided' }, text('Never asked.')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			assert.strictEqual(registry.window!.requests.length, 1);
+			assert.deepStrictEqual(actionTypes(signals), [ActionType.ChatError]);
+		});
+
+		test('is not sent again once part of the reply is on screen: it would be written twice', async () => {
+			const { agent, registry } = createAgent();
+			agent.retryDelayMs = 0;
+			registry.window!.stream = { replies: [[{ text: 'The first ha' }]] };
+			registry.window!.results = [failed, text('Never asked.')];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			assert.strictEqual(registry.window!.requests.length, 1);
+			assert.strictEqual(actionTypes(signals).at(-1), ActionType.ChatError);
+		});
+
+		test('stopping the turn while it waits to send again ends it at once', async () => {
+			const { agent, registry } = createAgent();
+			agent.retryDelayMs = 60_000;
+			registry.window!.results = [failed, text('Never asked.')];
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			const turn = agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+			await new Promise(resolve => setTimeout(resolve, 0));
+			await agent.chats.abort(chat, session);
+			await turn;
+
+			assert.strictEqual(registry.window!.requests.length, 1);
+		});
+	});
+
+	suite('a sub-agent, which researches in a conversation of its own', () => {
+		const call = (name: string, args: object, callId: string): IByokLmChatResult => ({ output: [{ type: 'function_call' as const, callId, name, argumentsJson: JSON.stringify(args) }] });
+		const outputs = (request: IByokLmChatRequest) => request.input.flatMap(item => item.type === 'function_call_output' ? [item.output] : []);
+
+		test('runs the task with the same model and read-only tools, and only its report comes back to the agent', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.results = [
+				call('run_subagent', { task: 'List the project folder and say what is in it.' }, 'main-1'),
+				call('ls_dir', { uri: '.' }, 'sub-1'),
+				text('The report: it has files.'),
+				text('Done.'),
+			];
+			const { session, chat } = newChat();
+			const { signals } = watch(agent);
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd], model: { id: 'gemini/gemini-3-pro' } });
+
+			await agent.chats.sendMessage(chat, 'What is in the project?', [cwd], undefined, 'turn-1');
+
+			const [main, sub1, sub2, mainAgain] = registry.window!.requests;
+			assert.ok(main.tools?.some(tool => tool.name === 'run_subagent'));
+
+			// the sub-agent starts from the task alone, with its own instructions and the tools that only read
+			assert.strictEqual(sub1.modelId, 'gemini-3-pro');
+			assert.ok(sub1.instructions?.includes('research sub-agent'));
+			assert.deepStrictEqual(sub1.input, [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'List the project folder and say what is in it.' }] }]);
+			const subTools = sub1.tools!.map(tool => tool.name);
+			assert.deepStrictEqual(subTools, ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_codebase', 'search_in_file', 'git_status', 'git_diff', 'git_log', 'git_show']);
+
+			// it is sent the result of its own tool call
+			assert.strictEqual(outputs(sub2).length, 1);
+			assert.ok(outputs(sub2)[0].length > 0);
+
+			// the agent gets the report, and nothing of what the sub-agent read
+			assert.deepStrictEqual(outputs(mainAgain), ['The report: it has files.']);
+			assert.ok(!JSON.stringify(mainAgain.input).includes('sub-1'));
+			assert.strictEqual(actionTypes(signals).at(-1), ActionType.ChatTurnComplete);
+			assert.strictEqual(actionTypes(signals).filter(type => type === ActionType.ChatToolCallStart).length, 1, 'the window shows one tool call: the sub-agent');
+		});
+
+		test('cannot change the project: a tool that writes is refused, and the sub-agent is told', async () => {
+			const { agent, registry } = createAgent();
+			const target = join(os.tmpdir(), `kodia-subagent-${Date.now()}.txt`);
+			registry.window!.results = [
+				call('run_subagent', { task: 'Write a file.' }, 'main-1'),
+				call('create_file_or_folder', { uri: target }, 'sub-1'),
+				text('I could not write.'),
+				text('Done.'),
+			];
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Go', [cwd], undefined, 'turn-1');
+
+			assert.ok(outputs(registry.window!.requests[2])[0].includes('it only reads'));
+			assert.strictEqual(fs.existsSync(target), false);
+			assert.deepStrictEqual(outputs(registry.window!.requests[3]), ['I could not write.']);
+		});
+
+		test('a call without a task, and a sub-agent whose model fails, tell the agent why', async () => {
+			const { agent, registry } = createAgent();
+			agent.retryDelayMs = 0;
+			registry.window!.results = [
+				call('run_subagent', {}, 'main-1'),
+				call('run_subagent', { task: 'Look.' }, 'main-2'),
+				{ output: [], error: '401 Incorrect API key provided' },
+				text('Done.'),
+			];
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Go', [cwd], undefined, 'turn-1');
+
+			const last = outputs(registry.window!.requests.at(-1)!);
+			assert.ok(last[0].includes('Missing "task"'));
+			assert.ok(last[1].includes('model request failed') && last[1].includes('401'));
+		});
+
+		test('an MCP tool never takes the name of the sub-agent tool', async () => {
+			const { agent, registry } = createAgent();
+			registry.window!.mcp = { tools: [{ ...issueSearch, name: 'run_subagent' }], calls: [], result: { isError: false, output: '' } };
+			registry.window!.results = [text('Hi.')];
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [cwd] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [cwd], undefined, 'turn-1');
+
+			assert.strictEqual(registry.window!.requests[0].tools!.filter(tool => tool.name === 'run_subagent').length, 1);
+		});
 	});
 
 	test('without a Kodia window a turn fails fast', async () => {
@@ -855,7 +1023,7 @@ suite('KodiaAgent', () => {
 	});
 	suite('the editor tools, which an editor window runs', () => {
 
-		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show', 'todo_write', ...persistentTerminalToolNames];
+		const ownTools = ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_codebase', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory', 'git_status', 'git_diff', 'git_log', 'git_show', 'todo_write', 'run_subagent', ...persistentTerminalToolNames];
 		const definition: IKodiaMcpToolResult = { isError: false, output: 'src/a.ts:12\n```\nfunction a() {}\n```' };
 		const editorWindow = (result = definition) => { const window = new FakeKodiaWindow(); window.editor = { names: [...editorToolNames], result, calls: [] }; return window; };
 		const agentsWindow = () => { const window = new FakeKodiaWindow(); window.editor = { names: [], result: definition, calls: [] }; return window; };

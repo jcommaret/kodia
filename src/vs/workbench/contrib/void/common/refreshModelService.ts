@@ -8,7 +8,7 @@ import { ILLMMessageService } from './sendLLMMessageService.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
 import { RefreshableProviderName, refreshableProviderNames, SettingsOfProvider } from './voidSettingsTypes.js';
-import { normalizeAutodetectedModelNamesForProvider } from './localSingleModelProviders.js';
+import { contextWindowsOfListedModels, normalizeAutodetectedModelNamesForProvider } from './localSingleModelProviders.js';
 import { OllamaModelResponse, OpenaiCompatibleModelResponse } from './sendLLMMessageTypes.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
@@ -203,7 +203,9 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 				this.voidSettingsService.setAutodetectedModels(
 					providerName,
 					normalizedModelNames,
-					{ enableProviderOnSuccess: options.enableProviderOnSuccess, hideRefresh: options.doNotFire }
+					{ enableProviderOnSuccess: options.enableProviderOnSuccess, hideRefresh: options.doNotFire },
+					// the context window the server gives a model, over the one Kodia guesses from its name
+					providerName === 'ollama' ? undefined : contextWindowsOfListedModels(providerName, models),
 				)
 
 				if (options.enableProviderOnSuccess && !this.voidSettingsService.state.settingsOfProvider[providerName]._didFillInProviderSettings) {

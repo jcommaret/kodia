@@ -14,7 +14,7 @@ import { isAbsolute } from '../../../../../../../base/common/path.js'
 import { separateOutFirstLine } from '../../../../common/helpers/util.js'
 import { BlockCode } from '../util/inputs.js'
 import { CodespanLocationLink } from '../../../../common/chatThreadServiceTypes.js'
-import { getBasename, getRelative, voidOpenFileFn } from '../sidebar-tsx/SidebarChat.js'
+import { getBasename, getRelative, voidOpenFileFn } from '../sidebar-tsx/chatPaths.js'
 
 
 export type ChatMessageLocation = {
@@ -38,8 +38,6 @@ const LatexRender = ({ latex }: { latex: string }) => {
 }
 
 const Codespan = ({ text, className, onClick, tooltip }: { text: string, className?: string, onClick?: () => void, tooltip?: string }) => {
-
-	// TODO compute this once for efficiency. we should use `labels.ts/shorten` to display duplicates properly
 
 	return <code
 		className={`font-mono font-medium rounded-sm bg-void-bg-1 px-1 ${className}`}

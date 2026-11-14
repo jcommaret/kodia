@@ -109,7 +109,7 @@ export const AutonomyModeSelector = () => {
 const TaskPlanDisplay = () => {
 	const accessor = useAccessor()
 	const chatThreadService = accessor.get('IChatThreadService')
-	const taskPlanService = accessor.get('ITaskPlanService')
+	const taskPlanService = accessor.get('TaskPlanService')
 	const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null)
 
 	useEffect(() => {

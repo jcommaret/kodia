@@ -6,6 +6,7 @@
 import { generateUuid } from '../../../../../base/common/uuid.js'
 import { endsWithAnyPrefixOf, SurroundingsRemover } from '../../common/helpers/extractCodeFromResult.js'
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js'
+import { jsonToolCallOfText } from '../../common/jsonToolCall.js'
 import { OnFinalMessage, OnText, RawToolCallObj, RawToolParamsObj } from '../../common/sendLLMMessageTypes.js'
 import { ToolName, ToolParamName } from '../../common/toolsServiceTypes.js'
 import { ChatMode } from '../../common/voidSettingsTypes.js'
@@ -349,8 +350,16 @@ export const extractXMLToolsWrapper = (
 		// console.log('----- returning ----\n', fullText)
 		// console.log('----- tools ----\n', JSON.stringify(firstToolCallRef.current, null, 2))
 
-		// XML tool calling parses a single call per turn
-		onFinalMessage({ ...params, fullText, toolCalls: latestToolCall ? [latestToolCall] : undefined })
+		// XML tool calling parses a single call per turn. A model that wrote its call as JSON instead is read the same way.
+		let toolCall: RawToolCallObj | undefined = latestToolCall
+		if (!toolCall) {
+			const json = jsonToolCallOfText(fullText, new Set(Object.keys(toolOfToolName)), toolId)
+			if (json) {
+				fullText = json.text
+				toolCall = json.call
+			}
+		}
+		onFinalMessage({ ...params, fullText, toolCalls: toolCall ? [toolCall] : undefined })
 	}
 	return { newOnText, newOnFinalMessage };
 }

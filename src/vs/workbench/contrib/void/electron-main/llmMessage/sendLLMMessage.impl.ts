@@ -25,6 +25,7 @@ import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens } from '../../common/tokenizer.js';
 import { mlxMaxOutputTokens, withOutputLimitNotice } from '../../common/outputLimit.js';
 import { mlxErrorWithHint, withoutEndOfTurnTokens } from '../../common/mlxInstalls.js';
+import { jsonToolCallOfText } from '../../common/jsonToolCall.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
 import { createHash } from 'crypto';
 
@@ -638,6 +639,9 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 	const nativeToolsObj = potentialTools && specialToolFormat === 'openai-style' ?
 		{ tools: potentialTools } as const
 		: {}
+	// the tools offered natively, by name: a local MLX model writes its call as JSON in the text, read below
+	const offeredTools = 'tools' in nativeToolsObj ? nativeToolsObj.tools : undefined
+	const offeredToolNames = offeredTools ? new Set(offeredTools.flatMap(t => t.type === 'function' ? [t.function.name] : [])) : undefined
 
 	const reservedOutputTokenSpace = getReservedOutputTokenSpace(providerName, modelName_, { isReasoningEnabled: !!reasoningInfo?.isReasoningEnabled, overridesOfModel })
 	const preparedMessages = nativeToolsObj.tools
@@ -746,7 +750,15 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 
 			}
 			// on final
-			const toolCalls = finalToolCallsOf(streamedToolCalls)
+			let toolCalls = finalToolCallsOf(streamedToolCalls)
+			// a local MLX model offered the tools natively writes its call as JSON in the text: it is read as the call
+			if (toolCalls.length === 0 && providerName === 'mlx' && offeredToolNames) {
+				const json = jsonToolCallOfText(fullTextSoFar, offeredToolNames, generateUuid())
+				if (json) {
+					fullTextSoFar = json.text
+					toolCalls = [json.call]
+				}
+			}
 			if (!fullTextSoFar && !fullReasoningSoFar && toolCalls.length === 0) {
 				onError({ message: 'Kodia: Response from model was empty.', fullError: null })
 			}

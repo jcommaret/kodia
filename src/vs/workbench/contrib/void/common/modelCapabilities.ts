@@ -256,6 +256,18 @@ export type ModelOverrides = Pick<
 	(typeof modelOverrideKeys)[number]
 >
 
+/**
+ * A model's overrides as they are stored. `specialToolFormat: null` means "no native tool calling": the model is
+ * taught the XML format instead. (JSON has no `undefined`, and a missing key means "keep Kodia's default".)
+ */
+export type StoredModelOverrides = Partial<Omit<ModelOverrides, 'specialToolFormat'>> & { specialToolFormat?: ModelOverrides['specialToolFormat'] | null }
+
+/** The stored overrides as capabilities: `specialToolFormat: null` becomes "no native tool format". */
+export const overridesAsCapabilities = (overrides: StoredModelOverrides | undefined): Partial<ModelOverrides> | undefined => {
+	if (!overrides || overrides.specialToolFormat !== null) return overrides as Partial<ModelOverrides> | undefined
+	return { ...overrides, specialToolFormat: undefined }
+}
+
 
 
 
@@ -287,9 +299,6 @@ const defaultModelOptions = {
 	reasoningCapabilities: false,
 } as const satisfies VoidStaticModelInfo
 
-// TODO!!! double check all context sizes below
-// TODO!!! add openrouter common models
-// TODO!!! allow user to modify capabilities and tell them if autodetected model or falling back
 const openSourceModelOptions_assumingOAICompat = {
 	'deepseekR1': {
 		supportsFIM: false,
@@ -2051,7 +2060,7 @@ export const getModelCapabilities = (
 	const { modelOptions, modelOptionsFallback } = modelSettingsOfProvider[providerName]
 
 	// Get any override settings for this model
-	const overrides = overridesOfModel?.[providerName]?.[modelName];
+	const overrides = overridesAsCapabilities(overridesOfModel?.[providerName]?.[modelName]);
 
 	// search model options object directly first
 	for (const modelName_ in modelOptions) {
@@ -2065,7 +2074,12 @@ export const getModelCapabilities = (
 	// a model detected through the provider's API: what the API says, over what its name tells
 	const detected = detectedModelOptions[providerName]?.[modelName];
 	if (detected) {
-		const fromName = modelOptionsFallback(modelName) ?? { ...defaultModelOptions, supportsVision: looksLikeVisionModel(lowercaseModelName) };
+		const known = modelOptionsFallback(modelName);
+		// a local server only says a model's context window: a name Kodia doesn't know is still a model it doesn't know
+		if (!known && Object.keys(detected).every(key => key === 'contextWindow')) {
+			return { ...defaultModelOptions, supportsVision: looksLikeVisionModel(lowercaseModelName), ...detected, ...overrides, modelName, isUnrecognizedModel: true };
+		}
+		const fromName = known ?? { ...defaultModelOptions, supportsVision: looksLikeVisionModel(lowercaseModelName) };
 		return { ...fromName, ...detected, ...overrides, modelName, recognizedModelName: modelName, isUnrecognizedModel: false };
 	}
 

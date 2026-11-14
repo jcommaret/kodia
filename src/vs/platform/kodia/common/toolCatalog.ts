@@ -77,6 +77,14 @@ export const sharedTools = {
 			page_number: { description: 'Optional. The page number of the result. Default is 1.', type: 'integer' },
 		},
 	},
+	search_codebase: {
+		name: 'search_codebase',
+		description: 'Returns the passages of the codebase that best match a question or a few keywords, each with its file and line numbers, best first. Use this first when you do not know where something is: it searches by the words of the query (identifiers are also matched by their parts), so give the words the code would use. For an exact string or a regex, use search_for_files instead.',
+		params: {
+			query: { description: 'What you are looking for: a question, or the names and words the code would use.', required: true },
+			search_in_folder: { description: 'Optional. Leave as blank by default. Searches descendants of this folder only.' },
+		},
+	},
 	search_in_file: {
 		name: 'search_in_file',
 		description: 'Returns an array of all the start line numbers where the content appears in the file.',

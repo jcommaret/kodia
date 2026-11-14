@@ -10,7 +10,8 @@ import { isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js'
 import { URI } from '../../../../../../../base/common/uri.js'
 import { FileSymlink, LucideIcon, Terminal } from 'lucide-react'
 import { Check, X, Square, Copy, Play } from 'lucide-react'
-import { getBasename, ListableToolItem, voidOpenFileFn, ToolChildrenWrapper } from '../sidebar-tsx/SidebarChat.js'
+import { getBasename, voidOpenFileFn } from '../sidebar-tsx/chatPaths.js'
+import { ListableToolItem, ToolChildrenWrapper } from '../sidebar-tsx/ChatToolResults.js'
 import { PlacesType } from 'react-tooltip'
 
 enum CopyButtonText {
@@ -113,7 +114,6 @@ export const JumpToTerminalButton = ({ onClick }: { onClick: () => void }) => {
 
 
 // state persisted for duration of react only
-// TODO change this to use type `ChatThreads.applyBoxState[applyBoxId]`
 const _applyingURIOfApplyBoxIdRef: { current: { [applyBoxId: string]: URI | undefined } } = { current: {} }
 
 const getUriBeingApplied = (applyBoxId: string) => {

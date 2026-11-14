@@ -120,7 +120,10 @@ Terms (`voidSettingsTypes.ts`):
 The Agents window is VS Code's agent session window. It talks to the **agent host**, a separate Node process (`src/vs/platform/agentHost/`) that runs agent "providers".
 
 Kodia registers only one: `KodiaAgent` (`src/vs/platform/agentHost/node/kodia/`, see `agentHostMain.ts`). It runs a tool loop with every model shown in Kodia's model dropdown, whatever its provider:
-- the tools (`kodiaTools.ts`) execute locally in the agent host. They are the chat's tools that don't need the editor, with the chat's names, parameters and descriptions, defined once in `src/vs/platform/kodia/common/toolCatalog.ts` (the chat's `builtinTools` takes them from there too). The language server's tools and persistent terminals stay chat-only;
+- the tools (`kodiaTools.ts`) execute locally in the agent host. They are the chat's tools that don't need the editor, with the chat's names, parameters and descriptions, defined once in `src/vs/platform/kodia/common/toolCatalog.ts` (the chat's `builtinTools` takes them from there too).
+- the language server's tools (`go_to_definition`, `find_references`, `search_symbols`, `read_lint_errors`) are in the same catalog (`editorTools`). The agent offers the ones an editor window says it can run, and that window runs them;
+- persistent terminals (`kodiaTerminals.ts`) use the host's terminals, and show in the window as background work;
+- the agent also has tools of its own: read-only git (`kodiaGitTools.ts`) and a task list (`kodiaTodoTool.ts`);
 - `edit_file` applies SEARCH/REPLACE blocks with the same engine as the chat (`platform/kodia/common/searchReplaceBlocks.ts`);
 - edits, commands and web pages go through the host's approval flow, and so does every MCP tool;
 - the agent reads the project's rules files, skills and memory (`kodiaProjectContext.ts`) into its instructions, as the chat does;

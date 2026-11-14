@@ -24,11 +24,17 @@ export class KodiaReplyStream {
 
 	private _text: IShownPart | undefined;
 	private _reasoning: IShownPart | undefined;
+	private _hasShown = false;
 
 	constructor(
 		private readonly _turnId: string,
 		private readonly _fire: (action: ChatAction) => void,
 	) { }
+
+	/** Whether any of the reply is on screen. */
+	get hasShown(): boolean {
+		return this._hasShown;
+	}
 
 	/** What the model has just written. */
 	append({ text, reasoning }: IByokLmChatDelta): void {
@@ -67,6 +73,7 @@ export class KodiaReplyStream {
 	}
 
 	private _showText(shown: IShownPart | undefined, content: string): IShownPart {
+		this._hasShown = true;
 		if (!shown) {
 			const id = generateUuid();
 			this._fire({ type: ActionType.ChatResponsePart, turnId: this._turnId, part: { kind: ResponsePartKind.Markdown, id, content } });
@@ -78,6 +85,7 @@ export class KodiaReplyStream {
 	}
 
 	private _showReasoning(shown: IShownPart | undefined, content: string): IShownPart {
+		this._hasShown = true;
 		if (!shown) {
 			const id = generateUuid();
 			this._fire({ type: ActionType.ChatResponsePart, turnId: this._turnId, part: { kind: ResponsePartKind.Reasoning, id, content } });

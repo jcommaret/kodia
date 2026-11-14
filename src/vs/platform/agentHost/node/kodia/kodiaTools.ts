@@ -15,6 +15,7 @@ import { EditorToolName, editorTools, isEditorToolName, isPersistentTerminalTool
 import { executeGitTool, GitToolName, isGitToolName } from './kodiaGitTools.js';
 import { describeTodoList, parseTodoItems, TODO_TOOL_NAME } from './kodiaTodoTool.js';
 import { fetchWebPage } from '../../../kodia/node/webFetch.js';
+import { describePassages, MAX_SEARCH_CANDIDATE_FILES, MAX_SEARCH_FILE_CHARS, rankPassages, SearchableFile, searchTermsOf } from '../../../kodia/common/codeSearchRanking.js';
 import type { IByokLmFunctionTool } from '../../common/agentHostByokLm.js';
 
 const execAsync = promisify(cp.exec);
@@ -77,6 +78,7 @@ const DISPLAY_NAMES: Readonly<Record<SharedToolName | EditorToolName | GitToolNa
 	get_dir_tree: 'Directory Tree',
 	search_pathnames_only: 'Find Files by Name',
 	search_for_files: 'Search Files',
+	search_codebase: 'Search Codebase',
 	search_in_file: 'Search in File',
 	create_file_or_folder: 'Create File or Folder',
 	delete_file_or_folder: 'Delete File or Folder',
@@ -214,6 +216,10 @@ export function describeKodiaToolCall(name: string, argsJson: string, workingDir
 		case 'search_for_files': {
 			const inFolder = toStr(args.search_in_folder) ? ` in ${shown(resolveToolPath(args.search_in_folder, root))}` : '';
 			return { invocationMessage: `Search for "${toStr(args.query)}"${inFolder}`, toolInput: argsJson };
+		}
+		case 'search_codebase': {
+			const inFolder = toStr(args.search_in_folder) ? ` in ${shown(resolveToolPath(args.search_in_folder, root))}` : '';
+			return { invocationMessage: `Search the codebase for "${toStr(args.query)}"${inFolder}`, toolInput: argsJson };
 		}
 		case 'read_file':
 		case 'ls_dir':
@@ -443,6 +449,32 @@ export async function executeKodiaTool(name: string, argsJson: string, ctx: IKod
 				const files = await ripgrepLines(['--files-with-matches', '--sort', 'path', ...toBool(args.is_regex) ? [] : ['--fixed-strings'], ...RIPGREP_HIDDEN_ARGS, '--regexp', query, ...searchPathArgs(args.search_in_folder, root)], root, ctx.signal);
 				const { items, remaining } = pageOf(files, toPositiveInt(args.page_number), MAX_CHILDREN_PAGE);
 				return { success: true, output: items.map(file => path.join(root, file)).join('\n') + nextPageNote(remaining > 0) };
+			}
+			case 'search_codebase': {
+				const query = toStr(args.query);
+				if (!query.trim()) {
+					return { success: false, output: 'Missing "query".' };
+				}
+				const terms = searchTermsOf(query);
+				if (terms.length === 0) {
+					return { success: true, output: describePassages([], query) };
+				}
+				// the files with the most lines that hold a word of the query, then their passages, ranked
+				const counts = await ripgrepLines(['--count', '--ignore-case', '--fixed-strings', '--max-filesize', `${MAX_SEARCH_FILE_CHARS}`, ...RIPGREP_HIDDEN_ARGS, ...terms.flatMap(term => ['--regexp', term]), ...searchPathArgs(args.search_in_folder, root)], root, ctx.signal);
+				const candidates = counts.flatMap(line => {
+					const match = /^(.*):(\d+)$/.exec(line);
+					return match ? [{ file: match[1], count: Number(match[2]) }] : [];
+				}).sort((a, b) => b.count - a.count || a.file.localeCompare(b.file)).slice(0, MAX_SEARCH_CANDIDATE_FILES);
+				const files: SearchableFile[] = [];
+				for (const { file } of candidates) {
+					const target = path.join(root, file);
+					try {
+						files.push({ path: target, content: await fs.promises.readFile(target, 'utf8') });
+					} catch {
+						// a file that went away, or can't be read: the others are ranked
+					}
+				}
+				return { success: true, output: describePassages(rankPassages(files, query), query) };
 			}
 			case 'search_in_file': {
 				const target = resolve(args.uri);

@@ -613,8 +613,6 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 		const isEnabled = this._settingsService.state.globalSettings.enableAutocomplete
 		if (!isEnabled) return []
 
-		const testMode = false
-
 		const docUriStr = model.uri.fsPath;
 
 		const prefixAndSuffix = getPrefixAndSuffixInfo(model, position)
@@ -733,10 +731,6 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 		const { shouldGenerate, predictionType, llmPrefix, llmSuffix, stopTokens } = getCompletionOptions(prefixAndSuffix, relevantContext, justAcceptedAutocompletion)
 
 		if (!shouldGenerate) return []
-
-		if (testMode && this._autocompletionId !== 0) { // TODO remove this
-			return []
-		}
 
 
 

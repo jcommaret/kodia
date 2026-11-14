@@ -86,3 +86,30 @@ export const dedupeProviderModels = (providerName: ProviderName, models: VoidSta
 export const normalizeAutodetectedModelNamesForProvider = (providerName: ProviderName, modelNames: string[]): string[] => {
 	return [...new Set(modelNames.map(n => canonicalModelNameForProvider(providerName, n)))]
 }
+
+/**
+ * Kodia: the context window a local server says a listed model has, in tokens, or undefined when it doesn't say.
+ * What is loaded comes first: LM Studio loads a model with a smaller window than the model can take
+ * (`loaded_context_length` under `max_context_length`, at /api/v0/models), and vLLM serves `max_model_len`.
+ */
+export const contextWindowOfListedModel = (model: unknown): number | undefined => {
+	if (typeof model !== 'object' || model === null) return undefined
+	const fields = model as Record<string, unknown>
+	for (const key of ['loaded_context_length', 'max_model_len', 'context_length', 'context_window', 'max_context_length']) {
+		const value = fields[key]
+		if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.floor(value)
+	}
+	return undefined
+}
+
+/** Kodia: the context window of each listed model that has one, by the name Kodia lists the model under. */
+export const contextWindowsOfListedModels = (providerName: ProviderName, models: readonly unknown[]): Record<string, { contextWindow: number }> => {
+	const windows: Record<string, { contextWindow: number }> = {}
+	for (const model of models) {
+		const id = (model as { id?: unknown } | null)?.id
+		const contextWindow = contextWindowOfListedModel(model)
+		if (typeof id !== 'string' || contextWindow === undefined) continue
+		windows[canonicalModelNameForProvider(providerName, id)] ??= { contextWindow }
+	}
+	return windows
+}

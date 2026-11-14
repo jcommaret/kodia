@@ -41,7 +41,7 @@ suite('Kodia agent tools', () => {
 	teardown(() => fs.promises.rm(dir, { recursive: true, force: true }));
 
 	test('offers the chat\'s tools that don\'t need the editor, with the chat\'s names and typed parameters', () => {
-		assert.deepStrictEqual(KODIA_TOOLS.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory']);
+		assert.deepStrictEqual(KODIA_TOOLS.map(t => t.name), ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_codebase', 'search_in_file', 'create_file_or_folder', 'delete_file_or_folder', 'edit_file', 'rewrite_file', 'run_command', 'fetch_url', 'write_project_memory']);
 		const readFile = KODIA_TOOLS.find(t => t.name === 'read_file')!;
 		assert.deepStrictEqual(Object.keys((readFile.parametersSchema as { properties: object }).properties), ['uri', 'start_line', 'end_line', 'page_number']);
 		assert.deepStrictEqual((readFile.parametersSchema as { required: string[] }).required, ['uri']);
@@ -57,7 +57,7 @@ suite('Kodia agent tools', () => {
 		}
 		const approvals = Object.fromEntries(KODIA_TOOLS.map(t => [t.name, approvalOfTool(t.name)]));
 		assert.deepStrictEqual(approvals, {
-			read_file: undefined, ls_dir: undefined, get_dir_tree: undefined, search_pathnames_only: undefined, search_for_files: undefined, search_in_file: undefined,
+			read_file: undefined, ls_dir: undefined, get_dir_tree: undefined, search_pathnames_only: undefined, search_for_files: undefined, search_codebase: undefined, search_in_file: undefined,
 			create_file_or_folder: 'edits', delete_file_or_folder: 'edits', edit_file: 'edits', rewrite_file: 'edits', write_project_memory: 'edits',
 			run_command: 'terminal', fetch_url: 'web pages',
 		});
@@ -183,6 +183,25 @@ suite('Kodia agent tools', () => {
 		await write('README.md', '');
 		assert.strictEqual((await run('get_dir_tree', { uri: '.' })).output, `Directory of ${dir}:\n├── src/\n│   ├── lib/\n│   │   └── util.ts\n│   └── app.ts\n└── README.md\n`);
 		assert.strictEqual((await run('get_dir_tree', { uri: 'README.md' })).success, false);
+	});
+
+	test('search_codebase returns the passages that match a question best, with their file and lines', async () => {
+		const filler = Array.from({ length: 50 }, (_, i) => `// line ${i}`).join('\n');
+		await write('src/retry.ts', `${filler}\nexport function shouldRetryModelRequest(attempt: number) {\n\treturn attempt < 3;\n}\n${filler}\n`);
+		await write('src/theme.ts', `${filler}\nconst request = 'colors';\n`);
+		await write('docs/notes.md', 'Nothing about it.\n');
+
+		const { success, output } = await run('search_codebase', { query: 'Where is a failed model request retried?' });
+		assert.strictEqual(success, true);
+		assert.ok(output.startsWith(`${join(dir, 'src/retry.ts')} (lines 49-53)\n\`\`\`\n`), output.slice(0, 200));
+		assert.ok(output.includes('shouldRetryModelRequest'));
+		assert.ok(output.indexOf(join(dir, 'src/theme.ts')) > output.indexOf('shouldRetryModelRequest'), 'the weaker match comes after');
+		assert.ok(!output.includes('notes.md'));
+
+		assert.ok(!(await run('search_codebase', { query: 'request', search_in_folder: 'docs' })).output.includes('retry.ts'));
+		assert.ok((await run('search_codebase', { query: 'zebra' })).output.includes('Nothing in the project matches'));
+		assert.ok((await run('search_codebase', { query: 'how does it' })).output.includes('no word to search by'));
+		assert.strictEqual((await run('search_codebase', { query: ' ' })).success, false);
 	});
 
 	test('search_pathnames_only and search_for_files look through the project, hidden folders included', async () => {

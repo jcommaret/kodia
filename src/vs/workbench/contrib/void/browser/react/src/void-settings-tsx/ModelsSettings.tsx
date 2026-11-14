@@ -13,7 +13,8 @@ import { useAccessor, useRefreshModelListener, useRefreshModelState, useSettings
 import { X, RefreshCw, Loader2, Check, Asterisk, Plus } from 'lucide-react'
 import { ChatMarkdownRender } from '../markdown/ChatMarkdownRender.js'
 import { WarningBox } from './WarningBox.js'
-import { getModelCapabilities, modelOverrideKeys, ModelOverrides } from '../../../../common/modelCapabilities.js';
+import { getModelCapabilities, StoredModelOverrides } from '../../../../common/modelCapabilities.js';
+import { parseModelOverridesText, systemMessageOptions, toolFormatOptions } from '../../../../common/helpers/modelOverridesInput.js';
 import { isFreeOpenRouterModel } from '../../../../common/openRouterModels.js';
 import { AddButton, AddRowButton, AnimatedCheckmarkButton, GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
 
@@ -95,13 +96,35 @@ const RefreshableModels = ({ providerNamesFilter }: { providerNamesFilter?: read
 
 }
 
-// ---------------- Simplified Model Settings Dialog ------------------
+// ---------------- Model Settings Dialog ------------------
 
-// keys of ModelOverrides we allow the user to override
+const toolFormatLabel = (format: (typeof toolFormatOptions)[number] | undefined) =>
+	format === 'openai-style' ? 'Native (OpenAI format)'
+		: format === 'anthropic-style' ? 'Native (Anthropic format)'
+			: format === 'gemini-style' ? 'Native (Gemini format)'
+				: 'None: tools are described in the prompt (XML)'
 
+const systemMessageLabel = (option: (typeof systemMessageOptions)[number]) =>
+	option === 'system-role' ? 'System role'
+		: option === 'developer-role' ? 'Developer role'
+			: option === 'separated' ? 'Separate field'
+				: 'Not supported: sent as a user message'
 
+const OverrideRow = ({ label, detail, isChanged, children }: { label: string, detail: string, isChanged: boolean, children: React.ReactNode }) => {
+	return <div className='flex items-center justify-between gap-4 py-1.5'>
+		<div className='min-w-0'>
+			<div className='text-sm text-void-fg-1'>{label}{isChanged ? <span className='text-void-fg-3'> · changed</span> : null}</div>
+			<div className='text-xs text-void-fg-3'>{detail}</div>
+		</div>
+		<div className='shrink-0'>{children}</div>
+	</div>
+}
 
-// This new dialog replaces the verbose UI with a single JSON override box.
+const overrideInputClassName = 'w-56 py-1 px-2 rounded-sm border border-void-border-2 text-sm'
+// VS Code styles bare inputs and selects itself: the theme's input colors have to be set on the element
+const overrideInputStyle: React.CSSProperties = { background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)' }
+
+// The form and the JSON box show the same overrides: the JSON text is the state, and the form reads and rewrites it.
 const SimpleModelSettingsDialog = ({
 	isOpen,
 	onClose,
@@ -119,68 +142,50 @@ const SimpleModelSettingsDialog = ({
 	const mouseDownInsideModal = useRef(false); // Ref to track mousedown origin
 	const settingsStateService = accessor.get('IVoidSettingsService')
 
-	// current overrides and defaults
-	const defaultModelCapabilities = getModelCapabilities(providerName, modelName, undefined);
-	const currentOverrides = settingsState.overridesOfModel?.[providerName]?.[modelName] ?? undefined;
-	const { recognizedModelName, isUnrecognizedModel } = defaultModelCapabilities
+	// what Kodia does without overrides
+	const defaults = getModelCapabilities(providerName, modelName, undefined);
+	const { recognizedModelName, isUnrecognizedModel } = defaults
+	const storedOverrides = settingsState.overridesOfModel?.[providerName]?.[modelName];
+	const textOf = (overrides: StoredModelOverrides | undefined) => overrides && Object.keys(overrides).length ? JSON.stringify(overrides, null, 2) : ''
 
-	// Create the placeholder with the default values for allowed keys
-	const partialDefaults: Partial<ModelOverrides> = {};
-	for (const k of modelOverrideKeys) { if (defaultModelCapabilities[k]) partialDefaults[k] = defaultModelCapabilities[k] as any; }
-	const placeholder = JSON.stringify(partialDefaults, null, 2);
+	const [jsonText, setJsonText] = useState<string>(() => textOf(storedOverrides));
+	const [showJson, setShowJson] = useState(false);
 
-	const [overrideEnabled, setOverrideEnabled] = useState<boolean>(() => !!currentOverrides);
-
-	const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-	const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
-
-	// reset when dialog toggles
+	// reset when the dialog opens on another model
 	useEffect(() => {
 		if (!isOpen) return;
-		const cur = settingsState.overridesOfModel?.[providerName]?.[modelName];
-		setOverrideEnabled(!!cur);
-		setErrorMsg(null);
-	}, [isOpen, providerName, modelName, settingsState.overridesOfModel, placeholder]);
+		setJsonText(textOf(settingsState.overridesOfModel?.[providerName]?.[modelName]));
+	}, [isOpen, providerName, modelName]);
+
+	const parsed = parseModelOverridesText(jsonText)
+	const overrides: StoredModelOverrides = parsed.error === undefined ? parsed.overrides : {}
+	const isFormDisabled = parsed.error !== undefined
+
+	// a value equal to Kodia's default isn't stored, so the model keeps following the catalog for it
+	const setOverride = <K extends keyof StoredModelOverrides>(key: K, value: StoredModelOverrides[K], defaultValue: unknown) => {
+		const next: StoredModelOverrides = { ...overrides }
+		if (value === undefined || value === (defaultValue ?? null) || value === defaultValue) delete next[key]
+		else next[key] = value
+		setJsonText(textOf(next))
+	}
+
+	const contextWindow = overrides.contextWindow ?? defaults.contextWindow
+	const reservedOutput = overrides.reservedOutputTokenSpace ?? defaults.reservedOutputTokenSpace
+	const toolFormat = 'specialToolFormat' in overrides ? overrides.specialToolFormat ?? null : defaults.specialToolFormat ?? null
+	const systemMessage = overrides.supportsSystemMessage ?? defaults.supportsSystemMessage
+	const supportsVision = overrides.supportsVision ?? !!defaults.supportsVision
+	const supportsFIM = overrides.supportsFIM ?? defaults.supportsFIM
+
+	const numberOf = (text: string) => { const n = Number(text); return text.trim() && Number.isInteger(n) && n > 0 ? n : undefined }
 
 	const onSave = async () => {
-		// if disabled override, reset overrides
-		if (!overrideEnabled) {
-			await settingsStateService.setOverridesOfModel(providerName, modelName, undefined);
-			onClose();
-			return;
-		}
-
-		// enabled overrides
-		// parse json
-		let parsedInput: Record<string, unknown>
-
-		if (textAreaRef.current?.value) {
-			try {
-				parsedInput = JSON.parse(textAreaRef.current.value);
-			} catch (e) {
-				setErrorMsg('Invalid JSON');
-				return;
-			}
-		} else {
-			setErrorMsg('Invalid JSON');
-			return;
-		}
-
-		// only keep allowed keys
-		const cleaned: Partial<ModelOverrides> = {};
-		for (const k of modelOverrideKeys) {
-			if (!(k in parsedInput)) continue
-			const isEmpty = parsedInput[k] === '' || parsedInput[k] === null || parsedInput[k] === undefined;
-			if (!isEmpty) {
-				cleaned[k] = parsedInput[k] as any;
-			}
-		}
-		await settingsStateService.setOverridesOfModel(providerName, modelName, cleaned);
+		if (parsed.error !== undefined) return
+		await settingsStateService.setOverridesOfModel(providerName, modelName, Object.keys(parsed.overrides).length ? parsed.overrides : undefined);
 		onClose();
 	};
 
 	const sourcecodeOverridesLink = `${KODIA_REPO_URL}/blob/master/src/vs/workbench/contrib/void/common/modelCapabilities.ts`
+	const numChanged = Object.keys(overrides).length
 
 	return (
 		<div // Backdrop
@@ -206,7 +211,7 @@ const SimpleModelSettingsDialog = ({
 			>
 				<div className="flex justify-between items-center mb-4">
 					<h3 className="text-lg font-medium">
-						Change Defaults for {modelName} ({displayInfoOfProviderName(providerName).title})
+						Capabilities of {modelName} ({displayInfoOfProviderName(providerName).title})
 					</h3>
 					<button
 						onClick={onClose}
@@ -220,45 +225,95 @@ const SimpleModelSettingsDialog = ({
 				<div className="text-sm text-void-fg-3 mb-4">
 					{type === 'default' ? `${modelName} comes packaged with Kodia, so you shouldn't need to change these settings.`
 						: isUnrecognizedModel
-							? `Model not recognized by Kodia.`
-							: `Kodia recognizes ${modelName} ("${recognizedModelName}").`}
+							? `Kodia doesn't know this model, so the values below are cautious guesses. Set the context window and the tool calling your server gives it.`
+							: recognizedModelName === modelName
+								? `Kodia knows ${modelName}.`
+								: `Kodia treats ${modelName} as "${recognizedModelName}".`}
 				</div>
 
+				<div className={`mb-3 ${isFormDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
+					<OverrideRow label='Context window' detail='Tokens the model reads at once. Older messages are trimmed to fit.' isChanged={'contextWindow' in overrides}>
+						<input
+							type='number' min={1} step={1}
+							className={overrideInputClassName} style={overrideInputStyle}
+							value={contextWindow}
+							onChange={e => setOverride('contextWindow', numberOf(e.target.value), defaults.contextWindow)}
+						/>
+					</OverrideRow>
 
-				{/* override toggle */}
-				<div className="flex items-center gap-2 mb-4">
-					<VoidSwitch size='xs' value={overrideEnabled} onChange={setOverrideEnabled} />
-					<span className="text-void-fg-3 text-sm">Override model defaults</span>
+					<OverrideRow label='Output limit' detail='Tokens kept free in the window for the reply.' isChanged={'reservedOutputTokenSpace' in overrides}>
+						<input
+							type='number' min={1} step={1}
+							className={overrideInputClassName} style={overrideInputStyle}
+							value={reservedOutput ?? ''}
+							placeholder='4096'
+							onChange={e => setOverride('reservedOutputTokenSpace', numberOf(e.target.value), defaults.reservedOutputTokenSpace)}
+						/>
+					</OverrideRow>
+
+					<OverrideRow label='Tool calling' detail='How the agent gives its tools to the model.' isChanged={'specialToolFormat' in overrides}>
+						<select
+							className={overrideInputClassName} style={overrideInputStyle}
+							value={toolFormat ?? ''}
+							onChange={e => setOverride('specialToolFormat', (e.target.value || null) as StoredModelOverrides['specialToolFormat'], defaults.specialToolFormat ?? null)}
+						>
+							{toolFormatOptions.map(option => <option key={option ?? ''} value={option ?? ''}>{toolFormatLabel(option)}</option>)}
+						</select>
+					</OverrideRow>
+
+					<OverrideRow label='System message' detail='How instructions are sent to the model.' isChanged={'supportsSystemMessage' in overrides}>
+						<select
+							className={overrideInputClassName} style={overrideInputStyle}
+							value={systemMessage === false ? '' : systemMessage}
+							onChange={e => setOverride('supportsSystemMessage', (e.target.value || false) as StoredModelOverrides['supportsSystemMessage'], defaults.supportsSystemMessage)}
+						>
+							{systemMessageOptions.map(option => <option key={option || ''} value={option || ''}>{systemMessageLabel(option)}</option>)}
+						</select>
+					</OverrideRow>
+
+					<OverrideRow label='Images' detail='The model accepts images in messages.' isChanged={'supportsVision' in overrides}>
+						<VoidSwitch size='xs' value={supportsVision} onChange={value => setOverride('supportsVision', value, !!defaults.supportsVision)} />
+					</OverrideRow>
+
+					<OverrideRow label='Fill-in-the-middle' detail='The model was made for autocomplete.' isChanged={'supportsFIM' in overrides}>
+						<VoidSwitch size='xs' value={supportsFIM} onChange={value => setOverride('supportsFIM', value, defaults.supportsFIM)} />
+					</OverrideRow>
 				</div>
 
-				{/* Informational link */}
-				{overrideEnabled && <div className="text-sm text-void-fg-3 mb-4">
-					<ChatMarkdownRender string={`See the [sourcecode](${sourcecodeOverridesLink}) for a reference on how to set this JSON (advanced).`} chatMessageLocation={undefined} />
-				</div>}
-
-				<textarea
-					key={overrideEnabled + ''}
-					ref={textAreaRef}
-					className={`w-full min-h-[200px] p-2 rounded-sm border border-void-border-2 bg-void-bg-2 resize-none font-mono text-sm ${!overrideEnabled ? 'text-void-fg-3' : ''}`}
-					defaultValue={overrideEnabled && currentOverrides ? JSON.stringify(currentOverrides, null, 2) : placeholder}
-					placeholder={placeholder}
-					readOnly={!overrideEnabled}
-				/>
-				{errorMsg && (
-					<div className="text-red-500 mt-2 text-sm">{errorMsg}</div>
+				{/* the same overrides as JSON, with the settings the form doesn't show (reasoning, extra payload...) */}
+				<button className='text-sm text-void-fg-3 hover:text-void-fg-1 mb-2' onClick={() => setShowJson(!showJson)}>
+					{showJson ? 'Hide' : 'Show'} as JSON (advanced)
+				</button>
+				{showJson && <>
+					<div className="text-sm text-void-fg-3 mb-2">
+						<ChatMarkdownRender string={`Only what you change is listed. See the [source code](${sourcecodeOverridesLink}) for every setting, such as \`reasoningCapabilities\`.`} chatMessageLocation={undefined} />
+					</div>
+					<textarea
+						className='w-full min-h-[160px] p-2 rounded-sm border border-void-border-2 resize-none font-mono text-sm' style={overrideInputStyle}
+						value={jsonText}
+						placeholder={'{\n  "contextWindow": 32000\n}'}
+						onChange={e => setJsonText(e.target.value)}
+					/>
+				</>}
+				{parsed.error !== undefined && (
+					<div className="text-red-500 mt-2 text-sm">{parsed.error}</div>
 				)}
 
-
-				<div className="flex justify-end gap-2 mt-4">
-					<VoidButtonBgDarken onClick={onClose} className="px-3 py-1">
-						Cancel
+				<div className="flex justify-between items-center gap-2 mt-4">
+					<VoidButtonBgDarken onClick={() => setJsonText('')} className={`px-3 py-1 ${numChanged === 0 && parsed.error === undefined ? 'opacity-50 pointer-events-none' : ''}`}>
+						Reset to Kodia's defaults
 					</VoidButtonBgDarken>
-					<VoidButtonBgDarken
-						onClick={onSave}
-						className="px-3 py-1 bg-[#0e70c0] text-white"
-					>
-						Save
-					</VoidButtonBgDarken>
+					<div className="flex gap-2">
+						<VoidButtonBgDarken onClick={onClose} className="px-3 py-1">
+							Cancel
+						</VoidButtonBgDarken>
+						<VoidButtonBgDarken
+							onClick={onSave}
+							className={`px-3 py-1 bg-[#0e70c0] text-white ${parsed.error !== undefined ? 'opacity-50 pointer-events-none' : ''}`}
+						>
+							Save
+						</VoidButtonBgDarken>
+					</div>
 				</div>
 			</div>
 		</div>

@@ -769,6 +769,22 @@ type OpenAIModel = {
 	object: 'model';
 	owned_by: string;
 }
+// LM Studio's listing of its models (https://lmstudio.ai/docs/app/api/endpoints/rest), by model id. Empty when the
+// server has no such endpoint or doesn't answer in time: the models are then listed without these details.
+const lmStudioModelDetails = async (endpoint: string): Promise<Map<string, object>> => {
+	const details = new Map<string, object>()
+	try {
+		const response = await fetch(`${endpoint}/api/v0/models`, { signal: AbortSignal.timeout(3_000) })
+		if (!response.ok) return details
+		const json = await response.json() as { data?: unknown }
+		for (const model of Array.isArray(json.data) ? json.data : []) {
+			if (model && typeof model === 'object' && typeof model.id === 'string') details.set(model.id, model)
+		}
+	}
+	catch { }
+	return details
+}
+
 const _openaiCompatibleList = async ({ onSuccess: onSuccess_, onError: onError_, settingsOfProvider, providerName }: ListParams_Internal<OpenAIModel>) => {
 	const onSuccess = ({ models }: { models: OpenAIModel[] }) => {
 		onSuccess_({ models })
@@ -784,6 +800,12 @@ const _openaiCompatibleList = async ({ onSuccess: onSuccess_, onError: onError_,
 				models.push(...response.data)
 				while (response.hasNextPage()) {
 					models.push(...(await response.getNextPage()).data)
+				}
+				// LM Studio says the context window a model is loaded with in its own listing, not in /v1/models
+				if (providerName === 'lmStudio') {
+					const details = await lmStudioModelDetails(settingsOfProvider.lmStudio.endpoint)
+					onSuccess({ models: models.map(model => ({ ...details.get(model.id), ...model })) })
+					return
 				}
 				onSuccess({ models })
 			})

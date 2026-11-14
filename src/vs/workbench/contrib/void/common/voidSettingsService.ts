@@ -11,7 +11,7 @@ import { registerSingleton, InstantiationType } from '../../../../platform/insta
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IMetricsService } from './metricsService.js';
-import { defaultModelsOfProvider, defaultProviderSettings, getModelCapabilities, ModelOverrides, setDetectedModelOptions, VoidStaticModelInfo } from './modelCapabilities.js';
+import { defaultModelsOfProvider, defaultProviderSettings, getModelCapabilities, StoredModelOverrides, setDetectedModelOptions, VoidStaticModelInfo } from './modelCapabilities.js';
 import { DetectedModel } from './providerModels.js';
 import { instructionsFrameworkContentForKodia } from './instructionsFrameworks.js';
 import { VOID_SETTINGS_STORAGE_KEY } from './storageKeys.js';
@@ -70,12 +70,14 @@ export interface IVoidSettingsService {
 	// setMCPServerStates: (newStates: MCPServerStates) => Promise<void>;
 
 	// setting to undefined CLEARS it, unlike others:
-	setOverridesOfModel(providerName: ProviderName, modelName: string, overrides: Partial<ModelOverrides> | undefined): Promise<void>;
+	/** Replaces the model's overrides: a setting left out goes back to Kodia's default. `undefined` removes them all. */
+	setOverridesOfModel(providerName: ProviderName, modelName: string, overrides: StoredModelOverrides | undefined): Promise<void>;
 
 	dangerousSetState(newState: VoidSettingsState): Promise<void>;
 	resetState(): Promise<void>;
 
-	setAutodetectedModels(providerName: ProviderName, modelNames: string[], logging: object): void;
+	// Kodia: `capabilitiesOfModel` is what the server says of a model (its context window), by model name
+	setAutodetectedModels(providerName: ProviderName, modelNames: string[], logging: object, capabilitiesOfModel?: Record<string, Partial<VoidStaticModelInfo> | undefined>): void;
 	// Kodia: the models a provider's API lists besides its default one (on OpenRouter, its free and most used models),
 	// with their capabilities. New ones are switched off, but for `shownModelNames` (the most used, OpenRouter's free ones)
 	setDetectedModels(providerName: ProviderName, models: DetectedModel[], shownModelNames?: readonly string[]): void;
@@ -536,17 +538,14 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		this._onDidChangeState.fire()
 	}
 
-	setOverridesOfModel = async (providerName: ProviderName, modelName: string, overrides: Partial<ModelOverrides> | undefined) => {
+	setOverridesOfModel = async (providerName: ProviderName, modelName: string, overrides: StoredModelOverrides | undefined) => {
 		const newState: VoidSettingsState = {
 			...this.state,
 			overridesOfModel: {
 				...this.state.overridesOfModel,
 				[providerName]: {
 					...this.state.overridesOfModel[providerName],
-					[modelName]: overrides === undefined ? undefined : {
-						...this.state.overridesOfModel[providerName][modelName],
-						...overrides
-					},
+					[modelName]: overrides === undefined || Object.keys(overrides).length === 0 ? undefined : { ...overrides },
 				}
 			}
 		};
@@ -561,13 +560,13 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 
 
 
-	setAutodetectedModels(providerName: ProviderName, autodetectedModelNames: string[], logging: object) {
+	setAutodetectedModels(providerName: ProviderName, autodetectedModelNames: string[], logging: object, capabilitiesOfModel?: Record<string, Partial<VoidStaticModelInfo> | undefined>) {
 
 		const { models } = this.state.settingsOfProvider[providerName]
 		const oldModelNames = models.map(m => m.modelName)
 
 		const normalizedNames = normalizeAutodetectedModelNamesForProvider(providerName, autodetectedModelNames)
-		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: normalizedNames, type: 'autodetected' })
+		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: normalizedNames, type: 'autodetected', capabilitiesOfModel })
 		// a local server is polled every 5 seconds: only a change is saved (and re-renders the settings)
 		if (JSON.stringify(newModels) === JSON.stringify(models)) return
 		this.setSettingOfProvider(providerName, 'models', newModels)

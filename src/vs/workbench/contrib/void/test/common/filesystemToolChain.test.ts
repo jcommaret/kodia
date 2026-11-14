@@ -77,6 +77,7 @@ suite('Kodia - filesystemToolChain', () => {
 		voidSettingsService as any,
 		DUMMY as any, DUMMY as any, DUMMY as any,
 		mainProcessService as any,
+		DUMMY as any, DUMMY as any, DUMMY as any, // Notebook services
 	);
 
 	setup(() => {

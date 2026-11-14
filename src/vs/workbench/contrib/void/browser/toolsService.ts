@@ -18,7 +18,7 @@ import { IEditCodeService } from './editCodeServiceInterface.js'
 import { ITerminalToolService } from './terminalToolService.js'
 import { IGitToolService } from './gitToolService.js'
 import { ITestToolService } from './testToolService.js'
-import { LintErrorItem, BuiltinToolCallParams, BuiltinToolResultType, BuiltinToolName, CodeLocation } from '../common/toolsServiceTypes.js'
+import { LintErrorItem, BuiltinToolCallParams, BuiltinToolResultType, BuiltinToolName, CodeLocation, NotebookCellOutput } from '../common/toolsServiceTypes.js'
 import { IVoidModelService } from '../common/voidModelService.js'
 import { EndOfLinePreference } from '../../../../editor/common/model.js'
 import { IVoidCommandBarService } from './voidCommandBarServiceInterface.js'
@@ -37,6 +37,10 @@ import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
 import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
 import { IWebSearchService, SearchRequest } from '../common/webSearchTypes.js'
+import { INotebookService } from '../../notebook/common/notebookService.js'
+import { INotebookKernelService } from '../../notebook/common/notebookKernelService.js'
+import { INotebookExecutionService } from '../../notebook/common/notebookExecutionService.js'
+import { VSBuffer } from '../../../../base/common/buffer.js'
 
 
 // tool use for AI
@@ -251,6 +255,9 @@ export class ToolsService implements IToolsService {
 		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
 		@ITextModelService textModelService: ITextModelService,
 		@IMainProcessService mainProcessService: IMainProcessService,
+		@INotebookService private readonly notebookService: INotebookService,
+		@INotebookKernelService private readonly notebookKernelService: INotebookKernelService,
+		@INotebookExecutionService private readonly notebookExecutionService: INotebookExecutionService,
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
 		const webFetchService = ProxyChannel.toService<IKodiaWebFetchService>(mainProcessService.getChannel('void-channel-webFetch'))
@@ -691,6 +698,85 @@ export class ToolsService implements IToolsService {
 				if (!description) throw new Error(`Invalid LLM output: description must not be empty.`)
 				if (!prompt) throw new Error(`Invalid LLM output: prompt must not be empty.`)
 				return { agent, description, prompt, model: model ?? undefined, sessionID: sessionID ?? undefined }
+			},
+
+			// Notebook operations
+			read_notebook: (params: RawToolParamsObj) => {
+				const { uri: uriUnknown, start_cell: startCellUnknown, end_cell: endCellUnknown } = params
+				const uri = validateURI(uriUnknown, workspaceContextService)
+				let start_cell: number | undefined
+				if (startCellUnknown !== undefined && startCellUnknown !== null) {
+					const validated = validateNumber(startCellUnknown, { default: 0 })
+					if (validated !== null) start_cell = validated as number
+				}
+				let end_cell: number | undefined
+				if (endCellUnknown !== undefined && endCellUnknown !== null) {
+					const validated = validateNumber(endCellUnknown, { default: null })
+					if (validated !== null) end_cell = validated as number
+				}
+				return { uri, start_cell, end_cell }
+			},
+			write_notebook: (params: RawToolParamsObj) => {
+				const { uri: uriUnknown, cells: cellsUnknown } = params
+				const uri = validateURI(uriUnknown, workspaceContextService)
+				const cells = validateStr('cells', cellsUnknown)
+				let parsedCells: any[]
+				try {
+					parsedCells = JSON.parse(cells)
+				} catch (e) {
+					throw new Error(`Invalid LLM output: cells must be valid JSON array.`)
+				}
+				if (!Array.isArray(parsedCells)) throw new Error(`Invalid LLM output: cells must be an array.`)
+				return { uri, cells: parsedCells }
+			},
+			edit_notebook: (params: RawToolParamsObj) => {
+				const { uri: uriUnknown, operations: operationsUnknown } = params
+				const uri = validateURI(uriUnknown, workspaceContextService)
+				const operations = validateStr('operations', operationsUnknown)
+				let parsedOps: any[]
+				try {
+					parsedOps = JSON.parse(operations)
+				} catch (e) {
+					throw new Error(`Invalid LLM output: operations must be valid JSON array.`)
+				}
+				if (!Array.isArray(parsedOps)) throw new Error(`Invalid LLM output: operations must be an array.`)
+				return { uri, operations: parsedOps }
+			},
+			execute_notebook_cell: (params: RawToolParamsObj) => {
+				const { uri: uriUnknown, cell_index: cellIndexUnknown, kernel_id: kernelIdUnknown } = params
+				const uri = validateURI(uriUnknown, workspaceContextService)
+				const cell_index = validateNumber(cellIndexUnknown, { default: 0 }) as number
+				const kernel_id = validateOptionalStr('kernel_id', kernelIdUnknown) ?? undefined
+				return { uri, cell_index, kernel_id }
+			},
+			execute_notebook: (params: RawToolParamsObj) => {
+				const { uri: uriUnknown, kernel_id: kernelIdUnknown, cell_indices: cellIndicesUnknown } = params
+				const uri = validateURI(uriUnknown, workspaceContextService)
+				const kernel_id = validateOptionalStr('kernel_id', kernelIdUnknown) ?? undefined
+				let cell_indices: number[] | undefined
+				if (cellIndicesUnknown !== undefined && cellIndicesUnknown !== null) {
+					if (typeof cellIndicesUnknown === 'string') {
+						try {
+							cell_indices = JSON.parse(cellIndicesUnknown)
+						} catch (e) {
+							throw new Error(`Invalid LLM output: cell_indices must be valid JSON array.`)
+						}
+					} else if (Array.isArray(cellIndicesUnknown)) {
+						cell_indices = (cellIndicesUnknown as unknown[]).map(Number)
+					}
+				}
+				return { uri, kernel_id, cell_indices }
+			},
+			select_notebook_kernel: (params: RawToolParamsObj) => {
+				const { uri: uriUnknown, kernel_id: kernelIdUnknown } = params
+				const uri = validateURI(uriUnknown, workspaceContextService)
+				const kernel_id = validateStr('kernel_id', kernelIdUnknown)
+				return { uri, kernel_id }
+			},
+			list_notebook_kernels: (params: RawToolParamsObj) => {
+				const { uri: uriUnknown } = params
+				const uri = validateOptionalURI(uriUnknown, workspaceContextService) ?? undefined
+				return { uri }
 			},
 
 		}
@@ -1227,6 +1313,260 @@ export class ToolsService implements IToolsService {
 				throw new Error('subagent tool is handled by chatThreadService, not toolsService.callTool')
 			},
 
+			// Notebook operations
+			read_notebook: async ({ uri, start_cell, end_cell }) => {
+				await voidModelService.initializeModel(uri)
+				const { model } = await voidModelService.getModelSafe(uri)
+				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
+				const content = model.getValue(EndOfLinePreference.LF)
+				let notebook: any
+				try {
+					notebook = JSON.parse(content)
+				} catch (e) {
+					throw new Error(`Notebook is not valid JSON.`)
+				}
+				if (!notebook.cells || !Array.isArray(notebook.cells)) {
+					throw new Error(`Notebook has no cells.`)
+				}
+				let cells = notebook.cells
+				if (start_cell !== null || end_cell !== null) {
+					const start = start_cell ?? 0
+					const end = end_cell !== null ? end_cell : cells.length
+					cells = cells.slice(start, end)
+				}
+				const outputCells = cells.map((cell: any, idx: number) => ({
+					index: idx,
+					cell_type: cell.cell_type,
+					source: cell.source,
+					outputs: cell.outputs || [],
+					execution_count: cell.execution_count,
+					metadata: cell.metadata || {},
+				}))
+				return { result: { cells: outputCells } }
+			},
+			write_notebook: async ({ uri, cells }) => {
+				const notebook = {
+					nbformat: 4,
+					nbformat_minor: 5,
+					metadata: {
+						kernelspec: {
+							display_name: 'Python 3',
+							language: 'python',
+							name: 'python3'
+						},
+						language_info: {
+							name: 'python',
+							version: '3.8.0'
+						}
+					},
+					cells: cells.map((cell: any) => ({
+						cell_type: cell.cell_type,
+						source: cell.source,
+						metadata: cell.metadata || {},
+						outputs: cell.outputs || [],
+						execution_count: cell.execution_count || null
+					}))
+				}
+				await fileService.writeFile(uri, VSBuffer.fromString(JSON.stringify(notebook, null, 2)))
+				return { result: { uri } }
+			},
+			edit_notebook: async ({ uri, operations }) => {
+				await voidModelService.initializeModel(uri)
+				const { model } = await voidModelService.getModelSafe(uri)
+				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
+				const content = model.getValue(EndOfLinePreference.LF)
+				let notebook: any
+				try {
+					notebook = JSON.parse(content)
+				} catch (e) {
+					throw new Error(`Notebook is not valid JSON.`)
+				}
+				if (!notebook.cells || !Array.isArray(notebook.cells)) {
+					notebook.cells = []
+				}
+				let applied = 0
+				for (const op of operations) {
+					switch (op.type) {
+						case 'add_cell':
+							if (op.index >= 0 && op.index <= notebook.cells.length) {
+								notebook.cells.splice(op.index, 0, op.cell)
+								applied++
+							}
+							break
+						case 'remove_cell':
+							if (op.index >= 0 && op.index < notebook.cells.length) {
+								notebook.cells.splice(op.index, 1)
+								applied++
+							}
+							break
+						case 'replace_cell':
+							if (op.index >= 0 && op.index < notebook.cells.length) {
+								notebook.cells[op.index] = op.cell
+								applied++
+							}
+							break
+						case 'move_cell':
+							if (op.from_index >= 0 && op.from_index < notebook.cells.length && op.to_index >= 0 && op.to_index <= notebook.cells.length) {
+								const [cell] = notebook.cells.splice(op.from_index, 1)
+								notebook.cells.splice(op.to_index, 0, cell)
+								applied++
+							}
+							break
+						case 'update_cell_source':
+							if (op.index >= 0 && op.index < notebook.cells.length) {
+								notebook.cells[op.index].source = op.source
+								applied++
+							}
+							break
+						case 'update_cell_outputs':
+							if (op.index >= 0 && op.index < notebook.cells.length) {
+								notebook.cells[op.index].outputs = op.outputs
+								applied++
+							}
+							break
+						case 'clear_cell_outputs':
+							if (op.index >= 0 && op.index < notebook.cells.length) {
+								notebook.cells[op.index].outputs = []
+								applied++
+							}
+							break
+					}
+				}
+				await fileService.writeFile(uri, VSBuffer.fromString(JSON.stringify(notebook, null, 2)))
+				return { result: { uri, applied } }
+			},
+			execute_notebook_cell: async ({ uri, cell_index, kernel_id }) => {
+				// Get the notebook model
+				await voidModelService.initializeModel(uri)
+				const { model } = await voidModelService.getModelSafe(uri)
+				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
+				const content = model.getValue(EndOfLinePreference.LF)
+				let notebook: any
+				try {
+					notebook = JSON.parse(content)
+				} catch (e) {
+					throw new Error(`Notebook is not valid JSON.`)
+				}
+				if (!notebook.cells || !Array.isArray(notebook.cells) || cell_index < 0 || cell_index >= notebook.cells.length) {
+					throw new Error(`Invalid cell index: ${cell_index}`)
+				}
+				const cell = notebook.cells[cell_index]
+				if (cell.cell_type !== 'code') {
+					throw new Error(`Cell ${cell_index} is not a code cell.`)
+				}
+				// Execute the cell using the notebook execution service
+				const startTime = Date.now()
+				try {
+					// Get the notebook editor model
+					const notebookModel = await this.notebookService.getNotebookTextModel(uri)
+					if (!notebookModel) throw new Error('Notebook model not found')
+					const cellModel = notebookModel.cells[cell_index]
+					if (!cellModel) throw new Error('Cell not found')
+					// Execute the cell
+					await this.notebookExecutionService.executeNotebookCells(notebookModel, [cellModel], undefined as any)
+					// Get the updated cell outputs
+					const updatedCell = notebookModel.cells[cell_index]
+					const outputs = updatedCell?.outputs || []
+					const executionTime = Date.now() - startTime
+					return { result: { cell_index: cell_index, outputs: outputs as any, execution_time: executionTime, success: true } }
+				} catch (e) {
+					return { result: { cell_index: cell_index, outputs: [], execution_time: Date.now() - startTime, success: false, error: e.message } }
+				}
+			},
+			execute_notebook: async ({ uri, kernel_id, cell_indices }) => {
+				// Execute multiple cells or all code cells
+				await voidModelService.initializeModel(uri)
+				const { model } = await voidModelService.getModelSafe(uri)
+				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
+				const content = model.getValue(EndOfLinePreference.LF)
+				let notebook: any
+				try {
+					notebook = JSON.parse(content)
+				} catch (e) {
+					throw new Error(`Notebook is not valid JSON.`)
+				}
+				if (!notebook.cells || !Array.isArray(notebook.cells)) {
+					throw new Error(`Notebook has no cells.`)
+				}
+				const codeCellIndices = cell_indices ?? notebook.cells
+					.map((cell: any, idx: number) => cell.cell_type === 'code' ? idx : -1)
+					.filter((idx: number) => idx >= 0)
+				const results = []
+				for (const idx of codeCellIndices) {
+					const startTime = Date.now()
+					try {
+						// Execute each cell
+						const cellResult = await this.callTool.execute_notebook_cell({ uri, cell_index: idx, kernel_id: kernel_id })
+						const cellResultData = cellResult.result as { outputs: NotebookCellOutput[]; execution_time: number; success: boolean; error?: string }
+						results.push({
+							cell_index: idx,
+							outputs: cellResultData.outputs,
+							execution_time: cellResultData.execution_time,
+							success: cellResultData.success,
+							error: cellResultData.error
+						})
+					} catch (e) {
+						results.push({
+							cell_index: idx,
+							outputs: [],
+							execution_time: Date.now() - startTime,
+							success: false,
+							error: e.message
+						})
+					}
+				}
+				return { result: { results } }
+			},
+			select_notebook_kernel: async ({ uri, kernel_id }): Promise<{ result: { kernel_id: string } }> => {
+				// Set the kernel for the notebook by updating the notebook metadata
+				const notebookModel = await this.notebookService.getNotebookTextModel(uri)
+				if (!notebookModel) throw new Error('Notebook model not found')
+				
+				// Update the notebook metadata with the kernel specification
+				const metadata = { ...notebookModel.metadata }
+				const existingKernelSpec = (metadata.kernelspec as Record<string, unknown>) || {}
+				metadata.kernelspec = {
+					...existingKernelSpec,
+					name: kernel_id,
+					display_name: kernel_id,
+					language: 'python'
+				}
+				
+				// Update the notebook metadata directly on the model
+				notebookModel.metadata = metadata
+				
+				return { result: { kernel_id: kernel_id } }
+			},
+			list_notebook_kernels: async ({ uri }) => {
+				let notebookModel: any = null
+				if (uri) {
+					notebookModel = await this.notebookService.getNotebookTextModel(uri)
+				}
+				const matchResult = await this.notebookKernelService.getMatchingKernel(notebookModel)
+				// Combine all kernels from suggestions, all, and selected
+				const allKernels = [
+					...(matchResult.suggestions || []),
+					...(matchResult.all || []),
+					...(matchResult.selected ? [matchResult.selected] : []),
+					...(matchResult.hidden || [])
+				]
+				// Deduplicate by id
+				const uniqueKernels = new Map()
+				for (const k of allKernels) {
+					if (!uniqueKernels.has(k.id)) {
+						uniqueKernels.set(k.id, k)
+					}
+				}
+				const kernelInfos = Array.from(uniqueKernels.values()).map((k: any) => ({
+					id: k.id,
+					name: k.label,
+					description: k.description,
+					supported_languages: k.supportedLanguages,
+					is_preferred: k.isPreferred
+				}))
+				return { result: { kernels: kernelInfos } }
+			},
+
 		}
 
 
@@ -1623,6 +1963,65 @@ export class ToolsService implements IToolsService {
 			subagent: (_params, result) => {
 				const { sessionID, status, output } = result
 				return `Subagent started in session ${sessionID} (${status}). ${output}`
+			},
+
+			// Notebook operations
+			read_notebook: (params, result) => {
+				const { cells } = result
+				if (!cells || cells.length === 0) return 'Notebook is empty.'
+				const lines = cells.map((cell: any) => {
+					const typeIcon = cell.cell_type === 'code' ? '▶' : '📝'
+					const execCount = cell.execution_count !== null && cell.execution_count !== undefined ? ` [${cell.execution_count}]` : ''
+					const source = Array.isArray(cell.source) ? cell.source.join('') : cell.source
+					const outputStr = cell.outputs && cell.outputs.length > 0
+						? '\n  Outputs: ' + cell.outputs.map((o: any) => {
+							if (o.output_type === 'stream') return `${o.name}: ${Array.isArray(o.text) ? o.text.join('') : o.text}`
+							if (o.output_type === 'execute_result' || o.output_type === 'display_data') return `display: ${JSON.stringify(o.data).slice(0, 100)}`
+							if (o.output_type === 'error') return `Error: ${o.ename}: ${o.evalue}`
+							return ''
+						}).join('; ')
+						: ''
+					return `${typeIcon} Cell ${cell.index}${execCount}: ${source.slice(0, 200)}${source.length > 200 ? '...' : ''}${outputStr}`
+				})
+				return `Notebook: ${params.uri.fsPath}\n${lines.join('\n')}`
+			},
+			write_notebook: (params, result) => {
+				return `Notebook written to ${params.uri.fsPath}.`
+			},
+			edit_notebook: (params, result) => {
+				return `Applied ${result.applied} notebook edit operations to ${params.uri.fsPath}.`
+			},
+			execute_notebook_cell: (params, result) => {
+				const { cell_index, outputs, execution_time, success, error } = result
+				if (!success) return `Cell ${cell_index} execution failed: ${error}`
+				const outputStr = outputs && outputs.length > 0
+					? outputs.map((o: any) => {
+						if (o.output_type === 'stream') return `${o.name}: ${Array.isArray(o.text) ? o.text.join('') : o.text}`
+						if (o.output_type === 'execute_result' || o.output_type === 'display_data') return `display: ${JSON.stringify(o.data).slice(0, 200)}`
+						if (o.output_type === 'error') return `Error: ${o.ename}: ${o.evalue}\n${o.traceback?.join('\n') || ''}`
+						return ''
+					}).join('\n')
+					: '(no output)'
+				return `Cell ${cell_index} executed in ${execution_time}ms:\n${outputStr}`
+			},
+			execute_notebook: (params, result) => {
+				const { results } = result
+				const successful = results.filter((r: any) => r.success).length
+				const failed = results.filter((r: any) => !r.success).length
+				const lines = results.map((r: any) => {
+					const status = r.success ? '✅' : '❌'
+					return `${status} Cell ${r.cell_index}: ${r.execution_time}ms${r.error ? ` - ${r.error}` : ''}`
+				})
+				return `Notebook execution complete: ${successful} succeeded, ${failed} failed.\n${lines.join('\n')}`
+			},
+			select_notebook_kernel: (params, result) => {
+				return `Kernel set to ${result.kernel_id} for ${params.uri.fsPath}.`
+			},
+			list_notebook_kernels: (params, result) => {
+				const { kernels } = result
+				if (!kernels || kernels.length === 0) return 'No kernels available.'
+				const lines = kernels.map((k: any) => `${k.id}: ${k.name}${k.description ? ` - ${k.description}` : ''} (languages: ${k.supported_languages.join(', ')})${k.is_preferred ? ' ⭐' : ''}`)
+				return `Available kernels:\n${lines.join('\n')}`
 			},
 
 		}

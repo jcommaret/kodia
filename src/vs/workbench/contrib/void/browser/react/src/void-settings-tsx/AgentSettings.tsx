@@ -109,14 +109,26 @@ export const AutonomyModeSelector = () => {
 const TaskPlanDisplay = () => {
 	const accessor = useAccessor()
 	const chatThreadService = accessor.get('IChatThreadService')
+	const taskPlanService = accessor.get('ITaskPlanService')
 	const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null)
 
 	useEffect(() => {
+		// Initial load
 		const thread = chatThreadService.getCurrentThread()
 		if (thread) {
 			setTaskPlan(thread.taskPlan ?? null)
 		}
-	}, [chatThreadService])
+
+		// Subscribe to plan changes
+		const disposable = taskPlanService.onDidChangePlan(({ threadId, plan }) => {
+			const currentThread = chatThreadService.getCurrentThread()
+			if (currentThread && currentThread.id === threadId) {
+				setTaskPlan(plan)
+			}
+		})
+
+		return () => disposable.dispose()
+	}, [chatThreadService, taskPlanService])
 
 	if (!taskPlan) return null
 

@@ -18,6 +18,7 @@ import { PastThreadsList } from './SidebarThreadSelector.js';
 import { VOID_CTRL_L_ACTION_ID } from '../../../actionIDs.js';
 import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 import { ChatMode, FeatureName, isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
+import { TaskPlan, TaskStatus, getPlanProgress } from '../../../../../../../workbench/contrib/void/common/autonomousTask.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '../../../../common/modelCapabilities.js';
@@ -3187,6 +3188,80 @@ const EditToolSoFar = ({ toolCallSoFar, }: { toolCallSoFar: RawToolCallObj }) =>
 }
 
 
+// Task Plan Display for Sidebar
+const TaskPlanSidebarDisplay = () => {
+	const accessor = useAccessor()
+	const chatThreadService = accessor.get('IChatThreadService')
+	const taskPlanService = accessor.get('ITaskPlanService')
+	const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null)
+
+	useEffect(() => {
+		// Initial load
+		const thread = chatThreadService.getCurrentThread()
+		if (thread) {
+			setTaskPlan(thread.taskPlan ?? null)
+		}
+
+		// Subscribe to plan changes
+		const disposable = taskPlanService.onDidChangePlan(({ threadId, plan }) => {
+			const currentThread = chatThreadService.getCurrentThread()
+			if (currentThread && currentThread.id === threadId) {
+				setTaskPlan(plan)
+			}
+		})
+
+		return () => disposable.dispose()
+	}, [chatThreadService, taskPlanService])
+
+	if (!taskPlan) return null
+
+	const statusColors: { [key in TaskPlan['overallStatus']]: string } = {
+		pending: 'text-void-fg-3',
+		'in_progress': 'text-[#0e70c0]',
+		completed: 'text-green-500',
+		failed: 'text-red-500',
+	}
+
+	const statusIcons: { [key in TaskStatus]: string } = {
+		pending: '○',
+		running: '●',
+		completed: '✓',
+		failed: '✗',
+		blocked: '!',
+	}
+
+	const { completed, total, percent } = getPlanProgress(taskPlan)
+
+	return (
+		<div className="border-b border-void-border-2 bg-void-bg-1/50 py-2 px-3">
+			<div className="flex items-center justify-between mb-1">
+				<h3 className={`text-xs font-medium text-void-fg-1 ${statusColors[taskPlan.overallStatus]}`}>
+					{taskPlan.title}
+				</h3>
+				<span className="text-[10px] text-void-fg-3">{percent}% ({completed}/{total})</span>
+			</div>
+			<div className="text-[10px] text-void-fg-3 mb-1">{taskPlan.description}</div>
+			<div className="space-y-0.5 max-h-32 overflow-y-auto">
+				{taskPlan.tasks.map(t => {
+					const icon = statusIcons[t.status]
+					const color = t.status === 'completed' ? 'text-green-500' : t.status === 'failed' ? 'text-red-500' : t.status === 'running' ? 'text-[#0e70c0]' : t.status === 'blocked' ? 'text-orange-500' : 'text-void-fg-3'
+					return (
+						<div key={t.id} className="flex items-start gap-1.5">
+							<span className={`text-[10px] ${color} mt-0.5 flex-shrink-0`}>{icon}</span>
+							<div className="text-[10px] text-void-fg-2 min-w-0">
+								<div className="font-medium truncate">{t.title}</div>
+								<div className="text-void-fg-3 truncate">{t.description}</div>
+								{t.error && <div className="text-[9px] text-red-500 mt-0.5 truncate">{t.error}</div>}
+							</div>
+						</div>
+					)
+				})}
+			</div>
+		</div>
+	)
+}
+
+
 export const SidebarChat = () => {
 	const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
 	const textAreaFnsRef = useRef<TextAreaFns | null>(null)
@@ -3472,6 +3547,9 @@ export const SidebarChat = () => {
 		className='w-full h-full flex flex-col overflow-hidden'
 	>
 
+		<ErrorBoundary>
+			<TaskPlanSidebarDisplay />
+		</ErrorBoundary>
 		<ErrorBoundary>
 			{messagesHTML}
 		</ErrorBoundary>

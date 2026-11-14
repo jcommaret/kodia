@@ -26,6 +26,7 @@ export interface ITaskPlanService {
 	hasCircularDependencies(threadId: string): boolean;
 	savePlans(fileService: any): Promise<void>;
 	loadPlans(fileService: any, storageUri: string): Promise<void>;
+	readonly onDidChangePlan: Event<{ threadId: string, plan: TaskPlan }>;
 }
 
 export class TaskPlanService extends Disposable implements ITaskPlanService {

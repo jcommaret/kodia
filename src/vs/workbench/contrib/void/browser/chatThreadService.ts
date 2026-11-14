@@ -398,6 +398,14 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		this._progressTestResults = new Map<string, { passed: number; failed: number }>()
 		this._progressStepsSinceLastProgress = 0
 
+		// Sync taskPlan from TaskPlanService to thread.taskPlan
+		this._register(this.taskPlanService.onDidChangePlan(({ threadId, plan }) => {
+			const thread = this.state.allThreads[threadId];
+			if (thread) {
+				this._setThreadTaskPlan(threadId, plan);
+			}
+		}));
+
 		const readThreads = this._readAllThreads() || {}
 
 		const allThreads = readThreads
@@ -877,12 +885,14 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			try {
 				if (toolName === 'create_task_plan') {
 					const plan = this.taskPlanService.createPlan(threadId, params.title, params.description, params.tasks);
+					this._setThreadTaskPlan(threadId, plan);
 					toolResult = { plan };
 				} else if (toolName === 'update_task_plan') {
 					const plan = this.taskPlanService.updateTask(threadId, params.taskId, params.status, params.result, params.error);
 					if (!plan) {
 						toolError = 'No task plan found for thread ' + threadId + '. Create one first with create_task_plan.';
 					} else {
+						this._setThreadTaskPlan(threadId, plan);
 						toolResult = { plan };
 					}
 				} else if (toolName === 'get_task_plan') {
@@ -2237,6 +2247,25 @@ We only need to do it for files that were edited since `from`, ie files between 
 			}
 		}, doNotRefreshMountInfo)
 
+	}
+
+	// set thread.taskPlan
+	private _setThreadTaskPlan(threadId: string, plan: TaskPlan | null): void {
+		const thread = this.state.allThreads[threadId]
+		if (!thread) return
+
+		const newThread: ThreadType = {
+			...thread,
+			taskPlan: plan ?? undefined,
+			lastModified: new Date().toISOString()
+		}
+
+		this._setState({
+			allThreads: {
+				...this.state.allThreads,
+				[thread.id]: newThread
+			}
+		})
 	}
 
 

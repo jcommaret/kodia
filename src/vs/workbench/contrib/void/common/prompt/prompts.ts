@@ -494,6 +494,72 @@ export const builtinTools: {
 		params: { terminal_id: { description: 'The ID of the terminal to close.' } }
 	},
 
+	// Notebook operations (Jupyter)
+	read_notebook: {
+		name: 'read_notebook',
+		description: `Read a Jupyter notebook (.ipynb) file. Returns all cells with their source, outputs, and execution counts. Optionally specify a cell range to read part of a large notebook.`,
+		params: {
+			...uriParam('notebook'),
+			start_cell: { description: 'Optional. Start reading from this cell index (0-based).' },
+			end_cell: { description: 'Optional. Read up to this cell index (exclusive).' },
+		},
+	},
+
+	write_notebook: {
+		name: 'write_notebook',
+		description: `Create a new Jupyter notebook or completely replace an existing one. Provide an array of cells with their type (code/markdown), source, and optional metadata.`,
+		params: {
+			...uriParam('notebook'),
+			cells: { description: 'Array of cells. Each cell has cell_type ("code" or "markdown"), source (string), and optional metadata/outputs.' },
+		},
+	},
+
+	edit_notebook: {
+		name: 'edit_notebook',
+		description: `Edit an existing notebook by adding, removing, replacing, moving cells, or updating cell content/outputs. Provide an array of operations to apply in order.`,
+		params: {
+			...uriParam('notebook'),
+			operations: { description: 'Array of operations: add_cell, remove_cell, replace_cell, move_cell, update_cell_source, update_cell_outputs, clear_cell_outputs. Each operation has a type and relevant parameters.' },
+		},
+	},
+
+	execute_notebook_cell: {
+		name: 'execute_notebook_cell',
+		description: `Execute a specific code cell in a notebook using its kernel. Returns the cell outputs (stdout, stderr, display data, errors) and execution time. Optionally specify a kernel ID.`,
+		params: {
+			...uriParam('notebook'),
+			cell_index: { description: 'The 0-based index of the cell to execute.' },
+			kernel_id: { description: 'Optional. The kernel ID to use. If not specified, uses the notebook\'s current kernel.' },
+		},
+	},
+
+	execute_notebook: {
+		name: 'execute_notebook',
+		description: `Execute all code cells in a notebook (or a subset) in order. Returns results for each cell with outputs and execution times. Optionally specify a kernel ID and specific cell indices.`,
+		params: {
+			...uriParam('notebook'),
+			kernel_id: { description: 'Optional. The kernel ID to use.' },
+			cell_indices: { description: 'Optional. Specific cell indices to execute (0-based). If omitted, executes all code cells.' },
+		},
+	},
+
+	select_notebook_kernel: {
+		name: 'select_notebook_kernel',
+		description: `Select a kernel for a notebook. Use list_notebook_kernels first to see available kernels.`,
+		params: {
+			...uriParam('notebook'),
+			kernel_id: { description: 'The kernel ID to select.' },
+		},
+	},
+
+	list_notebook_kernels: {
+		name: 'list_notebook_kernels',
+		description: `List available Jupyter kernels for the workspace (or for a specific notebook if URI provided). Returns kernel IDs, names, descriptions, and supported languages.`,
+		params: {
+			uri: { description: 'Optional. The notebook URI to get kernels for. If omitted, lists all available kernels.' },
+		},
+	},
+
 	// Task plan management (Stage 5A Day 2)
 	create_task_plan: {
 		name: 'create_task_plan',

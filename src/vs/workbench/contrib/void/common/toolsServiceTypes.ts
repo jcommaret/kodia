@@ -75,6 +75,13 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	// a fetched URL can carry data out of the workspace, so the user sees it first
 	'fetch_url': 'web pages',
 	'web_search': 'web pages',
+	// notebook operations
+	'read_notebook': 'edits',
+	'write_notebook': 'edits',
+	'edit_notebook': 'edits',
+	'execute_notebook_cell': 'terminal',
+	'execute_notebook': 'terminal',
+	'select_notebook_kernel': 'edits',
 }
 
 
@@ -139,6 +146,14 @@ export type BuiltinToolCallParams = {
 	'todo': { todos: { id: string, content: string, status: 'pending' | 'in_progress' | 'completed' }[] },
 	// Subagent delegation (OpenCode parity - roadmap Stage 6)
 	'subagent': { agent: string, description: string, prompt: string, model?: string, sessionID?: string },
+	// Notebook operations
+	'read_notebook': { uri: URI, start_cell?: number, end_cell?: number },
+	'write_notebook': { uri: URI, cells: NotebookCellData[] },
+	'edit_notebook': { uri: URI, operations: NotebookEditOperation[] },
+	'execute_notebook_cell': { uri: URI, cell_index: number, kernel_id?: string },
+	'execute_notebook': { uri: URI, kernel_id?: string, cell_indices?: number[] },
+	'select_notebook_kernel': { uri: URI, kernel_id: string },
+	'list_notebook_kernels': { uri?: URI },
 	// Git operations (Stage 2)
 	'git_status': {},
 	'git_diff': { ref: string | null, path: string | null, staged: boolean | null },
@@ -226,6 +241,14 @@ export type BuiltinToolResultType = {
 		'todo': { done: number, inProgress: number, pending: number, todos: { id: string, content: string, status: string }[] },
 		// Subagent delegation (OpenCode parity - roadmap Stage 6)
 		'subagent': { sessionID: string, status: string, output: string },
+	// Notebook operations
+	'read_notebook': { cells: NotebookCellOutput[] },
+	'write_notebook': { uri: URI },
+	'edit_notebook': { uri: URI, applied: number },
+	'execute_notebook_cell': { cell_index: number, outputs: NotebookCellOutput[], execution_time: number, success: boolean, error?: string },
+	'execute_notebook': { results: NotebookExecutionResult[] },
+	'select_notebook_kernel': { kernel_id: string },
+	'list_notebook_kernels': { kernels: NotebookKernelInfo[] },
 }
 
 
@@ -239,3 +262,49 @@ type BuiltinToolParamNameOfTool<T extends BuiltinToolName> = keyof (typeof built
 
 export type ToolName = BuiltinToolName | (string & {})
 export type ToolParamName<T extends ToolName> = T extends BuiltinToolName ? BuiltinToolParamNameOfTool<T> : string
+
+
+// Notebook types
+export interface NotebookCellData {
+	cell_type: 'code' | 'markdown';
+	source: string;
+	metadata?: Record<string, any>;
+	outputs?: NotebookCellOutput[];
+	execution_count?: number | null;
+}
+
+export interface NotebookCellOutput {
+	output_type: 'stream' | 'execute_result' | 'display_data' | 'error';
+	name?: string; // stream name: 'stdout' | 'stderr'
+	text?: string | string[];
+	data?: Record<string, any>; // for display_data
+	ename?: string; // error name
+	evalue?: string; // error value
+	traceback?: string[]; // error traceback
+	execution_count?: number | null;
+}
+
+export type NotebookEditOperation =
+	| { type: 'add_cell'; index: number; cell: NotebookCellData }
+	| { type: 'remove_cell'; index: number }
+	| { type: 'replace_cell'; index: number; cell: NotebookCellData }
+	| { type: 'move_cell'; from_index: number; to_index: number }
+	| { type: 'update_cell_source'; index: number; source: string }
+	| { type: 'update_cell_outputs'; index: number; outputs: NotebookCellOutput[] }
+	| { type: 'clear_cell_outputs'; index: number };
+
+export interface NotebookExecutionResult {
+	cell_index: number;
+	outputs: NotebookCellOutput[];
+	execution_time: number;
+	success: boolean;
+	error?: string;
+}
+
+export interface NotebookKernelInfo {
+	id: string;
+	name: string;
+	description?: string;
+	supported_languages: string[];
+	is_preferred?: boolean;
+}

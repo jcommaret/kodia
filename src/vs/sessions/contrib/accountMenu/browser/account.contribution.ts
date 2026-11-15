@@ -1030,7 +1030,9 @@ registerAction2(class extends Action2 {
 				id: Menus.TitleBarRightLayout,
 				group: 'navigation',
 				order: 100,
-				when: IsAuxiliaryWindowContext.toNegated(),
+				// Kodia: never shown. Signed out, all the widget offers is "Sign in with GitHub", which is for
+				// the Copilot agents Kodia doesn't have; its own agent runs the models set up in Kodia's settings.
+				when: ContextKeyExpr.false(),
 			}
 		});
 	}

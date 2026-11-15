@@ -118,6 +118,12 @@ export interface IByokLmChatRequest {
 	readonly previousResponseId?: string;
 	readonly reasoningEffort?: string;
 	readonly modelOptions?: Record<string, unknown>;
+	/**
+	 * Kodia: the request of a sub-agent, which only reads the project to answer one question. The window sends it the
+	 * user's own instructions but not the frameworks they turned on: those say how to write code, and would be sent
+	 * again with each of the sub-agent's requests, out of the room it has to read.
+	 */
+	readonly withoutFrameworks?: boolean;
 }
 
 export interface IByokLmOutputMessageItem {

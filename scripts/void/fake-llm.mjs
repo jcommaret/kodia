@@ -18,12 +18,14 @@
 //
 // MODEL names the model it lists (default `devstral`, which Kodia knows calls tools natively: a name it doesn't know
 // gets the tools as XML in the prompt, which this server doesn't read). CONTEXT is its context window, in tokens.
+// DELAY is how long it takes to answer, in milliseconds (0): a slow model, to watch a turn as it goes.
 
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT ?? 1234);
 const model = process.env.MODEL ?? 'devstral';
 const contextLength = Number(process.env.CONTEXT ?? 256_000);
+const delay = Number(process.env.DELAY ?? 0);
 
 /** The text of a message, whose content is a string or a list of parts. */
 export const textOf = message => {
@@ -83,6 +85,7 @@ const handleChat = async (request, response) => {
 	catch { return sendJson(response, 400, { error: { message: 'The body is not JSON.' } }); }
 
 	const reply = nextReply(Array.isArray(body.messages) ? body.messages : []);
+	if (delay > 0) { await new Promise(resolve => setTimeout(resolve, delay)); }
 	const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
 	const toolCalls = reply.toolCall ? [{ id: reply.toolCall.id, type: 'function', function: { name: reply.toolCall.name, arguments: reply.toolCall.arguments } }] : undefined;
 	const finishReason = toolCalls ? 'tool_calls' : 'stop';

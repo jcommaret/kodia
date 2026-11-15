@@ -142,7 +142,8 @@ class KodiaAgentHostLmHandler extends Disposable implements IKodiaAgentHostLmHan
 			simpleMessages: toSimpleMessages(request.input),
 			systemMessage,
 			// The agent works on its session's folder, not on an editor window's workspace, whose rules and memory don't apply.
-			aiInstructions: joinUserInstructions(globalSettings.aiInstructions, globalSettings.instructionsFrameworks),
+			// A sub-agent only reads: it is sent the user's own instructions, without the frameworks.
+			aiInstructions: joinUserInstructions(globalSettings.aiInstructions, request.withoutFrameworks ? [] : globalSettings.instructionsFrameworks),
 			modelSelection,
 			featureName: 'Chat',
 			overridesOfModel,

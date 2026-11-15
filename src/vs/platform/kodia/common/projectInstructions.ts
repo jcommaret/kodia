@@ -49,8 +49,22 @@ export const skillsOfPrompt = (skills: readonly DiscoveredSkill[] | undefined): 
 // sent with every request: past this, the remaining skills are listed by name and file only
 const MAX_SKILL_DESCRIPTIONS_CHARS = 20_000
 
-// The agent skills (SKILL.md files) the agent can load: their name and description only, it reads a skill's file when a task matches it
-export const skillsPrompt = (skills: readonly SkillOfPrompt[]) => {
+// what a model with a small context window is told of a skill's description: enough to know when the skill applies
+const MAX_SHORT_SKILL_DESCRIPTION_CHARS = 100
+
+// The agent skills (SKILL.md files) the agent can load: their name and description only, it reads a skill's file when a task matches it.
+// `short` is for a model with a small context window, where this list is sent with every request out of little room:
+// one line a skill, with the start of its description.
+export const skillsPrompt = (skills: readonly SkillOfPrompt[], { short = false }: { short?: boolean } = {}) => {
+	if (short) {
+		const start = (description: string) => {
+			const oneLine = description.replace(/\s+/g, ' ')
+			return oneLine.length <= MAX_SHORT_SKILL_DESCRIPTION_CHARS ? oneLine : `${oneLine.slice(0, MAX_SHORT_SKILL_DESCRIPTION_CHARS).trimEnd()}...`
+		}
+		return `SKILLS (instructions for specific kinds of tasks, from SKILL.md files in the workspace and the user's home):
+When the user's request matches a skill, read the skill's file with read_file before you start the task, and follow it.
+${skills.map(({ name, description, path }) => `- ${name}: ${start(description)} (${path})`).join('\n')}`
+	}
 	let descriptionsChars = 0
 	const entries = skills.map(({ name, description, path }) => {
 		descriptionsChars += description.length

@@ -34,9 +34,20 @@ cleanup() {
 	[ -n "$LLM_PID" ] && kill "$LLM_PID" 2>/dev/null || true
 	# only the app this script launched: its processes carry its own run folder in their arguments
 	[ -n "$RUN_DIR" ] && pkill -f "$RUN_DIR" 2>/dev/null || true
-	sleep 2
+	# its folder goes once they are gone: a process that is still closing writes it again
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ -n "$RUN_DIR" ] && pgrep -f "$RUN_DIR" >/dev/null 2>&1 || break
+		sleep 1
+	done
+	[ -n "$RUN_DIR" ] && pkill -9 -f "$RUN_DIR" 2>/dev/null || true
+	sleep 1
 	rm -rf "$WORK" 2>/dev/null || true
-	[ -n "$RUN_DIR" ] && rm -rf "$RUN_DIR" 2>/dev/null || true
+	# a helper of the app that is still closing writes its profile once more: the folder is removed until it stays so
+	for _ in 1 2 3 4 5; do
+		[ -n "$RUN_DIR" ] && [ -e "$RUN_DIR" ] || break
+		rm -rf "$RUN_DIR" 2>/dev/null || true
+		sleep 2
+	done
 }
 trap cleanup EXIT
 trap 'echo "[agent-e2e] FAILED: a step stopped at line $LINENO" >&2' ERR

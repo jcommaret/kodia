@@ -84,6 +84,15 @@ function waitOrAbort(ms: number, signal: AbortSignal): Promise<void> {
 	});
 }
 
+/**
+ * A model whose context window is at most this (a local model, mostly) is sent a lighter prompt, which it gets with
+ * every request: the skills in one line each, and no tool that another one stands in for.
+ */
+export const SMALL_CONTEXT_WINDOW_TOKENS = 32_000;
+
+/** The editor tools a model with a small context window keeps: the search tools find a definition, a reference or a symbol. */
+const EDITOR_TOOLS_OF_SMALL_MODELS: ReadonlySet<string> = new Set(['read_lint_errors']);
+
 const projectRulesPrompt = (rules: string): string => `PROJECT RULES (from the project's rules files):\n${rules}`;
 
 /** What the window shows of a sub-agent call: the start of its task. */
@@ -559,14 +568,22 @@ export class KodiaAgent extends Disposable implements IAgent {
 
 		try {
 			// read once a turn: the rules and skills don't change between its rounds
-			const instructions = await this._instructions(session);
+			const small = this._hasSmallContextWindow(model);
+			const instructions = await this._instructions(session, small);
 			// and so do the MCP tools of the Kodia window, which has the user's MCP servers
 			const mcpTools = await this._mcpTools(connection);
 			// and what the user's Kodia settings let run without asking
 			const autoApprove = await this._autoApprove(connection);
 			// and the editor tools (language server, lint errors), when an editor window is open to run them
 			const editor = await this._editorTools(connection);
-			const tools = [...KODIA_TOOLS, ...GIT_FUNCTION_TOOLS, TODO_FUNCTION_TOOL, SUBAGENT_FUNCTION_TOOL, ...PERSISTENT_TERMINAL_FUNCTION_TOOLS, ...editorFunctionTools(editor?.names ?? []), ...[...mcpTools.values()].map(mcpFunctionTool)];
+			// a model with a small context window is not offered the persistent terminals (run_command runs a command)
+			// nor the editor tools that look a symbol up (the search tools do): their descriptions take its room
+			const tools = [
+				...KODIA_TOOLS, ...GIT_FUNCTION_TOOLS, TODO_FUNCTION_TOOL, SUBAGENT_FUNCTION_TOOL,
+				...(small ? [] : PERSISTENT_TERMINAL_FUNCTION_TOOLS),
+				...editorFunctionTools((editor?.names ?? []).filter(name => !small || EDITOR_TOOLS_OF_SMALL_MODELS.has(name))),
+				...[...mcpTools.values()].map(mcpFunctionTool),
+			];
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				await this._fitContext(connection, session, model, signal);
 				if (signal.aborted) {
@@ -714,8 +731,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 	 * What the model is told besides the conversation: the agent's own instructions, then the project's rules files,
 	 * skills and memory, from the most stable part to the most changing one so a provider's prompt cache keeps the
 	 * longest prefix. They are the project's own, as in Kodia's chat: a failure to read them leaves them out.
+	 * `small` is for a model with a small context window: the skills take one line each.
 	 */
-	private async _instructions(session: KodiaAgentSession): Promise<string> {
+	private async _instructions(session: KodiaAgentSession, small: boolean): Promise<string> {
 		const sections = [instructionsFor(session.workingDirectory)];
 		try {
 			const [rules, skills, memory] = await Promise.all([
@@ -727,7 +745,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 				sections.push(projectRulesPrompt(rules));
 			}
 			if (skills.length > 0) {
-				sections.push(skillsPrompt(skills));
+				sections.push(skillsPrompt(skills, { short: small }));
 			}
 			// the notes the agent keeps with write_project_memory, as in the chat
 			if (memory) {
@@ -933,6 +951,11 @@ export class KodiaAgent extends Disposable implements IAgent {
 			signal.removeEventListener('abort', onAbort);
 			cts.dispose();
 		}
+	}
+
+	private _hasSmallContextWindow(model: { readonly vendor: string; readonly modelId: string }): boolean {
+		const contextWindow = this._bridge.getModels().find(m => m.vendor === model.vendor && m.id === model.modelId)?.maxContextWindowTokens;
+		return contextWindow !== undefined && contextWindow <= SMALL_CONTEXT_WINDOW_TOKENS;
 	}
 
 	private _supportsVision(model: { readonly vendor: string; readonly modelId: string }): boolean {

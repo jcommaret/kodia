@@ -43,6 +43,7 @@ import { GIT_FUNCTION_TOOLS, gitToolNames } from './kodiaGitTools.js';
 import { isPersistentTerminalToolName, KodiaTerminals, PERSISTENT_TERMINAL_FUNCTION_TOOLS, persistentTerminalToolNames } from './kodiaTerminals.js';
 import { TODO_FUNCTION_TOOL, TODO_TOOL_NAME } from './kodiaTodoTool.js';
 import { parseSubagentTask, runSubagent, SUBAGENT_FUNCTION_TOOL, SUBAGENT_TOOL_NAME, SUBAGENT_TOOLS, subagentInstructions } from './kodiaSubagent.js';
+import { toToolCallMeta } from '../../common/meta/agentToolCallMeta.js';
 import { approvalOfTool, describeKodiaToolCall, editorFunctionTools, editorToolArguments, executeKodiaTool, IKodiaToolResult, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
 
 /**
@@ -82,6 +83,8 @@ function waitOrAbort(ms: number, signal: AbortSignal): Promise<void> {
 		signal.addEventListener('abort', done, { once: true });
 	});
 }
+
+const projectRulesPrompt = (rules: string): string => `PROJECT RULES (from the project's rules files):\n${rules}`;
 
 /** What the window shows of a sub-agent call: the start of its task. */
 function describeSubagentCall(argumentsJson: string): { readonly invocationMessage: string; readonly toolInput: string } {
@@ -664,8 +667,18 @@ export class KodiaAgent extends Disposable implements IAgent {
 							confirmed: approvalKind ? ToolCallConfirmationReason.Setting : ToolCallConfirmationReason.NotNeeded,
 						});
 					}
+					const subagentSteps: string[] = [];
 					const res = mcpTool ? await this._callMcpTool(connection, call, signal)
-						: isSubagent ? await this._runSubagent(connection, session, model, call, signal)
+						: isSubagent ? await this._runSubagent(connection, session, model, call, signal, step => {
+							// what the sub-agent is doing, under its call in the window: the last step as the call's status,
+							// all of them as its content until the report takes their place
+							subagentSteps.push(step);
+							fire({
+								type: ActionType.ChatToolCallContentChanged, turnId, toolCallId: call.callId,
+								content: [{ type: ToolResultContentType.Text, text: subagentSteps.join('\n') }],
+								_meta: toToolCallMeta({ progressMessage: `Sub-agent: ${step}` }),
+							});
+						})
 						: editor?.names.includes(call.name) ? await this._callEditorTool(editor.connection, call, session.workingDirectory, signal)
 							: isPersistentTerminalToolName(call.name) ? await this._terminals.execute(call.name, call.argumentsJson, { chat: session.chat, turnId, toolCallId: call.callId, workingDirectory: session.workingDirectory, signal })
 								: await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
@@ -711,7 +724,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 				readProjectMemory(session.workingDirectory, this._fileService),
 			]);
 			if (rules) {
-				sections.push(`PROJECT RULES (from the project's rules files):\n${rules}`);
+				sections.push(projectRulesPrompt(rules));
 			}
 			if (skills.length > 0) {
 				sections.push(skillsPrompt(skills));
@@ -891,22 +904,28 @@ export class KodiaAgent extends Disposable implements IAgent {
 	/**
 	 * Runs a sub-agent on the task of a `run_subagent` call: the same model, in a conversation of its own, with the
 	 * tools that only read. Its report is the result of the call, and all the agent's conversation keeps of it.
+	 * `onStep` is told each tool call the sub-agent makes, as the window words it, before it runs.
 	 */
-	private async _runSubagent(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, call: IByokLmFunctionCallItem, signal: AbortSignal): Promise<IKodiaToolResult> {
+	private async _runSubagent(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, call: IByokLmFunctionCallItem, signal: AbortSignal, onStep: (step: string) => void): Promise<IKodiaToolResult> {
 		const parsed = parseSubagentTask(call.argumentsJson);
 		if ('error' in parsed) {
 			return { success: false, output: parsed.error };
 		}
 		const toolCtx = { workingDirectory: session.workingDirectory, signal };
-		const instructions = subagentInstructions(session.workingDirectory?.fsPath);
+		// the project's rules apply to the sub-agent's work too; its skills and memory stay with the agent
+		const rules = await readProjectRules(session.workingDirectory, this._fileService).catch(() => '');
+		const instructions = [subagentInstructions(session.workingDirectory?.fsPath), ...(rules ? [projectRulesPrompt(rules)] : [])].join('\n\n');
 		const cts = new CancellationTokenSource();
 		const onAbort = () => cts.cancel();
 		signal.addEventListener('abort', onAbort, { once: true });
 		try {
 			const { success, output, rounds } = await runSubagent(parsed.task, {
 				signal,
-				chat: input => connection.chat({ vendor: model.vendor, modelId: model.modelId, instructions, input: [...input], tools: [...SUBAGENT_TOOLS] }, cts.token),
-				runTool: async toolCall => (await executeKodiaTool(toolCall.name, toolCall.argumentsJson, toolCtx)).output,
+				chat: input => connection.chat({ vendor: model.vendor, modelId: model.modelId, instructions, input: [...input], tools: [...SUBAGENT_TOOLS], withoutFrameworks: true }, cts.token),
+				runTool: async toolCall => {
+					onStep(describeKodiaToolCall(toolCall.name, toolCall.argumentsJson, session.workingDirectory).invocationMessage);
+					return (await executeKodiaTool(toolCall.name, toolCall.argumentsJson, toolCtx)).output;
+				},
 			});
 			this._logService.info(`[Kodia] A sub-agent ${success ? 'reported' : 'failed'} after ${rounds} request(s).`);
 			return { success, output };

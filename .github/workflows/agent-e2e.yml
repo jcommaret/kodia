@@ -1,0 +1,46 @@
+# Weekly run of the Kodia agent in the real app, with a fake model (scripts/void/agent-e2e.sh): what the unit
+# tests of the pull requests can't see (the windows, the model detection, the agent host, the tools on a real
+# folder, the sub-agent). On macOS, where the script was written and a runner has a display. Too long for every
+# pull request: it needs Electron and the full build.
+name: Agent end to end
+
+on:
+  schedule:
+    - cron: '0 5 * * 1' # Mondays, 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-e2e:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          # @vscode/ripgrep's postinstall calls the GitHub API, which rate-limits anonymous runners (403)
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Build the React UI
+        working-directory: src/vs/workbench/contrib/void/browser/react
+        run: node build.js
+
+      - name: Build Kodia
+        run: npm run transpile-client
+
+      - name: Build the extensions
+        run: npm run gulp compile-extensions
+
+      - name: Run the agent end to end
+        run: scripts/void/agent-e2e.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

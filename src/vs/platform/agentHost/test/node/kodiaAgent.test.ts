@@ -27,6 +27,7 @@ import { ActionType, type ChatAction } from '../../common/state/sessionActions.j
 import { buildDefaultChatUri, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type ChatInputAnswer, type ChatInputRequest, type MessageAttachment } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
+import { describeKodiaToolCall } from '../../node/kodia/kodiaTools.js';
 import { FakeTerminalManager } from './kodiaFakeTerminalManager.js';
 import { editorToolNames, persistentTerminalToolNames } from '../../../kodia/common/toolCatalog.js';
 import { CLEARED_TOOL_RESULT, summarizedThreadMessage, summarizeThread_systemMessage } from '../../../kodia/common/threadSummary.js';
@@ -551,6 +552,8 @@ suite('KodiaAgent', () => {
 			// the sub-agent starts from the task alone, with its own instructions and the tools that only read
 			assert.strictEqual(sub1.modelId, 'gemini-3-pro');
 			assert.ok(sub1.instructions?.includes('research sub-agent'));
+			// the window leaves the user's frameworks out of the sub-agent's requests, not out of the agent's
+			assert.deepStrictEqual([main, sub1, sub2, mainAgain].map(request => request.withoutFrameworks === true), [false, true, true, false]);
 			assert.deepStrictEqual(sub1.input, [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'List the project folder and say what is in it.' }] }]);
 			const subTools = sub1.tools!.map(tool => tool.name);
 			assert.deepStrictEqual(subTools, ['read_file', 'ls_dir', 'get_dir_tree', 'search_pathnames_only', 'search_for_files', 'search_codebase', 'search_in_file', 'git_status', 'git_diff', 'git_log', 'git_show']);
@@ -564,6 +567,35 @@ suite('KodiaAgent', () => {
 			assert.ok(!JSON.stringify(mainAgain.input).includes('sub-1'));
 			assert.strictEqual(actionTypes(signals).at(-1), ActionType.ChatTurnComplete);
 			assert.strictEqual(actionTypes(signals).filter(type => type === ActionType.ChatToolCallStart).length, 1, 'the window shows one tool call: the sub-agent');
+			// and, under it while it runs, what the sub-agent is doing
+			const steps = signals.flatMap(s => s.kind === 'action' && s.action.type === ActionType.ChatToolCallContentChanged ? [s.action] : []);
+			assert.strictEqual(steps.length, 1);
+			assert.strictEqual(steps[0].toolCallId, 'main-1');
+			const step = describeKodiaToolCall('ls_dir', '{"uri":"."}', cwd).invocationMessage;
+			assert.strictEqual(steps[0]._meta?.progressMessage, `Sub-agent: ${step}`);
+			assert.deepStrictEqual(steps[0].content, [{ type: ToolResultContentType.Text, text: step }]);
+		});
+
+		test('is told the project\'s rules, not its skills nor its memory', async () => {
+			const { agent, registry, write } = createAgent();
+			registry.window!.results = [
+				call('run_subagent', { task: 'Look.' }, 'main-1'),
+				text('The report.'),
+				text('Done.'),
+			];
+			const project = URI.file('/project');
+			await write('/project/AGENTS.md', 'Answer in French.');
+			await write('/project/.agents/skills/tdd/SKILL.md', '---\nname: tdd\ndescription: Use when writing tests first.\n---\n');
+			await write('/project/.kodia/memory.md', '## Commands\nnpm run test-void');
+			const { session, chat } = newChat();
+			await agent.chats.createChat(chat, session, { workingDirectories: [project] });
+
+			await agent.chats.sendMessage(chat, 'Hi', [project], undefined, 'turn-1');
+
+			const instructions = registry.window!.requests[1].instructions ?? '';
+			assert.ok(instructions.startsWith('You are a research sub-agent'), instructions);
+			assert.ok(instructions.endsWith('PROJECT RULES (from the project\'s rules files):\nFrom AGENTS.md:\nAnswer in French.'), instructions);
+			assert.ok(!instructions.includes('SKILLS (') && !instructions.includes('PROJECT MEMORY'), instructions);
 		});
 
 		test('cannot change the project: a tool that writes is refused, and the sub-agent is told', async () => {

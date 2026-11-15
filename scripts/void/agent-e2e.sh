@@ -60,7 +60,7 @@ LLM_PID=$!
 disown "$LLM_PID"
 
 echo "[agent-e2e] launching Kodia..."
-INFO="$("$REPO/.claude/skills/launch/scripts/launch.sh" --repo "$REPO" --disable-workspace-trust --source-user-data-dir "$WORK/no-profile" -- "$WORKSPACE" 2>"$WORK/launch.log" | tail -n1)"
+INFO="$("$REPO/.agents/skills/launch/scripts/launch.sh" --repo "$REPO" --disable-workspace-trust --source-user-data-dir "$WORK/no-profile" -- "$WORKSPACE" 2>"$WORK/launch.log" | tail -n1)"
 RUN_DIR="$(node -p 'JSON.parse(process.argv[1]).runDir' "$INFO")"
 CDP="$(node -p 'JSON.parse(process.argv[1]).cdpPort' "$INFO")"
 pw attach --cdp="http://127.0.0.1:$CDP" >/dev/null
@@ -89,14 +89,21 @@ page "(async () => {
 })()" | grep -q true || fail "the Agents window did not offer the fake model"
 
 echo "[agent-e2e] asking the agent to read, create, search and delegate..."
-pw type 'CALL read_file {"uri": "package.json"}' >/dev/null
-pw press Shift+Enter >/dev/null
-pw type 'CALL create_file_or_folder {"uri": "notes.txt"}' >/dev/null
-pw press Shift+Enter >/dev/null
-pw type 'CALL search_codebase {"query": "agent-e2e name"}' >/dev/null
-pw press Shift+Enter >/dev/null
-# the task of the sub-agent is a plan too: the fake model follows it in the sub-agent's own conversation
-pw type 'CALL run_subagent {"task": "CALL ls_dir {}"}' >/dev/null
+# The input may not take the first keys right after the window opens: the plan is typed again until all of it is there.
+for attempt in 1 2 3; do
+	pw type 'CALL read_file {"uri": "package.json"}' >/dev/null
+	pw press Shift+Enter >/dev/null
+	pw type 'CALL create_file_or_folder {"uri": "notes.txt"}' >/dev/null
+	pw press Shift+Enter >/dev/null
+	pw type 'CALL search_codebase {"query": "agent-e2e name"}' >/dev/null
+	pw press Shift+Enter >/dev/null
+	# the task of the sub-agent is a plan too: the fake model follows it in the sub-agent's own conversation
+	pw type 'CALL run_subagent {"task": "CALL ls_dir {}"}' >/dev/null
+	page "(() => { const typed = [...document.querySelectorAll('.monaco-editor .view-lines')].at(-1)?.textContent ?? ''; return ['read_file', 'create_file_or_folder', 'search_codebase', 'run_subagent'].every(tool => typed.includes('CALL' + String.fromCharCode(160) + tool) || typed.includes('CALL ' + tool)) })()" | grep -q true && break
+	[ "$attempt" = 3 ] && fail "the plan could not be typed in the Agents window"
+	pw press Meta+a >/dev/null
+	pw press Backspace >/dev/null
+done
 pw press Enter >/dev/null
 
 # an approval the window asks for is given ("Allow", once), until the model has both results

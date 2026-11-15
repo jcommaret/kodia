@@ -65,6 +65,11 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 
+      # The extensions have their own dependencies: a bump of one of them (msal-node under
+      # microsoft-authentication) broke the build of every release without failing a check.
+      - name: Typecheck the extensions
+        run: npm run gulp compile-extensions
+
       - name: Typecheck the build scripts
         run: npm run typecheck --prefix build
 

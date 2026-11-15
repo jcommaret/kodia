@@ -26,7 +26,7 @@ import { BackgroundWorkKind, TerminalClaimKind } from '../../common/state/protoc
 import { ActionType, type ChatAction } from '../../common/state/sessionActions.js';
 import { buildDefaultChatUri, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, parseRequiredSessionUriFromChatUri, ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type ChatInputAnswer, type ChatInputRequest, type MessageAttachment } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
-import { KodiaAgent } from '../../node/kodia/kodiaAgent.js';
+import { KodiaAgent, SMALL_CONTEXT_WINDOW_TOKENS } from '../../node/kodia/kodiaAgent.js';
 import { describeKodiaToolCall } from '../../node/kodia/kodiaTools.js';
 import { FakeTerminalManager } from './kodiaFakeTerminalManager.js';
 import { editorToolNames, persistentTerminalToolNames } from '../../../kodia/common/toolCatalog.js';
@@ -289,6 +289,34 @@ suite('KodiaAgent', () => {
 		const [first, second] = registry.window!.requests.map(r => r.instructions ?? '');
 		assert.ok(first.includes('From AGENTS.md:\nBe brief.'));
 		assert.strictEqual(second, first);
+	});
+
+	test('a model with a small context window gets a lighter prompt: one line a skill, no tool another one stands in for', async () => {
+		const { agent, registry, write } = createAgent();
+		const local: IByokLmModelInfo = { vendor: 'local', id: 'small-1', name: 'small-1', maxContextWindowTokens: SMALL_CONTEXT_WINDOW_TOKENS };
+		registry.setModels([gemini, local]);
+		registry.window!.editor = { names: [...editorToolNames], result: { isError: false, output: '' }, calls: [] };
+		registry.window!.results = [text('Done.'), text('Done.')];
+		const project = URI.file('/project');
+		await write('/project/.agents/skills/tdd/SKILL.md', `---\nname: tdd\ndescription: Use when writing tests first. ${'More about it. '.repeat(20)}\n---\n`);
+		const small = newChat();
+		await agent.chats.createChat(small.chat, small.session, { workingDirectories: [project], model: { id: 'local/small-1' } });
+		const large = newChat();
+		await agent.chats.createChat(large.chat, large.session, { workingDirectories: [project], model: { id: 'gemini/gemini-3-pro' } });
+
+		await agent.chats.sendMessage(small.chat, 'Hi', [project], undefined, 'turn-1');
+		await agent.chats.sendMessage(large.chat, 'Hi', [project], undefined, 'turn-1');
+
+		const [toSmall, toLarge] = registry.window!.requests;
+		const skillLine = toSmall.instructions!.split('\n').find(line => line.startsWith('- tdd: '))!;
+		assert.ok(skillLine.startsWith('- tdd: Use when writing tests first. More about it.') && skillLine.endsWith('... (/project/.agents/skills/tdd/SKILL.md)'), skillLine);
+		assert.ok(skillLine.length < 160 && !toSmall.instructions!.includes('<skill>'));
+		assert.ok(toLarge.instructions!.includes('<skill>\n<name>tdd</name>'));
+
+		const namesOf = (request: IByokLmChatRequest) => request.tools!.map(tool => tool.name);
+		const leftOut = namesOf(toLarge).filter(name => !namesOf(toSmall).includes(name));
+		assert.deepStrictEqual(leftOut, [...persistentTerminalToolNames, ...editorToolNames.filter(name => name !== 'read_lint_errors')]);
+		assert.ok(namesOf(toSmall).includes('run_command') && namesOf(toSmall).includes('run_subagent') && namesOf(toSmall).includes('read_lint_errors'));
 	});
 
 	const issueSearch: IKodiaMcpTool = { name: 'a1b2_search', displayName: 'search', serverName: 'github', description: 'Search issues.', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } };

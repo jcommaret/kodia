@@ -37,8 +37,10 @@ jobs:
       - name: Build Kodia
         run: npm run transpile-client
 
+      # without the type check, as the app is launched from the sources: an extension whose types are broken
+      # (a dependency bumped under it) is not what this run is for
       - name: Build the extensions
-        run: npm run gulp compile-extensions
+        run: npm run gulp transpile-extensions
 
       - name: Run the agent end to end
         run: scripts/void/agent-e2e.sh

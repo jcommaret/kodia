@@ -501,26 +501,7 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 				</div>
 			)}
 
-			{/* Audio transcript preview when recording */}
-			{isRecording && audioTranscript && (
-				<div className='flex items-center gap-2 mt-1 px-2 py-1 bg-zinc-800/50 rounded border border-zinc-700/50 text-xs text-void-fg-2 w-full'>
-					<Mic size={12} className="text-zinc-400" />
-					<span className='flex-1 truncate'>{audioTranscript}</span>
-					<button
-						onClick={() => {
-							setIsRecording(false)
-							setListening(false)
-							mediaRecorderRef.current?.stop()
-							recognitionRef.current?.stop()
-							setAudioTranscript('')
-						}}
-						className='text-xs text-void-fg-4 hover:text-void-fg-2'
-						title='Cancel recording'
-					>
-						✕
-					</button>
-				</div>
-			)}
+			{/* Audio transcript preview when recording - handled inside AudioRecordButton */}
 
 			{/* Bottom row - Token count & Send button */}
 			<div className='flex flex-row justify-between items-end gap-1 w-full mt-1'>
@@ -630,14 +611,12 @@ const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: st
 			recognitionRef.current.onerror = (event: any) => {
 				console.error('Speech recognition error:', event.error)
 				setListening(false)
-				setIsRecording(false)
 				mediaRecorderRef.current?.stop()
 				stream.getTracks().forEach(t => t.stop())
 			}
 
 			recognitionRef.current.start()
 			setListening(true)
-			setIsRecording(true)
 		} catch (e) {
 			console.error('Failed to start audio recording:', e)
 		}
@@ -645,7 +624,6 @@ const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: st
 
 	const stopRecording = () => {
 		setListening(false)
-		setIsRecording(false)
 		mediaRecorderRef.current?.stop()
 		recognitionRef.current?.stop()
 
@@ -657,26 +635,41 @@ const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: st
 	}
 
 	return (
-		<button
-			type='button'
-			onClick={listening ? stopRecording : startRecording}
-			className={`rounded-full flex-shrink-0 flex-grow-0 cursor-pointer flex items-center justify-center
-				${listening ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-void-fg-3 hover:bg-zinc-700/20'}
-				transition-all duration-200
-			`}
-			title={listening ? 'Stop recording' : 'Record audio (speech-to-text)'}
-		>
-			{listening ? (
-				<IconSquare size={16} className="stroke-[3] p-[7px] fill-current" />
-			) : (
-				<Mic size={16} className="stroke-[2.5]" />
+		<div className='flex flex-col items-center gap-1'>
+			<button
+				type='button'
+				onClick={listening ? stopRecording : startRecording}
+				className={`rounded-full flex-shrink-0 flex-grow-0 cursor-pointer flex items-center justify-center
+					${listening ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-void-fg-3 hover:bg-zinc-700/20'}
+					transition-all duration-200
+				`}
+				title={listening ? 'Stop recording' : 'Record audio (speech-to-text)'}
+			>
+				{listening ? (
+					<IconSquare size={16} className="stroke-[3] p-[7px] fill-current" />
+				) : (
+					<Mic size={16} className="stroke-[2.5]" />
+				)}
+				{transcript && (
+					<span className='absolute -top-2 -right-2 bg-red-500 text-white text-[8px] px-1 py-0.5 rounded-full animate-pulse'>
+						●
+					</span>
+				)}
+			</button>
+			{listening && transcript && (
+				<div className='flex items-center gap-2 px-2 py-1 bg-zinc-800/50 rounded border border-zinc-700/50 text-xs text-void-fg-2 w-full max-w-xs'>
+					<Mic size={12} className="text-zinc-400 animate-pulse" />
+					<span className='flex-1 truncate text-void-fg-2'>{transcript}</span>
+					<button
+						onClick={stopRecording}
+						className='text-xs text-void-fg-4 hover:text-void-fg-2'
+						title='Cancel recording'
+					>
+						✕
+					</button>
+				</div>
 			)}
-			{transcript && (
-				<span className='absolute -top-2 -right-2 bg-red-500 text-white text-[8px] px-1 py-0.5 rounded-full animate-pulse'>
-					●
-				</span>
-			)}
-		</button>
+		</div>
 	)
 }
 
@@ -3424,24 +3417,6 @@ export const SidebarChat = () => {
 	const initVal = ''
 	const [instructionsAreEmpty, setInstructionsAreEmpty] = useState(!initVal)
 	const [tokenEstimate, setTokenEstimate] = useState(0)
-
-	// Audio recording state
-	const [isRecording, setIsRecording] = useState(false)
-	const [audioTranscript, setAudioTranscript] = useState('')
-	const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-	const recognitionRef = useRef<any>(null)
-
-	// Clean up on unmount
-	useEffect(() => {
-		return () => {
-			if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-				mediaRecorderRef.current.stop()
-			}
-			if (recognitionRef.current) {
-				try { recognitionRef.current.stop() } catch { }
-			}
-		}
-	}, [])
 
 	const isDisabled = instructionsAreEmpty || !!isFeatureNameDisabled('Chat', settingsState)
 

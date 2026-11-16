@@ -563,10 +563,9 @@ export class ToolsService implements IToolsService {
 			browser_set_viewport: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
 				const tabId = validateStr('tabId', params.tab_id)
-				const v = params.viewport as any
-				const width = validateNumber(v.width, { default: null })
-				const height = validateNumber(v.height, { default: null })
-				if (width === null || height === null) throw new Error('Invalid LLM output: viewport.width and viewport.height are required numbers.')
+				const width = validateNumber(params.width, { default: null })
+				const height = validateNumber(params.height, { default: null })
+				if (width === null || height === null) throw new Error('Invalid LLM output: width and height are required numbers.')
 				return { sessionId, tabId, width, height }
 			},
 			browser_screenshot: (params: RawToolParamsObj) => {

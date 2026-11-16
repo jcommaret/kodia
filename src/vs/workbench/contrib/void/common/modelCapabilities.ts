@@ -2688,7 +2688,6 @@ export const autoSelectModel = (
 	if (availableModels.length === 0) return null
 
 	const taskType = detectTaskType(userMessage)
-	const lower = userMessage.toLowerCase()
 
 	// Score all available models
 	const scored = availableModels.map(m => {

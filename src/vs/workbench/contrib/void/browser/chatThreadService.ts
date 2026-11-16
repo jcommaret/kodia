@@ -17,7 +17,7 @@ import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { autoSelectModel } from '../common/modelCapabilities.js';
 import { AnthropicReasoning, getErrorMessage, LLMUsage, RawToolCallObj, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { FeatureName, ModelSelection, ModelSelectionOptions, OverridesOfModel, providerNames } from '../common/voidSettingsTypes.js';
+import { FeatureName, ModelSelection, ModelSelectionOptions, OverridesOfModel, providerNames, ProviderName } from '../common/voidSettingsTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolCallParams, ToolName, ToolResult } from '../common/toolsServiceTypes.js';
 import { IToolsService } from './toolsService.js';

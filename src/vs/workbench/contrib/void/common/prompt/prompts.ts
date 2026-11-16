@@ -375,9 +375,10 @@ export const builtinTools: {
 
 	browser_launch: {
 		name: 'browser_launch',
-		description: `Launches a real Chromium browser and returns a session_id. Use the session_id in all subsequent browser tools. The browser persists across tool calls within the same session.`,
+		description: `Launches a real Chromium browser (visible by default) and returns a session_id. Use the session_id in all subsequent browser tools. The browser persists across tool calls within the same session.`,
 		params: {
 			headless: { description: 'Optional. Run the browser without a visible window (default false). Set true to run headless.' },
+			viewport: { description: 'Optional. Initial viewport size as { width, height } in pixels (default 1280x800). Use this to test desktop, tablet, or mobile layouts.' },
 		},
 	},
 
@@ -537,6 +538,17 @@ export const builtinTools: {
 			tab_id: { description: 'The tab ID.' },
 			selector: { description: 'A CSS selector to wait for.' },
 			timeout_ms: { description: 'Optional. Max milliseconds to wait. Defaults to 30000.' },
+		},
+	},
+
+	browser_set_viewport: {
+		name: 'browser_set_viewport',
+		description: `Resizes the browser tab's viewport to a specific width and height in pixels. Use this to test responsive designs at desktop, tablet, and mobile sizes live, then take screenshots to verify each layout.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			width: { description: 'Viewport width in pixels (e.g. 375 for mobile, 768 for tablet, 1280 for desktop, 1920 for full HD).' },
+			height: { description: 'Viewport height in pixels (e.g. 667 for mobile, 1024 for tablet, 800 for desktop).' },
 		},
 	},
 

@@ -461,7 +461,14 @@ export class ToolsService implements IToolsService {
 			// --- Browser automation ---
 			browser_launch: (params: RawToolParamsObj) => {
 				const headless = validateBoolean(params.headless, { default: false })
-				return { headless }
+				let viewport: { width: number; height: number } | undefined
+				if (params.viewport) {
+					const v = params.viewport as any
+					const width = validateNumber('viewport.width', v.width, { default: 1280 })
+					const height = validateNumber('viewport.height', v.height, { default: 800 })
+					viewport = { width, height }
+				}
+				return { headless, viewport }
 			},
 			browser_close: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
@@ -552,6 +559,15 @@ export class ToolsService implements IToolsService {
 				const selector = validateStr('selector', params.selector)
 				const timeoutMs = params.timeout_ms === undefined || params.timeout_ms === null ? undefined : Number(params.timeout_ms)
 				return { sessionId, tabId, selector, timeoutMs }
+			},
+			browser_set_viewport: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const v = params.viewport as any
+				const width = validateNumber('viewport.width', v.width, { default: null })
+				const height = validateNumber('viewport.height', v.height, { default: null })
+				if (width === null || height === null) throw new Error('Invalid LLM output: viewport.width and viewport.height are required numbers.')
+				return { sessionId, tabId, width, height }
 			},
 			browser_screenshot: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
@@ -1230,8 +1246,8 @@ export class ToolsService implements IToolsService {
 			},
 
 			// --- Browser automation ---
-			browser_launch: async ({ headless }) => {
-				const result = await browserService.launchBrowser({ headless })
+			browser_launch: async ({ headless, viewport }) => {
+				const result = await browserService.launchBrowser({ headless, viewport })
 				return { result: { sessionId: result.sessionId, engine: result.engine, headless: result.headless, version: result.version } }
 			},
 			browser_close: async ({ sessionId }) => {
@@ -1301,6 +1317,10 @@ export class ToolsService implements IToolsService {
 			browser_wait_for_element: async ({ sessionId, tabId, selector, timeoutMs }) => {
 				const result = await browserService.waitForElement(sessionId, tabId, selector, { timeoutMs })
 				return { result: { found: result.found } }
+			},
+			browser_set_viewport: async ({ sessionId, tabId, width, height }) => {
+				await browserService.setViewport(sessionId, tabId, { width, height })
+				return { result: { width, height } }
 			},
 			browser_screenshot: async ({ sessionId, tabId, type, selector }) => {
 				const result = await browserService.takeScreenshot(sessionId, tabId, { type, selector })
@@ -2400,6 +2420,7 @@ export class ToolsService implements IToolsService {
 			browser_check_element: () => 'Element check state changed.',
 			browser_submit_form: (_params, result) => `Form submitted (${result.url}).`,
 			browser_wait_for_element: (_params, result) => result.found ? 'Element found.' : 'Element not found within the timeout.',
+			browser_set_viewport: (_params, result) => `Viewport resized to ${result.width}x${result.height}.`,
 			browser_screenshot: (_params, result) => `Screenshot captured (${result.type}, ${result.width}x${result.height}).`,
 			browser_console: (_params, result) => {
 				if (!result.messages || result.messages.length === 0) return 'No console messages.'

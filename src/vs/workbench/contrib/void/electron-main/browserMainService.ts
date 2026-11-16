@@ -248,11 +248,12 @@ export class KodiaBrowserMainService implements IBrowserService {
 	private readonly sessions = new Map<string, SessionState>();
 	private shuttingDown = false;
 
-	async launchBrowser(opts: { headless?: boolean }): Promise<BrowserLaunchResult> {
+	async launchBrowser(opts: { headless?: boolean; viewport?: { width: number; height: number } }): Promise<BrowserLaunchResult> {
 		if (this.shuttingDown) throw new Error('Browser service is shutting down.');
 		const pw = await getPlaywright();
 		const headless = opts.headless ?? false;
 		const executablePath = resolveChromeExecutable(pw);
+		const viewport = opts.viewport ?? { width: 1280, height: 800 };
 		const browser = await pw.chromium.launch({
 			headless,
 			executablePath,
@@ -268,6 +269,7 @@ export class KodiaBrowserMainService implements IBrowserService {
 		});
 		const context = await browser.newContext({
 			acceptDownloads: true,
+			viewport,
 			// Do not record cookies/storage state for privacy across sessions;
 			// each session starts clean unless the agent navigates/logs in.
 		});
@@ -498,6 +500,12 @@ export class KodiaBrowserMainService implements IBrowserService {
 		} catch {
 			return { found: false };
 		}
+	}
+
+	async setViewport(sessionId: string, tabId: string, viewport: { width: number; height: number }): Promise<void> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		await st.page.setViewportSize(viewport);
 	}
 
 	async takeScreenshot(sessionId: string, tabId: string, opts: { type?: ScreenshotType; selector?: string }): Promise<BrowserScreenshotResult> {

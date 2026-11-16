@@ -96,6 +96,11 @@ export type BrowserLaunchResult = {
 	version: string;
 };
 
+export type BrowserViewport = {
+	width: number;
+	height: number;
+};
+
 export type BrowserTabResult = {
 	tabId: string;
 	url: string;
@@ -124,7 +129,7 @@ export interface IBrowserService {
 	readonly _serviceBrand: undefined;
 
 	// --- lifecycle ---
-	launchBrowser(opts: { headless?: boolean }): Promise<BrowserLaunchResult>;
+	launchBrowser(opts: { headless?: boolean; viewport?: { width: number; height: number } }): Promise<BrowserLaunchResult>;
 	closeBrowser(sessionId: string): Promise<void>;
 	listSessions(): Promise<BrowserSessionInfo[]>;
 
@@ -152,6 +157,7 @@ export interface IBrowserService {
 
 	// --- waiting ---
 	waitForElement(sessionId: string, tabId: string, selector: string, opts: { timeoutMs?: number }): Promise<{ found: boolean }>;
+	setViewport(sessionId: string, tabId: string, viewport: { width: number; height: number }): Promise<void>;
 
 	// --- screenshots ---
 	takeScreenshot(sessionId: string, tabId: string, opts: { type?: ScreenshotType; selector?: string }): Promise<BrowserScreenshotResult>;

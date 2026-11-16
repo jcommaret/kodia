@@ -281,6 +281,7 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'browser_reload':
 		case 'browser_inspect_page':
 		case 'browser_wait_for_element':
+		case 'browser_set_viewport':
 		case 'browser_screenshot':
 		case 'browser_console':
 		case 'browser_network_failures':

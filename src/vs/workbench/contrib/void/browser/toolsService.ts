@@ -1489,7 +1489,7 @@ export class ToolsService implements IToolsService {
 						throw new Error(`File not found: ${path}`)
 					}
 					const contents = await this.fileService.readFile(uri)
-					const text = contents.value.toString('utf8')
+					const text = contents.value.toString()
 					const allLines = text.split('\n')
 					const filteredLines = lines ? allLines.slice(-lines) : allLines
 					return {

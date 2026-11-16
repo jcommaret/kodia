@@ -654,13 +654,14 @@ export class ToolsService implements IToolsService {
 			},
 			// --- Direct API testing ---
 			api_request: (params: RawToolParamsObj) => {
-				const url = validateStr('url', params.url)
-				const method = params.method === 'GET' || params.method === 'POST' || params.method === 'PUT' || params.method === 'DELETE' || params.method === 'PATCH' ? params.method : 'GET'
-				const headers = params.headers && typeof params.headers === 'object' ? params.headers as Record<string, string> : undefined
-				const body = validateOptionalStr('body', params.body) ?? undefined
-				const timeoutMs = params.timeout_ms === undefined || params.timeout_ms === null ? undefined : Number(params.timeout_ms)
-				const useCookieJar = params.use_cookie_jar === true
-				const cookies = params.cookies && Array.isArray(params.cookies) ? (params.cookies as any[]).map((c: any) => ({
+				const p = params as any
+				const url = validateStr('url', p.url)
+				const method = p.method === 'GET' || p.method === 'POST' || p.method === 'PUT' || p.method === 'DELETE' || p.method === 'PATCH' ? p.method : 'GET'
+				const headers = p.headers && typeof p.headers === 'object' ? p.headers as Record<string, string> : undefined
+				const body = validateOptionalStr('body', p.body) ?? undefined
+				const timeoutMs = p.timeout_ms === undefined || p.timeout_ms === null ? undefined : Number(p.timeout_ms)
+				const useCookieJar = p.use_cookie_jar === true
+				const cookies = p.cookies && Array.isArray(p.cookies) ? (p.cookies as any[]).map((c: any) => ({
 					name: validateStr('name', c.name),
 					value: validateStr('value', c.value),
 					domain: validateStr('domain', c.domain),
@@ -669,19 +670,19 @@ export class ToolsService implements IToolsService {
 					httpOnly: c.httpOnly === true,
 					secure: c.secure === true,
 				})) : undefined
-				const oauth2Tokens = params.oauth2_tokens && typeof params.oauth2_tokens === 'object' ? {
-					access_token: validateStr('access_token', (params.oauth2_tokens as any).access_token),
-					refresh_token: (params.oauth2_tokens as any).refresh_token ?? undefined,
-					expires_in: (params.oauth2_tokens as any).expires_in === undefined || (params.oauth2_tokens as any).expires_in === null ? undefined : Number((params.oauth2_tokens as any).expires_in),
-					token_type: (params.oauth2_tokens as any).token_type ?? undefined,
-					scope: (params.oauth2_tokens as any).scope ?? undefined,
+				const oauth2Tokens = p.oauth2_tokens && typeof p.oauth2_tokens === 'object' ? {
+					access_token: validateStr('access_token', p.oauth2_tokens.access_token),
+					refresh_token: p.oauth2_tokens.refresh_token ?? undefined,
+					expires_in: p.oauth2_tokens.expires_in === undefined || p.oauth2_tokens.expires_in === null ? undefined : Number(p.oauth2_tokens.expires_in),
+					token_type: p.oauth2_tokens.token_type ?? undefined,
+					scope: p.oauth2_tokens.scope ?? undefined,
 				} : undefined
-				const multipartBody = params.multipart_body && typeof params.multipart_body === 'object' ? {
-					fields: params.multipart_body.fields && Array.isArray(params.multipart_body.fields) ? (params.multipart_body.fields as any[]).map((f: any) => ({
+				const multipartBody = p.multipart_body && typeof p.multipart_body === 'object' ? {
+					fields: p.multipart_body.fields && Array.isArray(p.multipart_body.fields) ? (p.multipart_body.fields as any[]).map((f: any) => ({
 						name: validateStr('name', f.name),
 						value: validateStr('value', f.value),
 					})) : [],
-					files: params.multipart_body.files && Array.isArray(params.multipart_body.files) ? (params.multipart_body.files as any[]).map((f: any) => ({
+					files: p.multipart_body.files && Array.isArray(p.multipart_body.files) ? (p.multipart_body.files as any[]).map((f: any) => ({
 						name: validateStr('name', f.name),
 						filename: validateStr('filename', f.filename),
 						content_type: validateStr('content_type', f.content_type),
@@ -710,16 +711,17 @@ export class ToolsService implements IToolsService {
 				return { cookies }
 			},
 			api_add_cookie: (params: RawToolParamsObj) => {
-				const cookie = params.cookie && typeof params.cookie === 'object' ? {
-					name: validateStr('name', params.cookie.name),
-					value: validateStr('value', params.cookie.value),
-					domain: validateStr('domain', params.cookie.domain),
-					path: validateStr('path', params.cookie.path),
-					expires: params.cookie.expires === undefined || params.cookie.expires === null ? undefined : Number(params.cookie.expires),
-					httpOnly: params.cookie.httpOnly === true,
-					secure: params.cookie.secure === true,
-				} : null
-				if (!cookie) throw new Error('Invalid LLM output: cookie object is required.')
+				const c = params.cookie && typeof params.cookie === 'object' ? params.cookie as any : null
+				if (!c) throw new Error('Invalid LLM output: cookie object is required.')
+				const cookie = {
+					name: validateStr('name', c.name),
+					value: validateStr('value', c.value),
+					domain: validateStr('domain', c.domain),
+					path: validateStr('path', c.path),
+					expires: c.expires === undefined || c.expires === null ? undefined : Number(c.expires),
+					httpOnly: c.httpOnly === true,
+					secure: c.secure === true,
+				}
 				return { cookie }
 			},
 			api_clear_cookies: () => ({}),
@@ -1869,17 +1871,17 @@ export class ToolsService implements IToolsService {
 			code_semantic_search: async ({ query, limit }: any) => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 				const results = await codeIndexService.semanticSearch(query, limit)
-				return { result: results }
+				return { result: { results } }
 			},
 			code_keyword_search: async ({ query, limit }: any) => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 				const results = await codeIndexService.keywordSearch(query, limit)
-				return { result: results }
+				return { result: { results } }
 			},
 			code_hybrid_search: async ({ query, limit }: any) => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 				const results = await codeIndexService.hybridSearch(query, limit)
-				return { result: results }
+				return { result: { results } }
 			},
 			code_index_stats: async () => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))

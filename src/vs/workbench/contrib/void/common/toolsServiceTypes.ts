@@ -249,6 +249,14 @@ export type BuiltinToolCallParams = {
 	'oauth2_generate_auth_url': { client_id: string, client_secret: string, authorization_url: string, token_url: string, redirect_uri: string, scope?: string },
 	'oauth2_exchange_code': { client_id: string, client_secret: string, token_url: string, redirect_uri: string, code: string, code_verifier?: string },
 	'oauth2_refresh_token': { client_id: string, client_secret: string, token_url: string, refresh_token: string },
+	// Code index & semantic search
+	'code_index': {},
+	'code_index_file': { uri: URI },
+	'code_semantic_search': { query: string, limit?: number },
+	'code_keyword_search': { query: string, limit?: number },
+	'code_hybrid_search': { query: string, limit?: number },
+	'code_index_stats': {},
+	'code_index_clear': {},
 	// Debugger automation
 	'debug_list_configurations': {},
 	'debug_list_sessions': {},

@@ -465,7 +465,6 @@ src/vs/workbench/services/telemetry/test/node/commonProperties.test.ts
 
 # Remote, tunnels, networking, and authentication (11 files)
 extensions/github-authentication/src/test/github.test.ts
-extensions/microsoft-authentication/src/common/experimentation.ts
 src/vs/platform/github/common/githubTransport.ts
 src/vs/platform/remote/node/wsl.ts
 src/vs/platform/request/node/requestService.ts

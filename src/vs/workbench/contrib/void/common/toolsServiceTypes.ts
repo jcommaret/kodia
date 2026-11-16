@@ -357,7 +357,7 @@ export type BuiltinToolResultType = {
 	'api_request': { ok: boolean, status: number, status_text: string, headers: Record<string, string>, body: string, body_type: 'json' | 'text' | 'other', url: string, method: string, elapsed_ms: number },
 	'port_check': { port: number, in_use: boolean, process?: string },
 	// Debugger automation results
-	'debug_list_configurations': {},
+	'debug_list_configurations': { configurations: DebugConfiguration[] },
 	'debug_list_sessions': { sessions: DebugSessionInfo[] },
 	'debug_get_session_status': DebugSessionInfo,
 	'debug_list_threads': { threads: DebugThread[] },

@@ -1385,8 +1385,8 @@ export class ToolsService implements IToolsService {
 			// --- Dev server automation ---
 			dev_server_start: async ({ command, cwd, port, name }) => {
 				const serverName = name ?? `server-${Date.now()}`
-				const resolvedCwd = resolveCwdUri(cwd, workspaceContextService)
-				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? undefined
+				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
+				const cwdPath = resolvedCwd?.fsPath ?? null
 
 				// Wrap command for safe execution
 				const wrappedCommand = wrapCommandForShell(command)
@@ -1397,6 +1397,8 @@ export class ToolsService implements IToolsService {
 					type: 'persistent',
 					persistentTerminalId: terminalId,
 				})
+				void resPromise
+				void interrupt
 
 				// Give the server a moment to start, then check if the port is responding
 				let serverUrl: string | undefined

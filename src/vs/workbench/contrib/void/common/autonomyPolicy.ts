@@ -73,6 +73,14 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'oauth2_generate_auth_url',
 	'oauth2_exchange_code',
 	'oauth2_refresh_token',
+	// Code index & semantic search
+	'code_index',
+	'code_index_file',
+	'code_semantic_search',
+	'code_keyword_search',
+	'code_hybrid_search',
+	'code_index_stats',
+	'code_index_clear',
 	// Debugger automation
 	'debug_list_configurations',
 	'debug_list_sessions',
@@ -349,6 +357,16 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'oauth2_generate_auth_url':
 		case 'oauth2_exchange_code':
 		case 'oauth2_refresh_token':
+			return 'low';
+
+		// Code index & semantic search - read-only operations
+		case 'code_index':
+		case 'code_index_file':
+		case 'code_semantic_search':
+		case 'code_keyword_search':
+		case 'code_hybrid_search':
+		case 'code_index_stats':
+		case 'code_index_clear':
 			return 'low';
 
 		// Debugger automation - inspection is low risk.

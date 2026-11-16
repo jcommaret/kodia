@@ -729,6 +729,60 @@ export const builtinTools: {
 		},
 	},
 
+	// --- Code Index & Semantic Search ---
+	code_index: {
+		name: 'code_index',
+		description: `Indexes the entire workspace codebase for semantic search. Parses files into chunks (functions, classes, blocks) and generates embeddings. Must be called before semantic search.`,
+		params: {},
+	},
+
+	code_index_file: {
+		name: 'code_index_file',
+		description: `Indexes a single file for semantic search. Pass the file URI.`,
+		params: {
+			uri: { description: 'The file URI to index.' },
+		},
+	},
+
+	code_semantic_search: {
+		name: 'code_semantic_search',
+		description: `Searches code by meaning (semantic similarity) using TF-IDF + character n-gram embeddings. Finds relevant functions, classes, and code blocks even if they don't contain exact keywords.`,
+		params: {
+			query: { description: 'The search query in natural language (e.g. "user authentication middleware", "database connection pool").' },
+			limit: { description: 'Optional. Maximum number of results to return. Defaults to 10.' },
+		},
+	},
+
+	code_keyword_search: {
+		name: 'code_keyword_search',
+		description: `Searches code by exact keyword matching. Finds files and code blocks containing specific words.`,
+		params: {
+			query: { description: 'The keyword or phrase to search for.' },
+			limit: { description: 'Optional. Maximum number of results to return. Defaults to 10.' },
+		},
+	},
+
+	code_hybrid_search: {
+		name: 'code_hybrid_search',
+		description: `Combines semantic and keyword search for best results. Returns deduplicated results ranked by relevance.`,
+		params: {
+			query: { description: 'The search query.' },
+			limit: { description: 'Optional. Maximum number of results to return. Defaults to 10.' },
+		},
+	},
+
+	code_index_stats: {
+		name: 'code_index_stats',
+		description: `Returns statistics about the code index: number of files indexed, total chunks, and last indexed time.`,
+		params: {},
+	},
+
+	code_index_clear: {
+		name: 'code_index_clear',
+		description: `Clears the entire code index. Use this before re-indexing a changed workspace.`,
+		params: {},
+	},
+
 	// Cookie management
 	api_get_cookies: {
 		name: 'api_get_cookies',

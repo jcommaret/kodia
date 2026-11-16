@@ -400,6 +400,14 @@ export type BuiltinToolResultType = {
 	'oauth2_generate_auth_url': { url: string, state: string, code_verifier?: string },
 	'oauth2_exchange_code': { access_token: string, refresh_token?: string, expires_in?: number, token_type?: string, scope?: string, created_at?: number },
 	'oauth2_refresh_token': { access_token: string, refresh_token?: string, expires_in?: number, token_type?: string, scope?: string, created_at?: number },
+	// Code index & semantic search results
+	'code_index': { totalFiles: number, totalChunks: number, lastIndexed: number | null },
+	'code_index_file': { indexed: boolean, filePath: string },
+	'code_semantic_search': { results: Array<{ uri: string, filePath: string, startLine: number, endLine: number, kind: string, name: string, content: string, score: number }> },
+	'code_keyword_search': { results: Array<{ uri: string, filePath: string, startLine: number, endLine: number, kind: string, name: string, content: string, score: number }> },
+	'code_hybrid_search': { results: Array<{ uri: string, filePath: string, startLine: number, endLine: number, kind: string, name: string, content: string, score: number }> },
+	'code_index_stats': { totalFiles: number, totalChunks: number, lastIndexed: number | null },
+	'code_index_clear': { cleared: boolean },
 	// Debugger automation results
 	'debug_list_configurations': { configurations: DebugConfiguration[] },
 	'debug_list_sessions': { sessions: DebugSessionInfo[] },

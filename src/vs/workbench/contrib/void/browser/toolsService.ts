@@ -1,5 +1,6 @@
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js'
 import { URI } from '../../../../base/common/uri.js'
+import * as fs from 'fs'
 import { IReference } from '../../../../base/common/lifecycle.js'
 import { Position } from '../../../../editor/common/core/position.js'
 import { IRange } from '../../../../editor/common/core/range.js'
@@ -40,6 +41,7 @@ import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
 import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
 import { IApiMainService } from '../common/apiServiceTypes.js'
+import { ICodeIndexService } from '../common/codeIndexServiceTypes.js'
 import { IWebSearchService, SearchRequest } from '../common/webSearchTypes.js'
 import { INotebookService } from '../../notebook/common/notebookService.js'
 import { INotebookKernelService } from '../../notebook/common/notebookKernelService.js'
@@ -747,6 +749,32 @@ export class ToolsService implements IToolsService {
 				const refreshToken = validateStr('refresh_token', params.refresh_token)
 				return { client_id: clientId, client_secret: clientSecret, token_url: tokenUrl, refresh_token: refreshToken }
 			},
+
+			// --- Code Index & Semantic Search ---
+			code_index: (params: RawToolParamsObj) => {
+				return {}
+			},
+			code_index_file: (params: RawToolParamsObj) => {
+				const uri = validateURI(params.uri, workspaceContextService)
+				return { uri }
+			},
+			code_semantic_search: (params: RawToolParamsObj) => {
+				const query = validateStr('query', params.query)
+				const limit = params.limit === undefined || params.limit === null ? 10 : Number(params.limit)
+				return { query, limit }
+			},
+			code_keyword_search: (params: RawToolParamsObj) => {
+				const query = validateStr('query', params.query)
+				const limit = params.limit === undefined || params.limit === null ? 10 : Number(params.limit)
+				return { query, limit }
+			},
+			code_hybrid_search: (params: RawToolParamsObj) => {
+				const query = validateStr('query', params.query)
+				const limit = params.limit === undefined || params.limit === null ? 10 : Number(params.limit)
+				return { query, limit }
+			},
+			code_index_stats: () => ({}),
+			code_index_clear: () => ({}),
 
 			// --- Debugger automation ---
 			debug_list_configurations: () => ({}),
@@ -1813,6 +1841,44 @@ export class ToolsService implements IToolsService {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
 				const result = await apiService.refreshAccessToken({ clientId: client_id, clientSecret: client_secret, tokenUrl: token_url }, refresh_token)
 				return { result: { access_token: result.accessToken, refresh_token: result.refreshToken, expires_in: result.expiresIn, token_type: result.tokenType, scope: result.scope, created_at: result.createdAt } }
+			},
+
+			// --- Code Index & Semantic Search ---
+			code_index: async () => {
+				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+				const stats = await codeIndexService.indexWorkspace()
+				return { result: { totalFiles: stats.totalFiles, totalChunks: stats.totalChunks, lastIndexed: stats.lastIndexed } }
+			},
+			code_index_file: async ({ uri }) => {
+				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+				const content = fs.readFileSync(uri.fsPath, 'utf8')
+				await codeIndexService.indexFile(uri, content)
+				return { result: { indexed: true, filePath: uri.fsPath } }
+			},
+			code_semantic_search: async ({ query, limit }) => {
+				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+				const results = await codeIndexService.semanticSearch(query, limit)
+				return { result: results }
+			},
+			code_keyword_search: async ({ query, limit }) => {
+				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+				const results = await codeIndexService.keywordSearch(query, limit)
+				return { result: results }
+			},
+			code_hybrid_search: async ({ query, limit }) => {
+				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+				const results = await codeIndexService.hybridSearch(query, limit)
+				return { result: results }
+			},
+			code_index_stats: async () => {
+				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+				const stats = await codeIndexService.getStats()
+				return { result: stats }
+			},
+			code_index_clear: async () => {
+				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+				await codeIndexService.clearIndex()
+				return { result: { cleared: true } }
 			},
 
 			// --- Debugger automation ---
@@ -2935,6 +3001,37 @@ export class ToolsService implements IToolsService {
 				const { project_type, cycles_run, success, final_status, errors_fixed, files_created, url } = result
 				const status = success ? 'SUCCESS' : 'WARNINGS'
 				return `autonomous_dev_cycle: ${status}\nProject type: ${project_type}\nCycles run: ${cycles_run}\nErrors fixed: ${errors_fixed}\nFiles created: ${files_created}\nFinal status: ${final_status}\nURL: ${url ?? 'N/A'}`
+			},
+
+			// --- Code Index & Semantic Search ---
+			code_index: (_params, result) => {
+				const { totalFiles, totalChunks, lastIndexed } = result
+				return `Code index: ${totalFiles} files, ${totalChunks} chunks indexed${lastIndexed ? ` (indexed at ${new Date(lastIndexed).toLocaleTimeString()})` : ''}`
+			},
+			code_index_file: (_params, result) => {
+				return `Indexed file: ${result.filePath}`
+			},
+			code_semantic_search: (_params, result) => {
+				const { results } = result
+				if (!results || results.length === 0) return 'No semantic search results.'
+				return results.map(r => `${r.filePath}:${r.startLine} [${r.kind}] ${r.name} — score: ${(r.score * 100).toFixed(1)}%\n  ${r.content.slice(0, 150).replace(/\n/g, ' ')}...`).join('\n\n')
+			},
+			code_keyword_search: (_params, result) => {
+				const { results } = result
+				if (!results || results.length === 0) return 'No keyword search results.'
+				return results.map(r => `${r.filePath}:${r.startLine} [${r.kind}] ${r.name} — score: ${r.score}\n  ${r.content.slice(0, 150).replace(/\n/g, ' ')}...`).join('\n\n')
+			},
+			code_hybrid_search: (_params, result) => {
+				const { results } = result
+				if (!results || results.length === 0) return 'No hybrid search results.'
+				return results.map(r => `${r.filePath}:${r.startLine} [${r.kind}] ${r.name}\n  ${r.content.slice(0, 150).replace(/\n/g, ' ')}...`).join('\n\n')
+			},
+			code_index_stats: (_params, result) => {
+				const { totalFiles, totalChunks, lastIndexed } = result
+				return `Index stats: ${totalFiles} files, ${totalChunks} chunks${lastIndexed ? `, last indexed ${new Date(lastIndexed).toLocaleString()}` : ''}`
+			},
+			code_index_clear: (_params, result) => {
+				return `Code index cleared.`
 			},
 
 			// --- Dev server automation ---

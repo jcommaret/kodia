@@ -229,6 +229,8 @@ import { IBrowserService } from '../../workbench/contrib/void/common/browserServ
 import { KodiaBrowserMainService } from '../../workbench/contrib/void/electron-main/browserMainService.js';
 import { IApiMainService } from '../../workbench/contrib/void/common/apiServiceTypes.js';
 import { KodiaApiMainService } from '../../workbench/contrib/void/electron-main/apiMainService.js';
+import { ICodeIndexService } from '../../workbench/contrib/void/common/codeIndexServiceTypes.js';
+import { KodiaCodeIndexMainService } from '../../workbench/contrib/void/electron-main/codeIndexMainService.js';
 import { IKodiaWindowsService, KODIA_WINDOWS_CHANNEL } from '../../platform/windows/common/kodiaWindows.js';
 import { KodiaWindowsMainService } from '../../platform/windows/electron-main/kodiaWindowsMainService.js';
 /**
@@ -1374,6 +1376,7 @@ export class CodeApplication extends Disposable {
 		services.set(IWebSearchService, new SyncDescriptor(WebSearchMainService, undefined, false));
 		services.set(IBrowserService, new SyncDescriptor(KodiaBrowserMainService, undefined, false));
 		services.set(IApiMainService, new SyncDescriptor(KodiaApiMainService, undefined, false));
+		services.set(ICodeIndexService, new SyncDescriptor(KodiaCodeIndexMainService, undefined, false));
 		services.set(IKodiaWindowsService, new SyncDescriptor(KodiaWindowsMainService, undefined, false));
 
 		// Default Extensions Profile Init
@@ -1582,6 +1585,10 @@ export class CodeApplication extends Disposable {
 		// Kodia: the API testing tool (main-process HTTP/net access)
 		const apiChannel = ProxyChannel.fromService(accessor.get(IApiMainService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-api', apiChannel);
+
+		// Kodia: the code index & semantic search service
+		const codeIndexChannel = ProxyChannel.fromService(accessor.get(ICodeIndexService), disposables);
+		mainProcessElectronServer.registerChannel('void-channel-code-index', codeIndexChannel);
 
 		// Kodia: the Agents Window opens Kodia's settings in an editor window
 		const kodiaWindowsChannel = ProxyChannel.fromService(accessor.get(IKodiaWindowsService), disposables);

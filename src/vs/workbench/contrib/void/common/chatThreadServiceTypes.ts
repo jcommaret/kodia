@@ -141,6 +141,17 @@ export type StagingSelectionItem = {
 	uri?: undefined;
 	language?: undefined;
 	state?: undefined;
+} | {
+	// a binary document attached with the + button (Word .docx/.doc, RTF, OpenDocument, etc.)
+	// sent as base64 to models that support document attachments (supportsPDF)
+	type: 'Document';
+	id: string;
+	name: string;
+	mimeType: string;
+	dataBase64: string;
+	uri?: undefined;
+	language?: undefined;
+	state?: undefined;
 }
 
 // the image types every vision-capable provider accepts (Anthropic, OpenAI, Gemini)

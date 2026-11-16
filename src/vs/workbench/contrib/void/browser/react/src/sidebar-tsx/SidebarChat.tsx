@@ -394,7 +394,7 @@ const AttachFilesButton = () => {
 			type='button'
 			className='flex items-center justify-center size-5 rounded-full text-void-fg-3 hover:text-void-fg-1 hover:bg-void-bg-2 transition-colors duration-150'
 			data-tooltip-id='void-tooltip'
-			data-tooltip-content='Attach files: images, PDFs, text or code'
+			data-tooltip-content='Attach files: images, PDFs, Word documents, text or code'
 			data-tooltip-place='top'
 			// lets the click reach the chat area too, which focuses its input: the files then go to that message
 			onClick={() => fileInputRef.current?.click()}
@@ -883,14 +883,14 @@ export const SelectedFiles = (
 				const thisKey = selection.type === 'CodeSelection' ? selection.type + selection.language + selection.range + selection.state.wasAddedAsCurrentFile + selection.uri.fsPath
 					: selection.type === 'File' ? selection.type + selection.language + selection.state.wasAddedAsCurrentFile + selection.uri.fsPath
 						: selection.type === 'Folder' ? selection.type + selection.language + selection.state + selection.uri.fsPath
-							: selection.type === 'Image' || selection.type === 'PDF' || selection.type === 'TextFile' ? selection.type + selection.id
+							: selection.type === 'Image' || selection.type === 'PDF' || selection.type === 'TextFile' || selection.type === 'Document' ? selection.type + selection.id
 								: i
 
 				// images show a thumbnail instead of an icon
 				const selectionIcon = selection.type === 'Image'
 					? <img src={dataURLOfChatImage(selection)} alt='' className='h-4 w-auto max-w-8 object-cover rounded-[2px]' />
 					: (() => {
-						const SelectionIcon = selection.type === 'File' || selection.type === 'TextFile' ? File : selection.type === 'PDF' ? FileText : selection.type === 'Folder' ? Folder : Text
+						const SelectionIcon = selection.type === 'File' || selection.type === 'TextFile' ? File : selection.type === 'PDF' || selection.type === 'Document' ? FileText : selection.type === 'Folder' ? Folder : Text
 						return <SelectionIcon size={10} />
 					})()
 
@@ -902,7 +902,7 @@ export const SelectedFiles = (
 					<span className="truncate overflow-hidden text-ellipsis"
 						data-tooltip-id='void-tooltip'
 						data-tooltip-content={selection.type === 'Image' || selection.type === 'TextFile' ? selection.name
-							: selection.type === 'PDF' ? `${selection.name} (~${selection.pageCount} page${selection.pageCount === 1 ? '' : 's'})`
+							: selection.type === 'PDF' || selection.type === 'Document' ? `${selection.name} (${selection.mimeType || 'document'})`
 								: getRelative(selection.uri, accessor)}
 						data-tooltip-place='top'
 						data-tooltip-delay-show={3000}
@@ -954,7 +954,7 @@ export const SelectedFiles = (
 							{selectionIcon}
 
 							{ // file name and range
-								selection.type === 'Image' || selection.type === 'PDF' || selection.type === 'TextFile' ? selection.name
+								selection.type === 'Image' || selection.type === 'PDF' || selection.type === 'TextFile' || selection.type === 'Document' ? selection.name
 									: getBasename(selection.uri.fsPath) + (selection.type === 'CodeSelection' ? ` (${selection.range[0]}-${selection.range[1]})` : '')
 							}
 

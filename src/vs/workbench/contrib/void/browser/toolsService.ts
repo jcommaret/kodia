@@ -464,8 +464,8 @@ export class ToolsService implements IToolsService {
 				let viewport: { width: number; height: number } | undefined
 				if (params.viewport) {
 					const v = params.viewport as any
-					const width = validateNumber('viewport.width', v.width, { default: 1280 })
-					const height = validateNumber('viewport.height', v.height, { default: 800 })
+					const width = validateNumber(v.width, { default: 1280 }) ?? 1280
+					const height = validateNumber(v.height, { default: 800 }) ?? 800
 					viewport = { width, height }
 				}
 				return { headless, viewport }
@@ -564,8 +564,8 @@ export class ToolsService implements IToolsService {
 				const sessionId = validateStr('sessionId', params.session_id)
 				const tabId = validateStr('tabId', params.tab_id)
 				const v = params.viewport as any
-				const width = validateNumber('viewport.width', v.width, { default: null })
-				const height = validateNumber('viewport.height', v.height, { default: null })
+				const width = validateNumber(v.width, { default: null })
+				const height = validateNumber(v.height, { default: null })
 				if (width === null || height === null) throw new Error('Invalid LLM output: viewport.width and viewport.height are required numbers.')
 				return { sessionId, tabId, width, height }
 			},

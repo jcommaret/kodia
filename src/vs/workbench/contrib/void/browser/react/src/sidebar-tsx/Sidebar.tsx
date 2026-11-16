@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { useIsDark } from '../util/services.js';
+import { MessageCircle, Search, ClipboardList } from 'lucide-react';
 
 import '../styles.css'
 import { SidebarChat } from './SidebarChat.js';
@@ -78,19 +79,19 @@ export const Sidebar = ({ className }: { className: string }) => {
 						onClick={() => setActivePanel('chat')}
 						className={`flex items-center gap-2 px-3 py-2 text-xs rounded border border-void-border-2 ${activePanel === 'chat' ? 'bg-void-bg-3 text-void-fg-1' : 'bg-void-bg-2 text-void-fg-3'} hover:bg-void-bg-3 shadow-md`}
 					>
-						💬 Chat
+						<MessageCircle size={12} className="mr-1" /> Chat
 					</button>
 					<button
 						onClick={() => setActivePanel('code-index')}
 						className={`flex items-center gap-2 px-3 py-2 text-xs rounded border border-void-border-2 ${activePanel === 'code-index' ? 'bg-void-bg-3 text-void-fg-1' : 'bg-void-bg-2 text-void-fg-3'} hover:bg-void-bg-3 shadow-md`}
 					>
-						🔍 Index
+						<Search size={12} className="mr-1" /> Index
 					</button>
 					<button
 						onClick={() => setActivePanel('task-plan')}
 						className={`flex items-center gap-2 px-3 py-2 text-xs rounded border border-void-border-2 ${activePanel === 'task-plan' ? 'bg-void-bg-3 text-void-fg-1' : 'bg-void-bg-2 text-void-fg-3'} hover:bg-void-bg-3 shadow-md`}
 					>
-						📋 Plan
+						<ClipboardList size={12} className="mr-1" /> Plan
 					</button>
 				</div>
 			</div>

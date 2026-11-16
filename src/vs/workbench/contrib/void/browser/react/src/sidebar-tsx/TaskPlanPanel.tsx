@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 
 import { useAccessor } from '../util/services.js';
 import { TaskPlan, TaskStatus, getPlanProgress } from '../../../../common/autonomousTask.js';
+import { ClipboardList, Circle, Check, X, AlertTriangle } from 'lucide-react';
 
 export const TaskPlanPanel = () => {
 	const accessor = useAccessor()
@@ -58,18 +59,18 @@ export const TaskPlanPanel = () => {
 		failed: 'text-red-500',
 	}
 
-	const statusIcons: { [key in TaskStatus]: string } = {
-		pending: '○',
-		running: '●',
-		completed: '✓',
-		failed: '✗',
-		blocked: '!',
+	const statusIcons: { [key in TaskStatus]: React.ReactNode } = {
+		pending: <Circle size={10} className="text-void-fg-3" />,
+		running: <Circle size={10} className="text-[#0e70c0] fill-current" />,
+		completed: <Check size={10} className="text-green-500" />,
+		failed: <X size={10} className="text-red-500" />,
+		blocked: <AlertTriangle size={10} className="text-orange-500" />,
 	}
 
 	return (
 		<div className='p-3 space-y-3 min-w-0'>
 			<div className='flex items-center gap-2 mb-2'>
-				<h2 className='text-sm font-semibold text-void-fg-1'>📋 Task Plan</h2>
+				<h2 className='text-sm font-semibold text-void-fg-1'><ClipboardList size={14} className="mr-1" /> Task Plan</h2>
 				{taskPlan && (
 					<span className={`text-xs font-medium ${statusColors[taskPlan.overallStatus]}`}>
 						{statusIcons[taskPlan.overallStatus]} {taskPlan.overallStatus}

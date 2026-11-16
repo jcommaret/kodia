@@ -23,7 +23,7 @@ import { ICommandService } from '../../../../../../../platform/commands/common/c
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '../../../../common/modelCapabilities.js';
 import { estimateTokens } from '../../../../common/tokenizer.js';
-import { AlertTriangle, File, Ban, Check, ChevronRight, FileIcon, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText } from 'lucide-react';
+import { AlertTriangle, File, Ban, Check, ChevronRight, Circle, FileIcon, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { dataURLOfChatImage } from '../util/chatImages.js';
 import { useAttachChatFiles } from '../util/chatAttachments.js';
@@ -3222,12 +3222,12 @@ const TaskPlanSidebarDisplay = () => {
 		failed: 'text-red-500',
 	}
 
-	const statusIcons: { [key in TaskStatus]: string } = {
-		pending: '○',
-		running: '●',
-		completed: '✓',
-		failed: '✗',
-		blocked: '!',
+	const statusIcons: { [key in TaskStatus]: React.ReactNode } = {
+		pending: <Circle size={10} className="text-void-fg-3" />,
+		running: <Circle size={10} className="text-[#0e70c0] fill-current" />,
+		completed: <Check size={10} className="text-green-500" />,
+		failed: <X size={10} className="text-red-500" />,
+		blocked: <AlertTriangle size={10} className="text-orange-500" />,
 	}
 
 	const { completed, total, percent } = getPlanProgress(taskPlan)

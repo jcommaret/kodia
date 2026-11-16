@@ -9,7 +9,7 @@ import { SEARCH_PROVIDER_DISPLAY_INFO } from '../../../../common/webSearchSettin
 import { useAccessor } from '../util/services.js';
 import { VoidButtonBgDarken, VoidSwitch } from '../util/inputs.js';
 import { ChatMarkdownRender } from '../markdown/ChatMarkdownRender.js';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, Eye, EyeOff } from 'lucide-react';
 
 interface SearchProviderCardProps {
 	providerName: WebSearchProviderName;
@@ -130,7 +130,7 @@ export const SearchProviderCard = ({
 								className='text-void-fg-4 hover:text-void-fg-2 shrink-0'
 								aria-label={showKey ? 'Hide key' : 'Show key'}
 							>
-								{showKey ? '👁' : '🙈'}
+								{showKey ? <Eye size={14} /> : <EyeOff size={14} />}
 							</button>
 							{showWarning && (
 								<span className='text-xs text-yellow-500 shrink-0'>Key seems short</span>

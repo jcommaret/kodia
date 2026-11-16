@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ProxyChannel } from '../../../../../../../base/parts/ipc/common/ipc.js';
 import { ICodeIndexService, SearchResult } from '../../../common/codeIndexServiceTypes.js';
 import { useAccessor } from '../util/services.js';
+import { Search, Folder, Puzzle } from 'lucide-react';
 
 export const CodeIndexPanel = () => {
 	const accessor = useAccessor()
@@ -102,7 +103,7 @@ export const CodeIndexPanel = () => {
 	return (
 		<div className='p-3 space-y-3 min-w-0'>
 			<div className='flex items-center gap-2 mb-2'>
-				<h2 className='text-sm font-semibold text-void-fg-1'>🔍 Code Index</h2>
+				<h2 className='text-sm font-semibold text-void-fg-1'><Search size={14} className="mr-1" /> Code Index</h2>
 				{indexing && <span className='text-xs text-void-fg-3 animate-pulse'>Indexing...</span>}
 			</div>
 
@@ -114,8 +115,8 @@ export const CodeIndexPanel = () => {
 
 			{indexStats && (
 				<div className='flex flex-wrap gap-2 text-xs text-void-fg-3 bg-void-bg-2 p-2 rounded'>
-					<span>📁 Files: {indexStats.totalFiles}</span>
-					<span>🧩 Chunks: {indexStats.totalChunks}</span>
+					<span><Folder size={10} className="mr-1" /> Files: {indexStats.totalFiles}</span>
+					<span><Puzzle size={10} className="mr-1" /> Chunks: {indexStats.totalChunks}</span>
 					<span>{indexStats.lastIndexed ? `Last: ${new Date(indexStats.lastIndexed).toLocaleTimeString()}` : 'Never'}</span>
 				</div>
 			)}

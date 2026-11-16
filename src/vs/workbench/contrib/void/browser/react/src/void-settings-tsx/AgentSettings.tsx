@@ -14,6 +14,7 @@ import { TaskPlan, TaskStatus, getPlanProgress } from '../../../../common/autono
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { ITaskPlanService } from '../../../../common/taskPlanService.js';
 import { GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
+import { Circle, Check, X, AlertTriangle } from 'lucide-react';
 
 // whether the agent runs this kind of tool without asking, and a setter
 const useAutoApprove = (approvalType: ToolApprovalType) => {
@@ -49,6 +50,7 @@ const labelOfApprovalType: { [T in ToolApprovalType]: string } = {
 	'debug': 'Debug without asking',
 	'web pages': 'Fetch web pages without asking',
 	'web_search': 'Fetch web pages without asking',
+	'browser': 'Browser automation without asking',
 	'MCP tools': 'Use MCP tools without asking',
 	'git': 'Git operations without asking',
 	'test': 'Test operations without asking',
@@ -95,7 +97,7 @@ export const AutonomyModeSelector = () => {
 							}
 						`}
 					>
-						{isActive ? '●' : '○'}
+						{isActive ? <Circle size={10} className="text-[#0e70c0] fill-current" /> : <Circle size={10} className="text-void-fg-3" />}
 						<div className='font-medium'>{info.title}</div>
 						<span className='text-void-fg-3 text-xs'>{info.desc}</span>
 					</button>
@@ -144,12 +146,12 @@ const TaskPlanDisplay = () => {
 		failed: 'text-red-500',
 	}
 
-	const statusIcons: { [key in TaskStatus]: string } = {
-		pending: '○',
-		running: '●',
-		completed: '✓',
-		failed: '✗',
-		blocked: '!',
+	const statusIcons: { [key in TaskStatus]: React.ReactNode } = {
+		pending: <Circle size={10} className="text-void-fg-3" />,
+		running: <Circle size={10} className="text-[#0e70c0] fill-current" />,
+		completed: <Check size={10} className="text-green-500" />,
+		failed: <X size={10} className="text-red-500" />,
+		blocked: <AlertTriangle size={10} className="text-orange-500" />,
 	}
 
 	const { completed, total, percent } = getPlanProgress(taskPlan)

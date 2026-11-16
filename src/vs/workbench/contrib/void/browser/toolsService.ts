@@ -39,6 +39,7 @@ import { TaskStatus, getPlanProgress, formatTaskPlanForLLM } from '../common/aut
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
 import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
+import { IApiMainService } from '../common/apiServiceTypes.js'
 import { IWebSearchService, SearchRequest } from '../common/webSearchTypes.js'
 import { INotebookService } from '../../notebook/common/notebookService.js'
 import { INotebookKernelService } from '../../notebook/common/notebookKernelService.js'
@@ -1462,16 +1463,14 @@ export class ToolsService implements IToolsService {
 
 			// --- Direct API testing ---
 			api_request: async ({ url, method, headers, body, timeout_ms: timeoutMs }) => {
-				// API requests need main process access (Node fetch/http).
-				// For now, use browser automation tools (browser_navigate,
-				// browser_inspect_page) to test web UIs. Full api_request
-				// main-process support can be added by extending
-				// electron-main/webFetchMainService.ts.
-				throw new Error('api_request requires a dedicated main-process HTTP service. Use browser_navigate + browser_inspect_page to test web UIs through the visible browser.')
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				const result = await apiService.apiRequest({ url, method, headers, body, timeoutMs: timeoutMs })
+				return { result: { ok: result.ok, status: result.status, status_text: result.statusText, headers: result.headers, body: result.body, body_type: result.bodyType, url: result.url, method: result.method, elapsed_ms: result.elapsedMs } }
 			},
 			port_check: async ({ port }) => {
-				// Port checking needs main process access (Node net module).
-				throw new Error('port_check requires a dedicated main-process service. Use dev_server_start to launch servers and check if they respond.')
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				const result = await apiService.portCheck({ port })
+				return { result: { port: result.port, in_use: result.inUse, process: result.process } }
 			},
 
 			// --- Debugger automation ---

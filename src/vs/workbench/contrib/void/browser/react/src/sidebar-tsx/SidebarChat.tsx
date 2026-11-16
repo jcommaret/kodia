@@ -479,43 +479,42 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 				)}
 			</div>
 
-			{/* Bottom row */}
-			<div className='flex flex-row justify-between items-end gap-1'>
-				{showModelDropdown && (
-					<div className='flex flex-col gap-y-1'>
-						<ReasoningOptionSlider featureName={featureName} />
+			{/* Bottom row - Model & Mode selectors */}
+			{showModelDropdown && (
+				<div className='flex flex-col gap-y-1 w-full'>
+					<ReasoningOptionSlider featureName={featureName} />
 
-						<div className='flex items-center flex-wrap gap-x-2 gap-y-1 text-nowrap '>
-							{enableAttachButton && <AttachFilesButton />}
-							{featureName === 'Chat' && <ChatModeDropdown className='text-xs text-void-fg-3 bg-void-bg-1 border border-void-border-2 rounded py-0.5 px-1' />}
-							<ModelDropdown featureName={featureName} className='text-xs text-void-fg-3 bg-void-bg-1 rounded' />
-						</div>
+					<div className='flex items-center flex-wrap gap-x-2 gap-y-1 text-nowrap w-full'>
+						{enableAttachButton && <AttachFilesButton />}
+						{featureName === 'Chat' && <ChatModeDropdown className='text-xs text-void-fg-3 bg-void-bg-1 border border-void-border-2 rounded py-0.5 px-1' />}
+						<ModelDropdown featureName={featureName} className='text-xs text-void-fg-3 bg-void-bg-1 rounded flex-1 min-w-[120px]' />
 					</div>
-				)}
+				</div>
+			)}
 
-				<div className="flex flex-col items-end gap-y-1">
-
+			{/* Bottom row - Token count & Send button */}
+			<div className='flex flex-row justify-between items-end gap-1 w-full mt-1'>
+				<div className="flex flex-col items-start gap-y-0.5">
 					{tokenCount !== undefined && tokenCount > 0 && (
 						<span className='text-void-fg-3 text-[10px] leading-none select-none pointer-events-none'>
 							{contextWindow ? `${formatTokenCount(tokenCount)} / ${formatTokenCount(contextWindow)}` : `${formatTokenCount(tokenCount)} tokens`}
 						</span>
 					)}
-
-					<div className="flex items-center gap-2">
-
-						{isStreaming && loadingIcon}
-
-						{isStreaming ? (
-							<ButtonStop onClick={onAbort} />
-						) : (
-							<ButtonSubmit
-								onClick={onSubmit}
-								disabled={isDisabled}
-							/>
-						)}
-					</div>
 				</div>
 
+				<div className="flex items-center gap-2">
+
+					{isStreaming && loadingIcon}
+
+					{isStreaming ? (
+						<ButtonStop onClick={onAbort} />
+					) : (
+						<ButtonSubmit
+							onClick={onSubmit}
+							disabled={isDisabled}
+						/>
+					)}
+				</div>
 			</div>
 		</div>
 	);
@@ -3196,6 +3195,8 @@ const TaskPlanSidebarDisplay = () => {
 	const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null)
 
 	useEffect(() => {
+		if (!taskPlanService) return
+
 		// Initial load
 		const thread = chatThreadService.getCurrentThread()
 		if (thread) {

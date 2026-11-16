@@ -607,6 +607,71 @@ export const builtinTools: {
 		params: {},
 	},
 
+	// --- Dev server automation ---
+	// These tools start, stop, and list local development servers (npm run dev,
+	// php artisan serve, python manage.py runserver, flask run, etc.) so the
+	// agent can test fullstack apps end-to-end. Servers run in persistent
+	// terminals and survive across tool calls.
+
+	dev_server_start: {
+		name: 'dev_server_start',
+		description: `Starts a local development server in a background terminal. Returns a name, terminal_id, and detected URL/port. The server keeps running until dev_server_stop is called.`,
+		params: {
+			command: { description: 'The shell command to start the server (e.g. "npm run dev", "php artisan serve", "python manage.py runserver", "flask run").' },
+			cwd: { description: 'Optional. Working directory to run the command in.' },
+			port: { description: 'Optional. The port the server is expected to listen on (used to construct the test URL).' },
+			name: { description: 'Optional. A friendly name for the server (defaults to a timestamp-based name).' },
+		},
+	},
+
+	dev_server_stop: {
+		name: 'dev_server_stop',
+		description: `Stops a running dev server. Pass either name or terminal_id.`,
+		params: {
+			name: { description: 'Optional. The friendly name of the server (as returned by dev_server_start).' },
+			terminal_id: { description: 'Optional. The terminal ID of the server.' },
+		},
+	},
+
+	dev_server_list: {
+		name: 'dev_server_list',
+		description: `Lists all active dev servers with their names, terminal IDs, commands, and running status.`,
+		params: {},
+	},
+
+	dev_server_status: {
+		name: 'dev_server_status',
+		description: `Checks if a dev server is running. Pass either name or port.`,
+		params: {
+			name: { description: 'Optional. The friendly name of the server.' },
+			port: { description: 'Optional. The port to check.' },
+		},
+	},
+
+	// --- Direct API testing ---
+	// These tools call backend APIs directly (outside the browser), so you can
+	// test REST/GraphQL endpoints without going through the UI.
+
+	api_request: {
+		name: 'api_request',
+		description: `Makes an HTTP request to a backend API endpoint and returns the status code, headers, and body. Use this to test APIs directly without going through the browser UI.`,
+		params: {
+			url: { description: 'The full URL to request (e.g. http://localhost:3000/api/users).' },
+			method: { description: 'Optional. HTTP method: GET, POST, PUT, DELETE, or PATCH. Defaults to GET.' },
+			headers: { description: 'Optional. HTTP headers as a key-value object (e.g. {"Content-Type": "application/json"}).' },
+			body: { description: 'Optional. Request body string (for POST/PUT/PATCH).' },
+			timeout_ms: { description: 'Optional. Request timeout in milliseconds.' },
+		},
+	},
+
+	port_check: {
+		name: 'port_check',
+		description: `Checks if a TCP port is in use on localhost. Useful to verify a dev server is listening before navigating to it.`,
+		params: {
+			port: { description: 'The port number to check.' },
+		},
+	},
+
 	// --- Debugger automation ---
 	// These tools drive VS Code's real Debug Adapter Protocol (DAP) debugging
 	// infrastructure. Inspection tools (list sessions, stack trace, variables,

@@ -289,6 +289,20 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'browser_shutdown':
 			return 'low';
 
+		// Dev server automation - starting/stopping servers is terminal-level
+		case 'dev_server_start':
+		case 'dev_server_stop':
+			return 'terminal';
+		case 'dev_server_list':
+		case 'dev_server_status':
+			return 'low';
+
+		// Direct API testing - reading from APIs is web-page-level
+		case 'api_request':
+			return 'web pages';
+		case 'port_check':
+			return 'terminal';
+
 		// Debugger automation - inspection is low risk.
 		case 'debug_list_configurations':
 		case 'debug_list_sessions':

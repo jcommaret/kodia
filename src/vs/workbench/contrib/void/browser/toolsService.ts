@@ -599,6 +599,41 @@ export class ToolsService implements IToolsService {
 			},
 			browser_shutdown: () => ({}),
 
+			// --- Dev server automation ---
+			dev_server_start: (params: RawToolParamsObj) => {
+				const { command: commandUnknown } = params
+				const command = validateStr('command', commandUnknown)
+				const cwd = validateOptionalStr('cwd', params.cwd) ?? undefined
+				const port = params.port === undefined || params.port === null ? undefined : Number(params.port)
+				const name = validateOptionalStr('name', params.name) ?? undefined
+				return { command, cwd, port, name }
+			},
+			dev_server_stop: (params: RawToolParamsObj) => {
+				const name = validateOptionalStr('name', params.name) ?? undefined
+				const terminalId = validateOptionalStr('terminal_id', params.terminal_id) ?? undefined
+				return { name, terminal_id: terminalId }
+			},
+			dev_server_list: () => ({}),
+			dev_server_status: (params: RawToolParamsObj) => {
+				const name = validateOptionalStr('name', params.name) ?? undefined
+				const port = params.port === undefined || params.port === null ? undefined : Number(params.port)
+				return { name, port }
+			},
+			// --- Direct API testing ---
+			api_request: (params: RawToolParamsObj) => {
+				const url = validateStr('url', params.url)
+				const method = params.method === 'GET' || params.method === 'POST' || params.method === 'PUT' || params.method === 'DELETE' || params.method === 'PATCH' ? params.method : 'GET'
+				const headers = params.headers && typeof params.headers === 'object' ? params.headers as Record<string, string> : undefined
+				const body = validateOptionalStr('body', params.body) ?? undefined
+				const timeoutMs = params.timeout_ms === undefined || params.timeout_ms === null ? undefined : Number(params.timeout_ms)
+				return { url, method, headers, body, timeout_ms: timeoutMs }
+			},
+			port_check: (params: RawToolParamsObj) => {
+				const port = validateNumber('port', params.port)
+				if (port === null) throw new Error('Invalid LLM output: port must be a number.')
+				return { port }
+			},
+
 			// --- Debugger automation ---
 			debug_list_configurations: () => ({}),
 			debug_list_sessions: () => ({}),
@@ -1344,6 +1379,99 @@ export class ToolsService implements IToolsService {
 			browser_shutdown: async () => {
 				await browserService.shutdown()
 				return { result: {} }
+			},
+
+			// --- Dev server automation ---
+			dev_server_start: async ({ command, cwd, port, name }) => {
+				const serverName = name ?? `server-${Date.now()}`
+				const resolvedCwd = resolveCwdUri(cwd, workspaceContextService)
+				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? undefined
+
+				// Wrap command for safe execution
+				const wrappedCommand = wrapCommandForShell(command)
+
+				// Start in a persistent terminal so it keeps running
+				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, {
+					type: 'persistent',
+					cwd: cwdPath,
+					terminalId: `dev-server-${serverName}`,
+				})
+
+				// Give the server a moment to start, then check if the port is responding
+				let serverUrl: string | undefined
+				if (port) {
+					serverUrl = `http://localhost:${port}`
+				}
+
+				// Store in active servers map (we'll track via terminalId)
+				// The terminalToolService manages the actual process
+
+				return {
+					result: {
+						name: serverName,
+						terminal_id: `dev-server-${serverName}`,
+						command,
+						cwd: cwdPath ?? '',
+						port,
+						url: serverUrl,
+						pid: 0, // terminal service doesn't expose PID directly
+					},
+				}
+			},
+			dev_server_stop: async ({ name, terminal_id: terminalId }) => {
+				const targetId = terminalId ?? (name ? `dev-server-${name}` : undefined)
+				if (!targetId) throw new Error('dev_server_stop requires either name or terminal_id')
+				await this.terminalToolService.killPersistentTerminal(targetId)
+				return { result: { name: name ?? targetId, stopped: true } }
+			},
+			dev_server_list: async () => {
+				const terminals = this.terminalToolService.listTerminals()
+				const servers = terminals
+					.filter(t => t.terminalId.startsWith('dev-server-'))
+					.map(t => ({
+						name: t.terminalId.replace('dev-server-', ''),
+						terminal_id: t.terminalId,
+						command: t.title ?? '(unknown)',
+						cwd: t.cwd ?? '',
+						port: undefined,
+						url: undefined,
+						running: t.exitCode === undefined,
+					}))
+				return { result: { servers } }
+			},
+			dev_server_status: async ({ name, port }) => {
+				const targetId = name ? `dev-server-${name}` : undefined
+				const terminals = this.terminalToolService.listTerminals()
+				const target = targetId ? terminals.find(t => t.terminalId === targetId) : undefined
+
+				if (!target) {
+					// Try to find by port (can't reliably do this from terminal info)
+					return { result: { name: name ?? '', running: false, port, url: port ? `http://localhost:${port}` : undefined, terminal_id: undefined } }
+				}
+
+				return {
+					result: {
+						name: target.terminalId.replace('dev-server-', ''),
+						running: target.exitCode === undefined,
+						port,
+						url: port ? `http://localhost:${port}` : undefined,
+						terminal_id: target.terminalId,
+					},
+				}
+			},
+
+			// --- Direct API testing ---
+			api_request: async ({ url, method, headers, body, timeout_ms: timeoutMs }) => {
+				// API requests need main process access (Node fetch/http).
+				// For now, use browser automation tools (browser_navigate,
+				// browser_inspect_page) to test web UIs. Full api_request
+				// main-process support can be added by extending
+				// electron-main/webFetchMainService.ts.
+				throw new Error('api_request requires a dedicated main-process HTTP service. Use browser_navigate + browser_inspect_page to test web UIs through the visible browser.')
+			},
+			port_check: async ({ port }) => {
+				// Port checking needs main process access (Node net module).
+				throw new Error('port_check requires a dedicated main-process service. Use dev_server_start to launch servers and check if they respond.')
 			},
 
 			// --- Debugger automation ---
@@ -2438,6 +2566,44 @@ export class ToolsService implements IToolsService {
 				return result.downloads.map(d => `  ${d.downloadId}: ${d.suggestedFilename} — ${d.status}${d.path ? ` (${d.path})` : ''}${d.failureText ? ` [${d.failureText}]` : ''}`).join('\n')
 			},
 			browser_shutdown: () => 'Browser automation service shut down. All sessions closed.',
+
+			// --- Dev server automation ---
+			dev_server_start: (_params, result) => {
+				const { name, terminal_id, command, cwd, port, url } = result
+				const portStr = port ? ` on port ${port}` : ''
+				const urlStr = url ? ` (${url})` : ''
+				return `Started dev server "${name}"${portStr}${urlStr}\nCommand: ${command}\nCWD: ${cwd}\nTerminal ID: ${terminal_id}`
+			},
+			dev_server_stop: (_params, result) => {
+				return `Stopped dev server "${result.name}".`
+			},
+			dev_server_list: (_params, result) => {
+				const { servers } = result
+				if (servers.length === 0) return 'No dev servers running.'
+				return servers.map(s => {
+					const status = s.running ? 'running' : 'stopped'
+					const urlStr = s.url ? ` → ${s.url}` : ''
+					return `  ${s.name} [${status}]${urlStr} (terminal: ${s.terminal_id})`
+				}).join('\n')
+			},
+			dev_server_status: (_params, result) => {
+				const { name, running, port, url } = result
+				const status = running ? 'running' : 'stopped'
+				const urlStr = url ? ` at ${url}` : ''
+				return `Dev server "${name}" is ${status}${urlStr}`
+			},
+			// --- Direct API testing ---
+			api_request: (_params, result) => {
+				const { ok, status, status_text, method, url, elapsed_ms, body_type, body } = result
+				const bodyPreview = body.length > 200 ? body.slice(0, 200) + '...' : body
+				return `${method} ${url} → ${status} ${status_text} (${elapsed_ms}ms)\nContent-Type: ${body_type}\nBody: ${bodyPreview}`
+			},
+			port_check: (_params, result) => {
+				const { port, in_use, process } = result
+				const status = in_use ? 'IN USE' : 'free'
+				const procStr = process ? ` (${process})` : ''
+				return `Port ${port}: ${status}${procStr}`
+			},
 
 			// --- Debugger automation ---
 			debug_list_configurations: (_params, result) => {

@@ -116,6 +116,14 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'browser_download': 'browser',
 	'browser_list_downloads': 'browser',
 	'browser_shutdown': 'browser',
+	// Dev server automation - starting/stopping local dev servers
+	'dev_server_start': 'terminal',
+	'dev_server_stop': 'terminal',
+	'dev_server_list': 'terminal',
+	'dev_server_status': 'terminal',
+	// Direct API testing - calling backend APIs outside the browser
+	'api_request': 'web pages',
+	'port_check': 'terminal',
 	// Debugger automation - inspection is low risk; session/breakpoint/execution
 	// control and expression evaluation are medium risk.
 	'debug_list_configurations': 'debug',
@@ -204,6 +212,14 @@ export type BuiltinToolCallParams = {
 	'browser_download': { sessionId: string, tabId: string, url: string },
 	'browser_list_downloads': { sessionId: string },
 	'browser_shutdown': {},
+	// Dev server automation
+	'dev_server_start': { command: string, cwd?: string | null, port?: number, name?: string },
+	'dev_server_stop': { name?: string, terminal_id?: string },
+	'dev_server_list': {},
+	'dev_server_status': { name?: string, port?: number },
+	// Direct API testing
+	'api_request': { url: string, method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH', headers?: Record<string, string>, body?: string, timeout_ms?: number },
+	'port_check': { port: number },
 	// Debugger automation
 	'debug_list_configurations': {},
 	'debug_list_sessions': {},
@@ -332,8 +348,15 @@ export type BuiltinToolResultType = {
 	'browser_download': { downloadId: string, url: string, suggestedFilename: string, status: 'in_progress' | 'completed' | 'failed' | 'cancelled', path?: string, failureText?: string },
 	'browser_list_downloads': { downloads: Array<{ downloadId: string, url: string, suggestedFilename: string, status: 'in_progress' | 'completed' | 'failed' | 'cancelled', path?: string, failureText?: string }> },
 	'browser_shutdown': {},
+	// Dev server automation results
+	'dev_server_start': { name: string, terminal_id: string, command: string, cwd: string, port?: number, url?: string, pid: number },
+	'dev_server_stop': { name: string, stopped: boolean },
+	'dev_server_list': { servers: Array<{ name: string, terminal_id: string, command: string, cwd: string, port?: number, url?: string, running: boolean }> },
+	'dev_server_status': { name: string, running: boolean, port?: number, url?: string, terminal_id?: string },
+	// Direct API testing results
+	'api_request': { ok: boolean, status: number, status_text: string, headers: Record<string, string>, body: string, body_type: 'json' | 'text' | 'other', url: string, method: string, elapsed_ms: number },
+	'port_check': { port: number, in_use: boolean, process?: string },
 	// Debugger automation results
-	'debug_list_configurations': { configurations: DebugConfiguration[] },
 	'debug_list_sessions': { sessions: DebugSessionInfo[] },
 	'debug_get_session_status': DebugSessionInfo,
 	'debug_list_threads': { threads: DebugThread[] },

@@ -64,6 +64,15 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	// Direct API testing
 	'api_request',
 	'port_check',
+	// Cookie management
+	'api_get_cookies',
+	'api_set_cookies',
+	'api_add_cookie',
+	'api_clear_cookies',
+	// OAuth2
+	'oauth2_generate_auth_url',
+	'oauth2_exchange_code',
+	'oauth2_refresh_token',
 	// Debugger automation
 	'debug_list_configurations',
 	'debug_list_sessions',
@@ -327,6 +336,19 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'api_request':
 			return 'low';
 		case 'port_check':
+			return 'low';
+
+		// Cookie management - reading/writing cookies is low risk
+		case 'api_get_cookies':
+		case 'api_set_cookies':
+		case 'api_add_cookie':
+		case 'api_clear_cookies':
+			return 'low';
+
+		// OAuth2 - token exchange is low risk (no state changes on server)
+		case 'oauth2_generate_auth_url':
+		case 'oauth2_exchange_code':
+		case 'oauth2_refresh_token':
 			return 'low';
 
 		// Debugger automation - inspection is low risk.

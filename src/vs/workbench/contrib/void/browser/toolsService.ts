@@ -657,12 +657,95 @@ export class ToolsService implements IToolsService {
 				const headers = params.headers && typeof params.headers === 'object' ? params.headers as Record<string, string> : undefined
 				const body = validateOptionalStr('body', params.body) ?? undefined
 				const timeoutMs = params.timeout_ms === undefined || params.timeout_ms === null ? undefined : Number(params.timeout_ms)
-				return { url, method, headers, body, timeout_ms: timeoutMs }
+				const useCookieJar = params.use_cookie_jar === true
+				const cookies = params.cookies && Array.isArray(params.cookies) ? params.cookies.map((c: any) => ({
+					name: validateStr('name', c.name),
+					value: validateStr('value', c.value),
+					domain: validateStr('domain', c.domain),
+					path: validateStr('path', c.path),
+					expires: c.expires === undefined || c.expires === null ? undefined : Number(c.expires),
+					httpOnly: c.httpOnly === true,
+					secure: c.secure === true,
+				})) : undefined
+				const oauth2Tokens = params.oauth2_tokens && typeof params.oauth2_tokens === 'object' ? {
+					access_token: validateStr('access_token', params.oauth2_tokens.access_token),
+					refresh_token: params.oauth2_tokens.refresh_token ?? undefined,
+					expires_in: params.oauth2_tokens.expires_in === undefined || params.oauth2_tokens.expires_in === null ? undefined : Number(params.oauth2_tokens.expires_in),
+					token_type: params.oauth2_tokens.token_type ?? undefined,
+					scope: params.oauth2_tokens.scope ?? undefined,
+				} : undefined
+				const multipartBody = params.multipart_body && typeof params.multipart_body === 'object' ? {
+					fields: params.multipart_body.fields && Array.isArray(params.multipart_body.fields) ? params.multipart_body.fields.map((f: any) => ({
+						name: validateStr('name', f.name),
+						value: validateStr('value', f.value),
+					})) : [],
+					files: params.multipart_body.files && Array.isArray(params.multipart_body.files) ? params.multipart_body.files.map((f: any) => ({
+						name: validateStr('name', f.name),
+						filename: validateStr('filename', f.filename),
+						content_type: validateStr('content_type', f.content_type),
+						content: validateStr('content', f.content),
+					})) : [],
+				} : undefined
+				return { url, method, headers, body, timeout_ms: timeoutMs, cookies, use_cookie_jar: useCookieJar, oauth2_tokens: oauth2Tokens, multipart_body: multipartBody }
 			},
 			port_check: (params: RawToolParamsObj) => {
 				const port = validateNumber(params.port, { default: null })
 				if (port === null) throw new Error('Invalid LLM output: port must be a number.')
 				return { port }
+			},
+			// Cookie management
+			api_get_cookies: () => ({}),
+			api_set_cookies: (params: RawToolParamsObj) => {
+				const cookies = params.cookies && Array.isArray(params.cookies) ? params.cookies.map((c: any) => ({
+					name: validateStr('name', c.name),
+					value: validateStr('value', c.value),
+					domain: validateStr('domain', c.domain),
+					path: validateStr('path', c.path),
+					expires: c.expires === undefined || c.expires === null ? undefined : Number(c.expires),
+					httpOnly: c.httpOnly === true,
+					secure: c.secure === true,
+				})) : []
+				return { cookies }
+			},
+			api_add_cookie: (params: RawToolParamsObj) => {
+				const cookie = params.cookie && typeof params.cookie === 'object' ? {
+					name: validateStr('name', params.cookie.name),
+					value: validateStr('value', params.cookie.value),
+					domain: validateStr('domain', params.cookie.domain),
+					path: validateStr('path', params.cookie.path),
+					expires: params.cookie.expires === undefined || params.cookie.expires === null ? undefined : Number(params.cookie.expires),
+					httpOnly: params.cookie.httpOnly === true,
+					secure: params.cookie.secure === true,
+				} : null
+				if (!cookie) throw new Error('Invalid LLM output: cookie object is required.')
+				return { cookie }
+			},
+			api_clear_cookies: () => ({}),
+			// OAuth2
+			oauth2_generate_auth_url: (params: RawToolParamsObj) => {
+				const clientId = validateStr('client_id', params.client_id)
+				const clientSecret = validateStr('client_secret', params.client_secret)
+				const authorizationUrl = validateStr('authorization_url', params.authorization_url)
+				const tokenUrl = validateStr('token_url', params.token_url)
+				const redirectUri = validateStr('redirect_uri', params.redirect_uri)
+				const scope = validateOptionalStr('scope', params.scope)
+				return { client_id: clientId, client_secret: clientSecret, authorization_url: authorizationUrl, token_url: tokenUrl, redirect_uri: redirectUri, scope }
+			},
+			oauth2_exchange_code: (params: RawToolParamsObj) => {
+				const clientId = validateStr('client_id', params.client_id)
+				const clientSecret = validateStr('client_secret', params.client_secret)
+				const tokenUrl = validateStr('token_url', params.token_url)
+				const redirectUri = validateStr('redirect_uri', params.redirect_uri)
+				const code = validateStr('code', params.code)
+				const codeVerifier = validateOptionalStr('code_verifier', params.code_verifier)
+				return { client_id: clientId, client_secret: clientSecret, token_url: tokenUrl, redirect_uri: redirectUri, code, code_verifier: codeVerifier }
+			},
+			oauth2_refresh_token: (params: RawToolParamsObj) => {
+				const clientId = validateStr('client_id', params.client_id)
+				const clientSecret = validateStr('client_secret', params.client_secret)
+				const tokenUrl = validateStr('token_url', params.token_url)
+				const refreshToken = validateStr('refresh_token', params.refresh_token)
+				return { client_id: clientId, client_secret: clientSecret, token_url: tokenUrl, refresh_token: refreshToken }
 			},
 
 			// --- Debugger automation ---
@@ -1684,15 +1767,52 @@ export class ToolsService implements IToolsService {
 			},
 
 			// --- Direct API testing ---
-			api_request: async ({ url, method, headers, body, timeout_ms: timeoutMs }) => {
+			api_request: async ({ url, method, headers, body, timeout_ms: timeoutMs, cookies, use_cookie_jar: useCookieJar, oauth2_tokens: oauth2Tokens, multipart_body: multipartBody }) => {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
-				const result = await apiService.apiRequest({ url, method, headers, body, timeoutMs: timeoutMs })
-				return { result: { ok: result.ok, status: result.status, status_text: result.statusText, headers: result.headers, body: result.body, body_type: result.bodyType, url: result.url, method: result.method, elapsed_ms: result.elapsedMs } }
+				const result = await apiService.apiRequest({ url, method, headers, body, timeoutMs: timeoutMs, cookies, useCookieJar, oauth2Tokens, multipartBody })
+				return { result: { ok: result.ok, status: result.status, status_text: result.statusText, headers: result.headers, body: result.body, body_type: result.bodyType, url: result.url, method: result.method, elapsed_ms: result.elapsedMs, cookies: result.cookies } }
 			},
 			port_check: async ({ port }) => {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
 				const result = await apiService.portCheck({ port })
 				return { result: { port: result.port, in_use: result.inUse, process: result.process } }
+			},
+			// Cookie management
+			api_get_cookies: async () => {
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				const cookies = await apiService.getCookies()
+				return { result: { cookies } }
+			},
+			api_set_cookies: async ({ cookies }) => {
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				await apiService.setCookies(cookies)
+				return { result: { count: cookies.length } }
+			},
+			api_add_cookie: async ({ cookie }) => {
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				await apiService.addCookie(cookie)
+				return { result: { count: 1 } }
+			},
+			api_clear_cookies: async () => {
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				await apiService.clearCookies()
+				return { result: { cleared: 0 } }
+			},
+			// OAuth2
+			oauth2_generate_auth_url: async ({ client_id, client_secret, authorization_url, token_url, redirect_uri, scope }) => {
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				const result = await apiService.generateAuthUrl({ clientId: client_id, clientSecret: client_secret, authorizationUrl: authorization_url, tokenUrl: token_url, redirectUri: redirect_uri, scope })
+				return { result: { url: result.url, state: result.state, code_verifier: result.codeVerifier } }
+			},
+			oauth2_exchange_code: async ({ client_id, client_secret, token_url, redirect_uri, code, code_verifier: codeVerifier }) => {
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				const result = await apiService.exchangeCodeForTokens({ clientId: client_id, clientSecret: client_secret, tokenUrl: token_url, redirectUri: redirect_uri }, code, codeVerifier)
+				return { result: { access_token: result.accessToken, refresh_token: result.refreshToken, expires_in: result.expiresIn, token_type: result.tokenType, scope: result.scope, created_at: result.createdAt } }
+			},
+			oauth2_refresh_token: async ({ client_id, client_secret, token_url, refresh_token }) => {
+				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
+				const result = await apiService.refreshAccessToken({ clientId: client_id, clientSecret: client_secret, tokenUrl: token_url }, refresh_token)
+				return { result: { access_token: result.accessToken, refresh_token: result.refreshToken, expires_in: result.expiresIn, token_type: result.tokenType, scope: result.scope, created_at: result.createdAt } }
 			},
 
 			// --- Debugger automation ---
@@ -2853,6 +2973,31 @@ export class ToolsService implements IToolsService {
 				const status = in_use ? 'IN USE' : 'free'
 				const procStr = process ? ` (${process})` : ''
 				return `Port ${port}: ${status}${procStr}`
+			},
+			// Cookie management
+			api_get_cookies: (_params, result) => {
+				const { cookies } = result
+				if (cookies.length === 0) return 'No cookies stored.'
+				return `Stored cookies (${cookies.length}):\n${cookies.map(c => `  ${c.name}=${c.value} (${c.domain}${c.path})`).join('\n')}`
+			},
+			api_set_cookies: (_params, result) => {
+				return `Set ${result.count} cookie(s) in jar.`
+			},
+			api_add_cookie: (_params, result) => {
+				return `Added 1 cookie to jar.`
+			},
+			api_clear_cookies: (_params, result) => {
+				return `Cleared ${result.cleared} cookie(s) from jar.`
+			},
+			// OAuth2
+			oauth2_generate_auth_url: (_params, result) => {
+				return `OAuth2 authorization URL:\n${result.url}\nState: ${result.state}\nCode verifier: ${result.code_verifier ?? 'N/A'}`
+			},
+			oauth2_exchange_code: (_params, result) => {
+				return `OAuth2 tokens obtained:\nAccess token: ${result.access_token}\nRefresh token: ${result.refresh_token ?? 'none'}\nExpires in: ${result.expires_in ?? 'unknown'}s\nToken type: ${result.token_type}\nScope: ${result.scope ?? 'none'}\nCreated at: ${result.created_at ?? 'unknown'}`
+			},
+			oauth2_refresh_token: (_params, result) => {
+				return `OAuth2 token refreshed:\nAccess token: ${result.access_token}\nRefresh token: ${result.refresh_token ?? 'none'}\nExpires in: ${result.expires_in ?? 'unknown'}s\nToken type: ${result.token_type}\nScope: ${result.scope ?? 'none'}\nCreated at: ${result.created_at ?? 'unknown'}`
 			},
 
 			// --- Debugger automation ---

@@ -7,6 +7,74 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 
 export const IApiMainService = createDecorator<IApiMainService>('ApiMainService');
 
+// ---------------------------------------------------------------------------
+// Cookie support
+// ---------------------------------------------------------------------------
+
+export type Cookie = {
+	name: string;
+	value: string;
+	domain: string;
+	path: string;
+	expires?: number; // epoch ms
+	httpOnly?: boolean;
+	secure?: boolean;
+	sameSite?: 'strict' | 'lax' | 'none';
+};
+
+export type CookieJar = {
+	cookies: Cookie[];
+};
+
+// ---------------------------------------------------------------------------
+// OAuth2 support
+// ---------------------------------------------------------------------------
+
+export type OAuth2Config = {
+	clientId: string;
+	clientSecret: string;
+	authorizationUrl: string;
+	tokenUrl: string;
+	redirectUri: string;
+	scope?: string;
+	codeChallenge?: string; // PKCE
+	codeVerifier?: string;  // PKCE
+};
+
+export type OAuth2Tokens = {
+	accessToken: string;
+	refreshToken?: string;
+	expiresIn?: number; // seconds
+	tokenType?: string; // e.g. "Bearer"
+	scope?: string;
+	createdAt?: number; // epoch ms
+};
+
+// ---------------------------------------------------------------------------
+// Multipart upload support
+// ---------------------------------------------------------------------------
+
+export type MultipartField = {
+	name: string;
+	value: string;
+};
+
+export type MultipartFile = {
+	name: string;
+	filename: string;
+	contentType: string;
+	content: string; // base64 or raw text
+};
+
+export type MultipartBody = {
+	fields: MultipartField[];
+	files: MultipartFile[];
+};
+
+// ---------------------------------------------------------------------------
+// API service interface
+// ---------------------------------------------------------------------------
+
 export interface IApiMainService {
 	readonly _serviceBrand: undefined;
 
@@ -19,6 +87,10 @@ export interface IApiMainService {
 		headers?: Record<string, string>;
 		body?: string;
 		timeoutMs?: number;
+		cookies?: Cookie[];           // cookies to send (merged with jar)
+		useCookieJar?: boolean;       // automatically store/send cookies from jar
+		oauth2Tokens?: OAuth2Tokens;  // bearer token to send
+		multipartBody?: MultipartBody;// multipart form data upload
 	}): Promise<{
 		ok: boolean;
 		status: number;
@@ -29,10 +101,21 @@ export interface IApiMainService {
 		url: string;
 		method: string;
 		elapsedMs: number;
+		cookies?: Cookie[]; // cookies returned by server (if useCookieJar)
 	}>;
 
+	// --- Cookie management ---
+	getCookies(): Promise<Cookie[]>;
+	setCookies(cookies: Cookie[]): Promise<void>;
+	addCookie(cookie: Cookie): Promise<void>;
+	clearCookies(): Promise<void>;
+
+	// --- OAuth2 ---
+	generateAuthUrl(config: OAuth2Config): Promise<{ url: string; state: string; codeVerifier?: string }>;
+	exchangeCodeForTokens(config: OAuth2Config, code: string, codeVerifier?: string): Promise<OAuth2Tokens>;
+	refreshAccessToken(config: OAuth2Config, refreshToken: string): Promise<OAuth2Tokens>;
+
 	// --- Port checking ---
-	// Checks if a TCP port is in use on localhost.
 	portCheck(opts: { port: number }): Promise<{
 		port: number;
 		inUse: boolean;

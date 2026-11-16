@@ -707,13 +707,17 @@ export const builtinTools: {
 
 	api_request: {
 		name: 'api_request',
-		description: `Makes an HTTP request to a backend API endpoint and returns the status code, headers, and body. Use this to test APIs directly without going through the browser UI.`,
+		description: `Makes an HTTP request to a backend API endpoint and returns the status code, headers, and body. Supports cookies, OAuth2 Bearer tokens, and multipart file uploads. Use this to test APIs directly without going through the browser UI (like Postman).`,
 		params: {
 			url: { description: 'The full URL to request (e.g. http://localhost:3000/api/users).' },
 			method: { description: 'Optional. HTTP method: GET, POST, PUT, DELETE, or PATCH. Defaults to GET.' },
-			headers: { description: 'Optional. HTTP headers as a key-value object (e.g. {"Content-Type": "application/json"}).' },
+			headers: { description: 'Optional. HTTP headers as a key-value object (e.g. {"Content-Type": "application/json", "Authorization": "Bearer <token>"}).' },
 			body: { description: 'Optional. Request body string (for POST/PUT/PATCH).' },
 			timeout_ms: { description: 'Optional. Request timeout in milliseconds.' },
+			cookies: { description: 'Optional. Array of cookies to send with the request. Each has name, value, domain, path, expires, httpOnly, secure.' },
+			use_cookie_jar: { description: 'Optional. If true, automatically store and send cookies from the cookie jar across requests.' },
+			oauth2_tokens: { description: 'Optional. OAuth2 tokens to send as Bearer authorization. Has access_token, refresh_token, expires_in, token_type, scope.' },
+			multipart_body: { description: 'Optional. Multipart form data for file uploads. Has fields (name/value pairs) and files (name, filename, content_type, content).' },
 		},
 	},
 
@@ -722,6 +726,73 @@ export const builtinTools: {
 		description: `Checks if a TCP port is in use on localhost. Useful to verify a dev server is listening before navigating to it.`,
 		params: {
 			port: { description: 'The port number to check.' },
+		},
+	},
+
+	// Cookie management
+	api_get_cookies: {
+		name: 'api_get_cookies',
+		description: `Returns all cookies currently stored in the cookie jar. Use this to inspect cookies captured from previous API responses.`,
+		params: {},
+	},
+
+	api_set_cookies: {
+		name: 'api_set_cookies',
+		description: `Replaces all cookies in the jar with the given list. Useful for restoring a session or setting up authentication state.`,
+		params: {
+			cookies: { description: 'Array of cookie objects, each with name, value, domain, path, expires, httpOnly, secure.' },
+		},
+	},
+
+	api_add_cookie: {
+		name: 'api_add_cookie',
+		description: `Adds a single cookie to the jar. If a cookie with the same name and domain already exists, it is replaced.`,
+		params: {
+			cookie: { description: 'Cookie object with name, value, domain, path, expires, httpOnly, secure.' },
+		},
+	},
+
+	api_clear_cookies: {
+		name: 'api_clear_cookies',
+		description: `Removes all cookies from the jar. Useful for starting a fresh session.`,
+		params: {},
+	},
+
+	// OAuth2
+	oauth2_generate_auth_url: {
+		name: 'oauth2_generate_auth_url',
+		description: `Generates an OAuth2 authorization URL for the authorization code flow. The user visits this URL to grant access. Returns the URL, state, and PKCE code_verifier.`,
+		params: {
+			client_id: { description: 'OAuth2 client ID.' },
+			client_secret: { description: 'OAuth2 client secret.' },
+			authorization_url: { description: 'The OAuth2 authorization endpoint URL.' },
+			token_url: { description: 'The OAuth2 token endpoint URL.' },
+			redirect_uri: { description: 'The redirect URI registered with the OAuth provider.' },
+			scope: { description: 'Optional. Space-separated list of scopes to request.' },
+		},
+	},
+
+	oauth2_exchange_code: {
+		name: 'oauth2_exchange_code',
+		description: `Exchanges an authorization code for OAuth2 access and refresh tokens. Call this after the user has granted access and you have the code from the redirect.`,
+		params: {
+			client_id: { description: 'OAuth2 client ID.' },
+			client_secret: { description: 'OAuth2 client secret.' },
+			token_url: { description: 'The OAuth2 token endpoint URL.' },
+			redirect_uri: { description: 'The same redirect URI used in authorization.' },
+			code: { description: 'The authorization code from the redirect.' },
+			code_verifier: { description: 'Optional. PKCE code verifier if PKCE was used.' },
+		},
+	},
+
+	oauth2_refresh_token: {
+		name: 'oauth2_refresh_token',
+		description: `Refreshes an OAuth2 access token using a refresh token. Returns new access and refresh tokens.`,
+		params: {
+			client_id: { description: 'OAuth2 client ID.' },
+			client_secret: { description: 'OAuth2 client secret.' },
+			token_url: { description: 'The OAuth2 token endpoint URL.' },
+			refresh_token: { description: 'The refresh token to exchange.' },
 		},
 	},
 

@@ -129,6 +129,15 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	// Direct API testing - calling backend APIs outside the browser
 	'api_request': 'web pages',
 	'port_check': 'terminal',
+	// Cookie management
+	'api_get_cookies': 'web pages',
+	'api_set_cookies': 'web pages',
+	'api_add_cookie': 'web pages',
+	'api_clear_cookies': 'web pages',
+	// OAuth2
+	'oauth2_generate_auth_url': 'web pages',
+	'oauth2_exchange_code': 'web pages',
+	'oauth2_refresh_token': 'web pages',
 	// Debugger automation - inspection is low risk; session/breakpoint/execution
 	// control and expression evaluation are medium risk.
 	'debug_list_configurations': 'debug',
@@ -229,8 +238,17 @@ export type BuiltinToolCallParams = {
 	'dev_server_list': {},
 	'dev_server_status': { name?: string, port?: number },
 	// Direct API testing
-	'api_request': { url: string, method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH', headers?: Record<string, string>, body?: string, timeout_ms?: number },
+	'api_request': { url: string, method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH', headers?: Record<string, string>, body?: string, timeout_ms?: number, cookies?: Array<{ name: string, value: string, domain: string, path: string, expires?: number, httpOnly?: boolean, secure?: boolean }>, use_cookie_jar?: boolean, oauth2_tokens?: { access_token: string, refresh_token?: string, expires_in?: number, token_type?: string, scope?: string }, multipart_body?: { fields: Array<{ name: string, value: string }>, files: Array<{ name: string, filename: string, content_type: string, content: string }> } },
 	'port_check': { port: number },
+	// Cookie management
+	'api_get_cookies': {},
+	'api_set_cookies': { cookies: Array<{ name: string, value: string, domain: string, path: string, expires?: number, httpOnly?: boolean, secure?: boolean }> },
+	'api_add_cookie': { cookie: { name: string, value: string, domain: string, path: string, expires?: number, httpOnly?: boolean, secure?: boolean } },
+	'api_clear_cookies': {},
+	// OAuth2
+	'oauth2_generate_auth_url': { client_id: string, client_secret: string, authorization_url: string, token_url: string, redirect_uri: string, scope?: string },
+	'oauth2_exchange_code': { client_id: string, client_secret: string, token_url: string, redirect_uri: string, code: string, code_verifier?: string },
+	'oauth2_refresh_token': { client_id: string, client_secret: string, token_url: string, refresh_token: string },
 	// Debugger automation
 	'debug_list_configurations': {},
 	'debug_list_sessions': {},
@@ -371,8 +389,17 @@ export type BuiltinToolResultType = {
 	'dev_server_list': { servers: Array<{ name: string, terminal_id: string, command: string, cwd: string, port?: number, url?: string, running: boolean }> },
 	'dev_server_status': { name: string, running: boolean, port?: number, url?: string, terminal_id?: string },
 	// Direct API testing results
-	'api_request': { ok: boolean, status: number, status_text: string, headers: Record<string, string>, body: string, body_type: 'json' | 'text' | 'other', url: string, method: string, elapsed_ms: number },
+	'api_request': { ok: boolean, status: number, status_text: string, headers: Record<string, string>, body: string, body_type: 'json' | 'text' | 'other', url: string, method: string, elapsed_ms: number, cookies?: Array<{ name: string, value: string, domain: string, path: string, expires?: number, httpOnly?: boolean, secure?: boolean }> },
 	'port_check': { port: number, in_use: boolean, process?: string },
+	// Cookie management results
+	'api_get_cookies': { cookies: Array<{ name: string, value: string, domain: string, path: string, expires?: number, httpOnly?: boolean, secure?: boolean }> },
+	'api_set_cookies': { count: number },
+	'api_add_cookie': { count: number },
+	'api_clear_cookies': { cleared: number },
+	// OAuth2 results
+	'oauth2_generate_auth_url': { url: string, state: string, code_verifier?: string },
+	'oauth2_exchange_code': { access_token: string, refresh_token?: string, expires_in?: number, token_type?: string, scope?: string, created_at?: number },
+	'oauth2_refresh_token': { access_token: string, refresh_token?: string, expires_in?: number, token_type?: string, scope?: string, created_at?: number },
 	// Debugger automation results
 	'debug_list_configurations': { configurations: DebugConfiguration[] },
 	'debug_list_sessions': { sessions: DebugSessionInfo[] },

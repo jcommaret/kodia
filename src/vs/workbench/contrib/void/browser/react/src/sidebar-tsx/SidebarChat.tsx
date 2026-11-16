@@ -23,7 +23,7 @@ import { ICommandService } from '../../../../../../../platform/commands/common/c
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '../../../../common/modelCapabilities.js';
 import { estimateTokens } from '../../../../common/tokenizer.js';
-import { AlertTriangle, File, Ban, Check, ChevronRight, Circle, FileIcon, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText } from 'lucide-react';
+import { AlertTriangle, File, Ban, Check, ChevronRight, Circle, FileIcon, Mic, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { dataURLOfChatImage } from '../util/chatImages.js';
 import { useAttachChatFiles } from '../util/chatAttachments.js';
@@ -486,9 +486,39 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 
 					<div className='flex items-center flex-wrap gap-x-2 gap-y-1 text-nowrap w-full'>
 						{enableAttachButton && <AttachFilesButton />}
+						<AudioRecordButton onTranscriptReady={(text) => {
+							if (textAreaFnsRef.current) {
+								textAreaFnsRef.current.setValue(text)
+							} else if (textAreaRef.current) {
+								textAreaRef.current.value = text
+								onChangeText(text)
+							}
+							setInstructionsAreEmpty(!text)
+						}} />
 						{featureName === 'Chat' && <ChatModeDropdown className='text-xs text-void-fg-3 bg-void-bg-1 border border-void-border-2 rounded py-0.5 px-1' />}
 						<ModelDropdown featureName={featureName} className='text-xs text-void-fg-3 bg-void-bg-1 rounded flex-1 min-w-[120px]' />
 					</div>
+				</div>
+			)}
+
+			{/* Audio transcript preview when recording */}
+			{isRecording && audioTranscript && (
+				<div className='flex items-center gap-2 mt-1 px-2 py-1 bg-zinc-800/50 rounded border border-zinc-700/50 text-xs text-void-fg-2 w-full'>
+					<Mic size={12} className="text-zinc-400" />
+					<span className='flex-1 truncate'>{audioTranscript}</span>
+					<button
+						onClick={() => {
+							setIsRecording(false)
+							setListening(false)
+							mediaRecorderRef.current?.stop()
+							recognitionRef.current?.stop()
+							setAudioTranscript('')
+						}}
+						className='text-xs text-void-fg-4 hover:text-void-fg-2'
+						title='Cancel recording'
+					>
+						✕
+					</button>
 				</div>
 			)}
 
@@ -552,6 +582,102 @@ export const ButtonStop = ({ className, ...props }: ButtonHTMLAttributes<HTMLBut
 	>
 		<IconSquare size={DEFAULT_BUTTON_SIZE} className="stroke-[3] p-[7px]" />
 	</button>
+}
+
+// Audio record button with speech-to-text transcription
+const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: string) => void }) => {
+	const [listening, setListening] = useState(false)
+	const [transcript, setTranscript] = useState('')
+
+	const startRecording = async () => {
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+			mediaRecorderRef.current = new MediaRecorder(stream)
+
+			// Speech-to-text using Web Speech API
+			const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+			if (!SpeechRecognition) {
+				console.warn('Speech recognition not supported in this browser')
+				return
+			}
+
+			recognitionRef.current = new SpeechRecognition()
+			recognitionRef.current.continuous = true
+			recognitionRef.current.interimResults = true
+			recognitionRef.current.lang = 'en-US'
+
+			recognitionRef.current.onresult = (event: any) => {
+				let finalTranscript = ''
+				let interimTranscript = ''
+				for (let i = event.resultIndex; i < event.results.length; i++) {
+					const transcriptPart = event.results[i][0].transcript
+					if (event.results[i].isFinal) {
+						finalTranscript += transcriptPart
+					} else {
+						interimTranscript += transcriptPart
+					}
+				}
+				setTranscript(finalTranscript + interimTranscript)
+			}
+
+			recognitionRef.current.onend = () => {
+				if (listening) {
+					// Auto-restart if still recording
+					recognitionRef.current?.start()
+				}
+			}
+
+			recognitionRef.current.onerror = (event: any) => {
+				console.error('Speech recognition error:', event.error)
+				setListening(false)
+				setIsRecording(false)
+				mediaRecorderRef.current?.stop()
+				stream.getTracks().forEach(t => t.stop())
+			}
+
+			recognitionRef.current.start()
+			setListening(true)
+			setIsRecording(true)
+		} catch (e) {
+			console.error('Failed to start audio recording:', e)
+		}
+	}
+
+	const stopRecording = () => {
+		setListening(false)
+		setIsRecording(false)
+		mediaRecorderRef.current?.stop()
+		recognitionRef.current?.stop()
+
+		// Insert transcript into input
+		if (transcript.trim()) {
+			onTranscriptReady(transcript.trim())
+			setTranscript('')
+		}
+	}
+
+	return (
+		<button
+			type='button'
+			onClick={listening ? stopRecording : startRecording}
+			className={`rounded-full flex-shrink-0 flex-grow-0 cursor-pointer flex items-center justify-center
+				${listening ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-void-fg-3 hover:bg-zinc-700/20'}
+				transition-all duration-200
+			`}
+			title={listening ? 'Stop recording' : 'Record audio (speech-to-text)'}
+		>
+			{listening ? (
+				<IconSquare size={16} className="stroke-[3] p-[7px] fill-current" />
+			) : (
+				<Mic size={16} className="stroke-[2.5]" />
+			)}
+			{transcript && (
+				<span className='absolute -top-2 -right-2 bg-red-500 text-white text-[8px] px-1 py-0.5 rounded-full animate-pulse'>
+					●
+				</span>
+			)}
+		</button>
+	)
 }
 
 
@@ -3298,6 +3424,24 @@ export const SidebarChat = () => {
 	const initVal = ''
 	const [instructionsAreEmpty, setInstructionsAreEmpty] = useState(!initVal)
 	const [tokenEstimate, setTokenEstimate] = useState(0)
+
+	// Audio recording state
+	const [isRecording, setIsRecording] = useState(false)
+	const [audioTranscript, setAudioTranscript] = useState('')
+	const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+	const recognitionRef = useRef<any>(null)
+
+	// Clean up on unmount
+	useEffect(() => {
+		return () => {
+			if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+				mediaRecorderRef.current.stop()
+			}
+			if (recognitionRef.current) {
+				try { recognitionRef.current.stop() } catch { }
+			}
+		}
+	}, [])
 
 	const isDisabled = instructionsAreEmpty || !!isFeatureNameDisabled('Chat', settingsState)
 

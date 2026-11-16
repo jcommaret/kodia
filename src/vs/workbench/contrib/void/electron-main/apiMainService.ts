@@ -24,7 +24,6 @@ import { IApiMainService, Cookie, CookieJar, OAuth2Config, OAuth2Tokens, Multipa
 import * as http from 'http';
 import * as https from 'https';
 import * as net from 'net';
-import * as url from 'url';
 import * as crypto from 'crypto';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -40,11 +39,11 @@ export class KodiaApiMainService implements IApiMainService {
 	// Cookie helpers
 	// ---------------------------------------------------------------------------
 
-	private cookieMatches(cookie: Cookie, url: string): boolean {
+	private cookieMatches(cookie: Cookie, requestUrl: string): boolean {
 		const now = Date.now();
 		if (cookie.expires && now > cookie.expires) return false;
 
-		const parsed = url.parse(url);
+		const parsed = new URL(requestUrl);
 		const domain = parsed.hostname || '';
 
 		// Domain matching: cookie domain must match or be a suffix of request domain
@@ -64,18 +63,18 @@ export class KodiaApiMainService implements IApiMainService {
 		return true;
 	}
 
-	private getCookieHeader(url: string): string {
-		const matching = cookieJar.cookies.filter(c => this.cookieMatches(c, url));
+	private getCookieHeader(requestUrl: string): string {
+		const matching = cookieJar.cookies.filter(c => this.cookieMatches(c, requestUrl));
 		if (matching.length === 0) return '';
 		return matching.map(c => `${c.name}=${c.value}`).join('; ');
 	}
 
-	private storeSetCookieHeaders(resHeaders: http.IncomingHttpHeaders, url: string): void {
+	private storeSetCookieHeaders(resHeaders: http.IncomingHttpHeaders, requestUrl: string): void {
 		const setCookie = resHeaders['set-cookie'];
 		if (!setCookie) return;
 
 		const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
-		const parsed = url.parse(url);
+		const parsed = new URL(requestUrl);
 
 		for (const raw of cookies) {
 			const parts = raw.split(';').map(p => p.trim());
@@ -171,11 +170,7 @@ export class KodiaApiMainService implements IApiMainService {
 		elapsedMs: number;
 		cookies?: Cookie[];
 	}> {
-		const parsed = url.parse(opts.url);
-		if (!parsed.protocol || !['http:', 'https:'].includes(parsed.protocol)) {
-			throw new Error(`Invalid URL: "${opts.url}". Only http and https are supported.`);
-		}
-
+		const parsed = new URL(opts.url);
 		const method = opts.method ?? 'GET';
 		const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 		const startTime = Date.now();
@@ -222,7 +217,7 @@ export class KodiaApiMainService implements IApiMainService {
 			method,
 			hostname: parsed.hostname,
 			port: parsed.port || (isHttps ? 443 : 80),
-			path: parsed.path || '/',
+			path: parsed.pathname + (parsed.search ?? ''),
 			headers,
 			timeout: timeoutMs,
 		};
@@ -350,17 +345,13 @@ export class KodiaApiMainService implements IApiMainService {
 			.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
 			.join('&');
 
-		const url = `${config.authorizationUrl}?${query}`;
+		const authUrl = `${config.authorizationUrl}?${query}`;
 
-		return { url, state, codeVerifier };
+		return { url: authUrl, state, codeVerifier };
 	}
 
 	async exchangeCodeForTokens(config: OAuth2Config, code: string, codeVerifier?: string): Promise<OAuth2Tokens> {
-		const parsed = url.parse(config.tokenUrl);
-		if (!parsed.protocol || !['http:', 'https:'].includes(parsed.protocol)) {
-			throw new Error(`Invalid token URL: "${config.tokenUrl}".`);
-		}
-
+		const parsed = new URL(config.tokenUrl);
 		const isHttps = parsed.protocol === 'https:';
 		const mod = isHttps ? https : http;
 
@@ -384,7 +375,7 @@ export class KodiaApiMainService implements IApiMainService {
 			method: 'POST',
 			hostname: parsed.hostname,
 			port: parsed.port || (isHttps ? 443 : 80),
-			path: parsed.path || '/',
+			path: parsed.pathname + (parsed.search ?? ''),
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
 				'Content-Length': Buffer.byteLength(bodyString),
@@ -425,11 +416,7 @@ export class KodiaApiMainService implements IApiMainService {
 	}
 
 	async refreshAccessToken(config: OAuth2Config, refreshToken: string): Promise<OAuth2Tokens> {
-		const parsed = url.parse(config.tokenUrl);
-		if (!parsed.protocol || !['http:', 'https:'].includes(parsed.protocol)) {
-			throw new Error(`Invalid token URL: "${config.tokenUrl}".`);
-		}
-
+		const parsed = new URL(config.tokenUrl);
 		const isHttps = parsed.protocol === 'https:';
 		const mod = isHttps ? https : http;
 
@@ -439,7 +426,7 @@ export class KodiaApiMainService implements IApiMainService {
 			method: 'POST',
 			hostname: parsed.hostname,
 			port: parsed.port || (isHttps ? 443 : 80),
-			path: parsed.path || '/',
+			path: parsed.pathname + (parsed.search ?? ''),
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
 				'Content-Length': Buffer.byteLength(bodyString),

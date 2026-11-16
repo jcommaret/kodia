@@ -660,7 +660,7 @@ export class ToolsService implements IToolsService {
 				const body = validateOptionalStr('body', params.body) ?? undefined
 				const timeoutMs = params.timeout_ms === undefined || params.timeout_ms === null ? undefined : Number(params.timeout_ms)
 				const useCookieJar = params.use_cookie_jar === true
-				const cookies = params.cookies && Array.isArray(params.cookies) ? params.cookies.map((c: any) => ({
+				const cookies = params.cookies && Array.isArray(params.cookies) ? (params.cookies as any[]).map((c: any) => ({
 					name: validateStr('name', c.name),
 					value: validateStr('value', c.value),
 					domain: validateStr('domain', c.domain),
@@ -670,18 +670,18 @@ export class ToolsService implements IToolsService {
 					secure: c.secure === true,
 				})) : undefined
 				const oauth2Tokens = params.oauth2_tokens && typeof params.oauth2_tokens === 'object' ? {
-					access_token: validateStr('access_token', params.oauth2_tokens.access_token),
-					refresh_token: params.oauth2_tokens.refresh_token ?? undefined,
-					expires_in: params.oauth2_tokens.expires_in === undefined || params.oauth2_tokens.expires_in === null ? undefined : Number(params.oauth2_tokens.expires_in),
-					token_type: params.oauth2_tokens.token_type ?? undefined,
-					scope: params.oauth2_tokens.scope ?? undefined,
+					access_token: validateStr('access_token', (params.oauth2_tokens as any).access_token),
+					refresh_token: (params.oauth2_tokens as any).refresh_token ?? undefined,
+					expires_in: (params.oauth2_tokens as any).expires_in === undefined || (params.oauth2_tokens as any).expires_in === null ? undefined : Number((params.oauth2_tokens as any).expires_in),
+					token_type: (params.oauth2_tokens as any).token_type ?? undefined,
+					scope: (params.oauth2_tokens as any).scope ?? undefined,
 				} : undefined
 				const multipartBody = params.multipart_body && typeof params.multipart_body === 'object' ? {
-					fields: params.multipart_body.fields && Array.isArray(params.multipart_body.fields) ? params.multipart_body.fields.map((f: any) => ({
+					fields: params.multipart_body.fields && Array.isArray(params.multipart_body.fields) ? (params.multipart_body.fields as any[]).map((f: any) => ({
 						name: validateStr('name', f.name),
 						value: validateStr('value', f.value),
 					})) : [],
-					files: params.multipart_body.files && Array.isArray(params.multipart_body.files) ? params.multipart_body.files.map((f: any) => ({
+					files: params.multipart_body.files && Array.isArray(params.multipart_body.files) ? (params.multipart_body.files as any[]).map((f: any) => ({
 						name: validateStr('name', f.name),
 						filename: validateStr('filename', f.filename),
 						content_type: validateStr('content_type', f.content_type),
@@ -730,7 +730,7 @@ export class ToolsService implements IToolsService {
 				const authorizationUrl = validateStr('authorization_url', params.authorization_url)
 				const tokenUrl = validateStr('token_url', params.token_url)
 				const redirectUri = validateStr('redirect_uri', params.redirect_uri)
-				const scope = validateOptionalStr('scope', params.scope)
+				const scope = validateOptionalStr('scope', params.scope) ?? undefined
 				return { client_id: clientId, client_secret: clientSecret, authorization_url: authorizationUrl, token_url: tokenUrl, redirect_uri: redirectUri, scope }
 			},
 			oauth2_exchange_code: (params: RawToolParamsObj) => {
@@ -739,7 +739,7 @@ export class ToolsService implements IToolsService {
 				const tokenUrl = validateStr('token_url', params.token_url)
 				const redirectUri = validateStr('redirect_uri', params.redirect_uri)
 				const code = validateStr('code', params.code)
-				const codeVerifier = validateOptionalStr('code_verifier', params.code_verifier)
+				const codeVerifier = validateOptionalStr('code_verifier', params.code_verifier) ?? undefined
 				return { client_id: clientId, client_secret: clientSecret, token_url: tokenUrl, redirect_uri: redirectUri, code, code_verifier: codeVerifier }
 			},
 			oauth2_refresh_token: (params: RawToolParamsObj) => {
@@ -1795,12 +1795,22 @@ export class ToolsService implements IToolsService {
 			},
 
 			// --- Direct API testing ---
-			api_request: async ({ url, method, headers, body, timeout_ms: timeoutMs, cookies, use_cookie_jar: useCookieJar, oauth2_tokens: oauth2Tokens, multipart_body: multipartBody }) => {
+			api_request: async (params: any) => {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
-				const result = await apiService.apiRequest({ url, method, headers, body, timeoutMs: timeoutMs, cookies, useCookieJar, oauth2Tokens, multipartBody })
+				const result = await apiService.apiRequest({
+					url: params.url,
+					method: params.method,
+					headers: params.headers,
+					body: params.body,
+					timeoutMs: params.timeout_ms,
+					cookies: params.cookies,
+					useCookieJar: params.use_cookie_jar,
+					oauth2Tokens: params.oauth2_tokens,
+					multipartBody: params.multipart_body,
+				})
 				return { result: { ok: result.ok, status: result.status, status_text: result.statusText, headers: result.headers, body: result.body, body_type: result.bodyType, url: result.url, method: result.method, elapsed_ms: result.elapsedMs, cookies: result.cookies } }
 			},
-			port_check: async ({ port }) => {
+			port_check: async ({ port }: any) => {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
 				const result = await apiService.portCheck({ port })
 				return { result: { port: result.port, in_use: result.inUse, process: result.process } }
@@ -1811,12 +1821,12 @@ export class ToolsService implements IToolsService {
 				const cookies = await apiService.getCookies()
 				return { result: { cookies } }
 			},
-			api_set_cookies: async ({ cookies }) => {
+			api_set_cookies: async ({ cookies }: any) => {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
 				await apiService.setCookies(cookies)
 				return { result: { count: cookies.length } }
 			},
-			api_add_cookie: async ({ cookie }) => {
+			api_add_cookie: async ({ cookie }: any) => {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
 				await apiService.addCookie(cookie)
 				return { result: { count: 1 } }
@@ -1832,14 +1842,14 @@ export class ToolsService implements IToolsService {
 				const result = await apiService.generateAuthUrl({ clientId: client_id, clientSecret: client_secret, authorizationUrl: authorization_url, tokenUrl: token_url, redirectUri: redirect_uri, scope })
 				return { result: { url: result.url, state: result.state, code_verifier: result.codeVerifier } }
 			},
-			oauth2_exchange_code: async ({ client_id, client_secret, token_url, redirect_uri, code, code_verifier: codeVerifier }) => {
+			oauth2_exchange_code: async ({ client_id, client_secret, token_url, redirect_uri, code, code_verifier: codeVerifier }: any) => {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
 				const result = await apiService.exchangeCodeForTokens({ clientId: client_id, clientSecret: client_secret, tokenUrl: token_url, redirectUri: redirect_uri }, code, codeVerifier)
 				return { result: { access_token: result.accessToken, refresh_token: result.refreshToken, expires_in: result.expiresIn, token_type: result.tokenType, scope: result.scope, created_at: result.createdAt } }
 			},
-			oauth2_refresh_token: async ({ client_id, client_secret, token_url, refresh_token }) => {
+			oauth2_refresh_token: async ({ client_id, client_secret, token_url, refresh_token }: any) => {
 				const apiService = ProxyChannel.toService<IApiMainService>(mainProcessService.getChannel('void-channel-api'))
-				const result = await apiService.refreshAccessToken({ clientId: client_id, clientSecret: client_secret, tokenUrl: token_url }, refresh_token)
+				const result = await apiService.refreshAccessToken({ clientId: client_id, clientSecret: client_secret, tokenUrl: token_url, authorizationUrl: '', redirectUri: '' }, refresh_token)
 				return { result: { access_token: result.accessToken, refresh_token: result.refreshToken, expires_in: result.expiresIn, token_type: result.tokenType, scope: result.scope, created_at: result.createdAt } }
 			},
 
@@ -1849,23 +1859,24 @@ export class ToolsService implements IToolsService {
 				const stats = await codeIndexService.indexWorkspace()
 				return { result: { totalFiles: stats.totalFiles, totalChunks: stats.totalChunks, lastIndexed: stats.lastIndexed } }
 			},
-			code_index_file: async ({ uri }) => {
+			code_index_file: async (params: any) => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+				const uri = URI.file(params.uri)
 				const content = fs.readFileSync(uri.fsPath, 'utf8')
 				await codeIndexService.indexFile(uri, content)
 				return { result: { indexed: true, filePath: uri.fsPath } }
 			},
-			code_semantic_search: async ({ query, limit }) => {
+			code_semantic_search: async ({ query, limit }: any) => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 				const results = await codeIndexService.semanticSearch(query, limit)
 				return { result: results }
 			},
-			code_keyword_search: async ({ query, limit }) => {
+			code_keyword_search: async ({ query, limit }: any) => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 				const results = await codeIndexService.keywordSearch(query, limit)
 				return { result: results }
 			},
-			code_hybrid_search: async ({ query, limit }) => {
+			code_hybrid_search: async ({ query, limit }: any) => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 				const results = await codeIndexService.hybridSearch(query, limit)
 				return { result: results }

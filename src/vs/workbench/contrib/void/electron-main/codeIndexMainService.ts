@@ -19,6 +19,7 @@
 import { ICodeIndexService, CodeChunk, SearchResult, IndexStats } from '../common/codeIndexServiceTypes.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { URI } from '../../../../base/common/uri.js';
 
 const INDEX_CHUNK_LINES = 50; // lines per block chunk
 

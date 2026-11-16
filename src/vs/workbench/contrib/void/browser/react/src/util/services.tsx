@@ -61,6 +61,7 @@ import { IRequestService } from '../../../../../../../platform/request/common/re
 import { IWorkbenchThemeService } from '../../../../../../../workbench/services/themes/common/workbenchThemeService.js'
 import { IPromptsService } from '../../../../../../../workbench/contrib/chat/common/promptSyntax/service/promptsService.js';
 import { IWebSearchService } from '../../../../../../../workbench/contrib/void/common/webSearchTypes.js';
+import { ICodeIndexService } from '../../../common/codeIndexServiceTypes.js'
 
 
 // normally to do this you'd use a useEffect that calls .onDidChangeState(), but useEffect mounts too late and misses initial state changes
@@ -242,6 +243,7 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IWorkbenchThemeService: accessor.get(IWorkbenchThemeService),
 		IPromptsService: accessor.get(IPromptsService),
 		IWebSearchService: accessor.get(IWebSearchService),
+		ICodeIndexService: accessor.get(ICodeIndexService),
 
 	} as const
 	return reactAccessor

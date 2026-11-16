@@ -33,9 +33,9 @@ export type CookieJar = {
 export type OAuth2Config = {
 	clientId: string;
 	clientSecret: string;
-	authorizationUrl: string;
+	authorizationUrl?: string;
 	tokenUrl: string;
-	redirectUri: string;
+	redirectUri?: string;
 	scope?: string;
 	codeChallenge?: string; // PKCE
 	codeVerifier?: string;  // PKCE

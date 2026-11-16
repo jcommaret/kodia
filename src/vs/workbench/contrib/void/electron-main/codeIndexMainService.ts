@@ -56,7 +56,7 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 		return tf;
 	}
 
-	private generateEmbeddingVector(text: string): number[] {
+	public async generateEmbedding(text: string): Promise<number[]> {
 		const tf = this.termFrequency(text);
 		const vocab = Array.from(this.documentFrequencies.keys());
 		const vector: number[] = new Array(vocab.length).fill(0);
@@ -88,7 +88,7 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 		return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 	}
 
-	private rebuildEmbeddings(): void {
+	private async rebuildEmbeddings(): Promise<void> {
 		// Rebuild document frequencies from all chunks
 		this.documentFrequencies.clear();
 		this.totalDocuments = this.allChunks.length;
@@ -105,7 +105,7 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 
 		// Assign embeddings to all chunks
 		for (const chunk of this.allChunks) {
-			chunk.embedding = this.generateEmbeddingVector(chunk.content);
+			chunk.embedding = await this.generateEmbedding(chunk.content);
 		}
 	}
 
@@ -219,7 +219,7 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 		this.chunks.set(filePath, chunks);
 		this.allChunks.push(...chunks);
 
-		this.rebuildEmbeddings();
+		await this.rebuildEmbeddings();
 
 		this.indexStats = {
 			totalFiles: this.chunks.size,
@@ -253,7 +253,7 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 			await this.walkDirectory(root, extensions);
 		}
 
-		this.rebuildEmbeddings();
+		await this.rebuildEmbeddings();
 
 		this.indexStats = {
 			totalFiles: this.chunks.size,
@@ -294,7 +294,7 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 		const filePath = uri.fsPath;
 		this.chunks.delete(filePath);
 		this.allChunks = this.allChunks.filter(c => c.filePath !== filePath);
-		this.rebuildEmbeddings();
+		await this.rebuildEmbeddings();
 		this.indexStats = {
 			totalFiles: this.chunks.size,
 			totalChunks: this.allChunks.length,
@@ -321,7 +321,7 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 	async semanticSearch(query: string, limit: number = 10): Promise<SearchResult[]> {
 		if (this.allChunks.length === 0) return [];
 
-		const queryEmbedding = this.generateEmbeddingVector(query);
+		const queryEmbedding = await this.generateEmbedding(query);
 
 		const scored: Array<SearchResult & { score: number }> = [];
 		for (const chunk of this.allChunks) {

@@ -61,7 +61,7 @@ import { IRequestService } from '../../../../../../../platform/request/common/re
 import { IWorkbenchThemeService } from '../../../../../../../workbench/services/themes/common/workbenchThemeService.js'
 import { IPromptsService } from '../../../../../../../workbench/contrib/chat/common/promptSyntax/service/promptsService.js';
 import { IWebSearchService } from '../../../../../../../workbench/contrib/void/common/webSearchTypes.js';
-import { ICodeIndexService } from '../../../common/codeIndexServiceTypes.js'
+import { ICodeIndexService } from '../../../../../../../workbench/contrib/void/common/codeIndexServiceTypes.js'
 
 
 // normally to do this you'd use a useEffect that calls .onDidChangeState(), but useEffect mounts too late and misses initial state changes

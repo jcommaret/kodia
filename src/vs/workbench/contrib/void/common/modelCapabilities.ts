@@ -2786,3 +2786,166 @@ export const getSendableReasoningInfo = (
 
 	return null
 }
+
+// ============================================================================
+// AUTO MODEL SELECTION
+// When the user selects "Auto" mode, Kodia analyzes the user's message and
+// picks the best available model for the task, similar to Cursor's auto mode.
+// ============================================================================
+
+export type TaskType = 'coding' | 'reasoning' | 'analysis' | 'vision' | 'general'
+
+// Detect the likely task type from the user's message content
+export const detectTaskType = (userMessage: string): TaskType => {
+	const lower = userMessage.toLowerCase()
+
+	// Vision / image-related tasks
+	if (/image|picture|photo|screenshot|diagram|chart|graph|visual|see|look at|view|attach.*(png|jpg|jpeg|webp)/.test(lower)) {
+		return 'vision'
+	}
+
+	// Complex reasoning / math / logic / architecture
+	if (/architect|design|system design|reason|logic|solve|proof|theorem|complex|difficult|hard|plan|strategy|algorithm|optimize|refactor.*(architecture|design)/.test(lower)) {
+		return 'reasoning'
+	}
+
+	// Coding / development tasks
+	if (/code|program|script|function|class|component|api|endpoint|bug|fix|error|implement|create|build|write|develop|deploy|test|debug|refactor|typescript|javascript|python|react|node|html|css|sql|docker|kubernetes|git|commit|push|pull|merge|branch|repository|project|file|folder|directory/.test(lower)) {
+		return 'coding'
+	}
+
+	// Analysis / review / explain / summarize
+	if (/analy|review|explain|summariz|compare|evaluat|assess|check|audit|inspect|find|search|locate|what is|how does|why does|difference between/.test(lower)) {
+		return 'analysis'
+	}
+
+	return 'general'
+}
+
+// Score a model for a given task type. Higher = better fit.
+export const scoreModelForTask = (
+	taskType: TaskType,
+	providerName: ProviderName,
+	modelName: string,
+	overridesOfModel: OverridesOfModel | undefined,
+): number => {
+	const caps = getModelCapabilities(providerName, modelName, overridesOfModel)
+	let score = 0
+
+	// Base score from context window (larger is generally better)
+	const ctxScore = Math.min(Math.log2(Math.max(caps.contextWindow, 1024)) / 20, 1) * 10
+	score += ctxScore
+
+	// Reasoning capability bonus
+	const reasoning = caps.reasoningCapabilities
+	if (reasoning && typeof reasoning === 'object' && reasoning.supportsReasoning) {
+		score += 15
+		if (reasoning.canIOReasoning) score += 10 // model outputs reasoning traces
+	}
+
+	// Vision support bonus
+	if (caps.supportsVision) score += 10
+
+	// Tool support bonus
+	if (caps.specialToolFormat) score += 5
+
+	// Task-specific scoring
+	switch (taskType) {
+		case 'coding':
+			// Coding models get big bonus
+			if (/codestral|deepseek|coder|qwen.*coder|starcoder|codegemma|claude|nemotron|gpt|llama/.test(modelName.toLowerCase())) score += 20
+			// Models with strong tool use are better for coding agents
+			if (caps.specialToolFormat === 'openai-style') score += 10
+			if (caps.supportsFIM) score += 10
+			break
+
+		case 'reasoning':
+			// Reasoning models get big bonus
+			const reasoning2 = caps.reasoningCapabilities
+			if (reasoning2 && typeof reasoning2 === 'object' && reasoning2.supportsReasoning) score += 30
+			if (/nemotron|gpt-5|gpt-6|claude.*opus|deepseek.*r1|qwq|qwen3|grok/.test(modelName.toLowerCase())) score += 15
+			break
+
+		case 'vision':
+			// Vision models get big bonus
+			if (caps.supportsVision) score += 25
+			if (/nemotron.*vl|gemma.*vision|llama.*vision|claude|gpt-4o|gpt-6|pali/.test(modelName.toLowerCase())) score += 10
+			break
+
+		case 'analysis':
+			// Large context is important for analysis
+			if (caps.contextWindow >= 1_000_000) score += 20
+			else if (caps.contextWindow >= 256_000) score += 10
+			const reasoning3 = caps.reasoningCapabilities
+			if (reasoning3 && typeof reasoning3 === 'object' && reasoning3.supportsReasoning) score += 10
+			break
+
+		case 'general':
+			// Balanced - decent context, good all-rounder
+			if (caps.contextWindow >= 256_000) score += 10
+			if (caps.supportsVision) score += 5
+			break
+	}
+
+	// Penalty for very small context (can't handle large projects)
+	if (caps.contextWindow < 32_000) score -= 20
+	if (caps.contextWindow < 16_000) score -= 30
+
+	// Penalty for unknown/unrecognized models (fallback context of 4K is too small)
+	if (caps.isUnrecognizedModel && caps.contextWindow <= 4_096) score -= 50
+
+	// Cost preference (cheaper models preferred for general tasks, but not at expense of capability)
+	if (taskType === 'general' && caps.cost.output > 0 && caps.cost.output < 1) score += 5
+
+	return Math.max(score, 0)
+}
+
+// Auto-select the best model from available options for a given task
+export const autoSelectModel = (
+	userMessage: string,
+	availableModels: { providerName: ProviderName, modelName: string, contextWindow?: number }[],
+	overridesOfModel: OverridesOfModel | undefined,
+): { providerName: ProviderName, modelName: string, reason: string } | null => {
+
+	if (availableModels.length === 0) return null
+
+	const taskType = detectTaskType(userMessage)
+	const lower = userMessage.toLowerCase()
+
+	// Score all available models
+	const scored = availableModels.map(m => {
+		const score = scoreModelForTask(taskType, m.providerName, m.modelName, overridesOfModel)
+		return { ...m, score }
+	})
+
+	// Sort by score descending
+	scored.sort((a, b) => b.score - a.score)
+
+	const best = scored[0]
+	if (!best) return null
+
+	// Build a human-readable reason
+	const caps = getModelCapabilities(best.providerName, best.modelName, overridesOfModel)
+	const reasons: string[] = []
+	reasons.push(`Task: ${taskType}`)
+
+	if (caps.contextWindow >= 1_000_000) reasons.push('1M context window')
+	else if (caps.contextWindow >= 256_000) reasons.push('large context window')
+	else reasons.push(`${Math.round(caps.contextWindow / 1000)}K context window`)
+
+	if (caps.reasoningCapabilities && typeof caps.reasoningCapabilities === 'object' && caps.reasoningCapabilities.supportsReasoning) {
+		reasons.push(caps.reasoningCapabilities.canIOReasoning ? 'reasoning with trace' : 'reasoning capable')
+	}
+
+	if (caps.supportsVision) reasons.push('vision support')
+
+	if (caps.specialToolFormat) reasons.push('tool use')
+
+	const reason = reasons.join(', ')
+
+	return {
+		providerName: best.providerName,
+		modelName: best.modelName,
+		reason,
+	}
+}

@@ -3301,7 +3301,7 @@ export const SidebarChat = () => {
 	const isDisabled = instructionsAreEmpty || !!isFeatureNameDisabled('Chat', settingsState)
 
 	const chatModelSelection = settingsState.modelSelectionOfFeature['Chat']
-	const chatContextWindow = chatModelSelection
+	const chatContextWindow = chatModelSelection && chatModelSelection.modelName !== '__auto__'
 		? getModelCapabilities(chatModelSelection.providerName, chatModelSelection.modelName, settingsState.overridesOfModel).contextWindow
 		: undefined
 

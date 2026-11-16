@@ -285,6 +285,12 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 		}
 	}
 
+	// Add "Auto" pseudo-model option at the top — lets Kodia pick the best model per request
+	newModelOptions.unshift({
+		name: '✨ Auto (smart model pick)',
+		selection: { providerName: 'nvidia' as ProviderName, modelName: '__auto__' },
+	})
+
 	// now that model options are updated, make sure the selection is valid
 	// if the user-selected model is no longer in the list, update the selection for each feature that needs it to something relevant (the 0th model available, or null)
 	let newModelSelectionOfFeature = state.modelSelectionOfFeature

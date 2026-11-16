@@ -14,9 +14,10 @@ import { ILLMMessageService } from '../common/sendLLMMessageService.js';
 import { chat_userMessageContent, isABuiltinToolName, summarizeThread_systemMessage, summarizeThread_userMessage } from '../common/prompt/prompts.js';
 import { chooseSummaryKeepIdx, transcriptForSummary } from '../common/helpers/threadSummary.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
+import { autoSelectModel } from '../common/modelCapabilities.js';
 import { AnthropicReasoning, getErrorMessage, LLMUsage, RawToolCallObj, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { FeatureName, ModelSelection, ModelSelectionOptions, OverridesOfModel } from '../common/voidSettingsTypes.js';
+import { FeatureName, ModelSelection, ModelSelectionOptions, OverridesOfModel, providerNames } from '../common/voidSettingsTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolCallParams, ToolName, ToolResult } from '../common/toolsServiceTypes.js';
 import { IToolsService } from './toolsService.js';
@@ -549,10 +550,46 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 
 
-	private _currentModelSelectionProps = () => {
+	private _autoResolvedModels = new Map<string, { modelSelection: ModelSelection, reason: string }>()
+
+	private _currentModelSelectionProps = (threadId: string) => {
 		// these settings should not change throughout the loop (eg anthropic breaks if you change its thinking mode and it's using tools)
 		const featureName: FeatureName = 'Chat'
-		const modelSelection = this._settingsService.state.modelSelectionOfFeature[featureName]
+		const settingsSelection = this._settingsService.state.modelSelectionOfFeature[featureName]
+
+		// Auto mode: resolve the best model for the current user message
+		if (settingsSelection?.modelName === '__auto__') {
+			const cached = this._autoResolvedModels.get(threadId)
+			if (cached) {
+				const modelSelectionOptions = this._settingsService.state.optionsOfModelSelection[featureName][cached.modelSelection.providerName]?.[cached.modelSelection.modelName]
+				return { modelSelection: cached.modelSelection, modelSelectionOptions, autoReason: cached.reason }
+			}
+
+			// Get the last user message for this thread to analyze the task
+			const thread = this.state.allThreads[threadId]
+			const lastUserMsg = thread?.messages.findLast(m => m.role === 'user')
+			const userMessage = lastUserMsg?.displayContent || ''
+
+			// Build list of available models from settings
+			const availableModels: { providerName: ProviderName, modelName: string }[] = []
+			for (const providerName of providerNames) {
+				const providerModels = this._settingsService.state.settingsOfProvider[providerName]?.models ?? []
+				for (const { modelName, isHidden } of providerModels) {
+					if (isHidden) continue
+					if (modelName === '__auto__') continue
+					availableModels.push({ providerName, modelName })
+				}
+			}
+
+			const selected = autoSelectModel(userMessage, availableModels, this._settingsService.state.overridesOfModel)
+			if (selected) {
+				this._autoResolvedModels.set(threadId, { modelSelection: { providerName: selected.providerName, modelName: selected.modelName }, reason: selected.reason })
+				const modelSelectionOptions = this._settingsService.state.optionsOfModelSelection[featureName][selected.providerName]?.[selected.modelName]
+				return { modelSelection: { providerName: selected.providerName, modelName: selected.modelName }, modelSelectionOptions, autoReason: selected.reason }
+			}
+		}
+
+		const modelSelection = settingsSelection
 		const modelSelectionOptions = modelSelection ? this._settingsService.state.optionsOfModelSelection[featureName][modelSelection.providerName]?.[modelSelection.modelName] : undefined
 		return { modelSelection, modelSelectionOptions }
 	}
@@ -587,7 +624,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		const callThisToolFirst: ToolMessage<ToolName> = lastMsg
 
 		this._wrapRunAgentToNotify(
-			this._runChatAgent({ callThisToolFirst, threadId, ...this._currentModelSelectionProps() })
+			this._runChatAgent({ callThisToolFirst, threadId, ...this._currentModelSelectionProps(threadId) })
 			, threadId
 		)
 	}
@@ -1083,12 +1120,13 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		modelSelection,
 		modelSelectionOptions,
 		callThisToolFirst,
+		autoReason,
 	}: {
 		threadId: string,
 		modelSelection: ModelSelection | null,
 		modelSelectionOptions: ModelSelectionOptions | undefined,
-
-		callThisToolFirst?: ToolMessage<ToolName> & { type: 'tool_request' }
+		callThisToolFirst?: ToolMessage<ToolName> & { type: 'tool_request' },
+		autoReason?: string
 	}) {
 
 
@@ -1614,6 +1652,9 @@ We only need to do it for files that were edited since `from`, ie files between 
 
 
 	private _wrapRunAgentToNotify(p: Promise<void>, threadId: string) {
+		// Capture auto-selected model reason before cleanup
+		const autoInfo = this._autoResolvedModels.get(threadId)
+
 		const notify = ({ error }: { error: string | null }) => {
 			const thread = this.state.allThreads[threadId]
 			if (!thread) return
@@ -1622,9 +1663,15 @@ We only need to do it for files that were edited since `from`, ie files between 
 			if (userMsg.role !== 'user') return
 			const messageContent = truncate(userMsg.displayContent, 50, '...')
 
+			// If Auto mode was used, append the selected model info
+			let finalMessage = error ? `Error: ${error} ` : `A new Chat result is ready.`
+			if (!error && autoInfo) {
+				finalMessage = `Auto picked: ${autoInfo.modelSelection.providerName}/${autoInfo.modelSelection.modelName} — ${autoInfo.reason}`
+			}
+
 			this._notificationService.notify({
 				severity: error ? Severity.Warning : Severity.Info,
-				message: error ? `Error: ${error} ` : `A new Chat result is ready.`,
+				message: finalMessage,
 				source: messageContent,
 				sticky: true,
 				actions: {
@@ -1651,6 +1698,10 @@ We only need to do it for files that were edited since `from`, ie files between 
 		}).catch((e) => {
 			if (threadId !== this.state.currentThreadId) notify({ error: getErrorMessage(e) })
 			throw e
+		})
+		// Clean up auto-resolved model for this thread after the turn completes
+		p.finally(() => {
+			this._autoResolvedModels.delete(threadId)
 		})
 	}
 
@@ -1689,7 +1740,7 @@ We only need to do it for files that were edited since `from`, ie files between 
 		this._setThreadState(threadId, { currCheckpointIdx: null }) // no longer at a checkpoint because started streaming
 
 		this._wrapRunAgentToNotify(
-			this._runChatAgent({ threadId, ...this._currentModelSelectionProps(), }),
+			this._runChatAgent({ threadId, ...this._currentModelSelectionProps(threadId) }),
 			threadId,
 		)
 

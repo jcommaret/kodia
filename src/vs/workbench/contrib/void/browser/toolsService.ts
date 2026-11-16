@@ -1415,7 +1415,7 @@ export class ToolsService implements IToolsService {
 			// --- Autonomous dev cycle tools ---
 			dep_install: async ({ command, cwd }) => {
 				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
-				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? undefined
+				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? null
 				const wrappedCommand = wrapCommandForShell(command)
 				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, {
 					type: 'temporary',
@@ -1437,7 +1437,7 @@ export class ToolsService implements IToolsService {
 			},
 			db_migrate: async ({ command, cwd }) => {
 				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
-				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? undefined
+				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? null
 				const wrappedCommand = wrapCommandForShell(command)
 				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, {
 					type: 'temporary',
@@ -1459,7 +1459,7 @@ export class ToolsService implements IToolsService {
 			},
 			lint_run: async ({ command, cwd }) => {
 				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
-				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? undefined
+				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? null
 				const wrappedCommand = wrapCommandForShell(command)
 				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, {
 					type: 'temporary',
@@ -1488,7 +1488,7 @@ export class ToolsService implements IToolsService {
 					if (!stat || !stat.isFile) {
 						throw new Error(`File not found: ${path}`)
 					}
-					const contents = await this.fileService.readFile(uri)
+					const contents = await this.fileService.readFile(uri, {})
 					const text = contents.value.toString('utf8')
 					const allLines = text.split('\n')
 					const filteredLines = lines ? allLines.slice(-lines) : allLines
@@ -1539,7 +1539,7 @@ export class ToolsService implements IToolsService {
 				const hasServerJs = await this.fileService.stat(URI.file(`${cwdPath}/server.js`)).then(() => true).catch(() => false)
 
 				if (!hasPackageJson) {
-					await this.fileService.writeFile(URI.file(`${cwdPath}/package.json`), Buffer.from(JSON.stringify({
+					await this.fileService.writeFile(URI.file(`${cwdPath}/package.json`), VSBuffer.fromString(JSON.stringify({
 						name: 'autonomous-app',
 						version: '1.0.0',
 						scripts: { start: 'node server.js', test: 'echo "no tests specified" && exit 0' },
@@ -1547,7 +1547,7 @@ export class ToolsService implements IToolsService {
 					filesCreated++
 				}
 				if (!hasServerJs) {
-					await this.fileService.writeFile(URI.file(`${cwdPath}/server.js`), Buffer.from(`const express = require('express')\nconst app = express()\napp.use(express.json())\napp.get('/', (req, res) => res.json({ status: 'ok', service: '${project_type}' }))\napp.get('/api/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString() }))\nconst PORT = ${portToUse}\napp.listen(PORT, () => console.log('Server running on port ' + PORT))\n`))
+					await this.fileService.writeFile(URI.file(`${cwdPath}/server.js`), VSBuffer.fromString(`const express = require('express')\nconst app = express()\napp.use(express.json())\napp.get('/', (req, res) => res.json({ status: 'ok', service: '${project_type}' }))\napp.get('/api/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString() }))\nconst PORT = ${portToUse}\napp.listen(PORT, () => console.log('Server running on port ' + PORT))\n`))
 					filesCreated++
 				}
 
@@ -1584,7 +1584,7 @@ export class ToolsService implements IToolsService {
 				// Step 5: Test APIs
 				cyclesRun++
 				const testResult = await runCmd('npm test 2>&1 || true', 'test_run')
-				const testsPassed = (testResult.output.match(/\d+ passing/gi) || []).length
+				const _testsPassed = (testResult.output.match(/\d+ passing/gi) || []).length
 				const testsFailed = (testResult.output.match(/\d+ failing/gi) || []).length
 				if (testsFailed > 0) {
 					errorsFixed++
@@ -2803,7 +2803,7 @@ export class ToolsService implements IToolsService {
 				return `db_migrate: ${status}\nCommand: ${command}\nCWD: ${cwd}\nOutput:\n${outputPreview}`
 			},
 			lint_run: (_params, result) => {
-				const { command, cwd, success, output, exit_code, errors_found } = result
+				const { command, cwd, success, output, errors_found } = result
 				const status = success ? 'PASS' : `FAIL (${errors_found} errors)`
 				const outputPreview = output.length > 300 ? output.slice(0, 300) + '...' : output
 				return `lint_run: ${status}\nCommand: ${command}\nCWD: ${cwd}\nErrors found: ${errors_found}\nOutput:\n${outputPreview}`

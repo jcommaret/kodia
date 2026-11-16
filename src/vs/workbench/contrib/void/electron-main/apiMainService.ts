@@ -332,7 +332,7 @@ export class KodiaApiMainService implements IApiMainService {
 
 		const params: Record<string, string> = {
 			client_id: config.clientId,
-			redirect_uri: config.redirectUri,
+			redirect_uri: config.redirectUri ?? '',
 			response_type: 'code',
 			scope: config.scope ?? '',
 			state,
@@ -360,7 +360,7 @@ export class KodiaApiMainService implements IApiMainService {
 			client_id: config.clientId,
 			client_secret: config.clientSecret,
 			code,
-			redirect_uri: config.redirectUri,
+			redirect_uri: config.redirectUri ?? '',
 		};
 
 		if (codeVerifier) {

@@ -74,7 +74,7 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 		return vector;
 	}
 
-	private cosineSimilarity(a: number[], b: number[]): number {
+	public cosineSimilarity(a: number[], b: number[]): number {
 		if (a.length !== b.length) return 0;
 		let dot = 0;
 		let normA = 0;

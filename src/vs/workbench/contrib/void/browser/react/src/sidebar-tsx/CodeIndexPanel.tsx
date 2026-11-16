@@ -6,14 +6,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 
 import { ProxyChannel } from '../../../../../../../base/parts/ipc/common/ipc.js';
-import { IMainProcessService } from '../../../../../../../platform/ipc/common/mainProcessService.js';
 import { ICodeIndexService, SearchResult } from '../../../common/codeIndexServiceTypes.js';
 import { useAccessor } from '../util/services.js';
 
 export const CodeIndexPanel = () => {
 	const accessor = useAccessor()
-	const mainProcessService = accessor.get('IMainProcessService')
-	const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+	const [mainProcessService, setMainProcessService] = useState<any>(null)
+	const [codeIndexService, setCodeIndexService] = useState<ICodeIndexService | null>(null)
+	const [error, setError] = useState<string | null>(null)
 
 	const [indexing, setIndexing] = useState(false)
 	const [indexStats, setIndexStats] = useState<{ totalFiles: number, totalChunks: number, lastIndexed: number | null } | null>(null)
@@ -21,7 +21,21 @@ export const CodeIndexPanel = () => {
 	const [searchQuery, setSearchQuery] = useState('')
 	const [searchType, setSearchType] = useState<'semantic' | 'keyword' | 'hybrid'>('semantic')
 	const [searching, setSearching] = useState(false)
-	const [error, setError] = useState<string | null>(null)
+
+	useEffect(() => {
+		try {
+			const service = accessor.get('IMainProcessService')
+			if (service && typeof service.getChannel === 'function') {
+				setMainProcessService(service)
+				const codeService = ProxyChannel.toService<ICodeIndexService>(service.getChannel('void-channel-code-index'))
+				setCodeIndexService(codeService)
+			} else {
+				setError('Code index service not available. Use the agent chat instead.')
+			}
+		} catch (e: any) {
+			setError(`Failed to connect to code index service: ${e?.message ?? String(e)}`)
+		}
+	}, [accessor])
 
 	const refreshStats = useCallback(async () => {
 		if (!codeIndexService) return
@@ -88,30 +102,36 @@ export const CodeIndexPanel = () => {
 	return (
 		<div className='p-3 space-y-3 min-w-0'>
 			<div className='flex items-center gap-2 mb-2'>
-				<h2 className='text-xs font-semibold text-void-fg-1'>🔍 Code Index</h2>
-				{indexing && <span className='text-[10px] text-void-fg-3 animate-pulse'>Indexing...</span>}
+				<h2 className='text-sm font-semibold text-void-fg-1'>🔍 Code Index</h2>
+				{indexing && <span className='text-xs text-void-fg-3 animate-pulse'>Indexing...</span>}
 			</div>
 
+			{error && (
+				<div className='text-xs text-red-500 bg-red-500/10 p-2 rounded border border-red-500/30 break-words'>
+					{error}
+				</div>
+			)}
+
 			{indexStats && (
-				<div className='flex flex-wrap gap-2 text-[10px] text-void-fg-3 bg-void-bg-2 p-2 rounded border border-void-border-2/50'>
-					<span className='flex-1'>📁 Files: {indexStats.totalFiles}</span>
-					<span className='flex-1'>🧩 Chunks: {indexStats.totalChunks}</span>
-					<span className='flex-1'>{indexStats.lastIndexed ? `Last: ${new Date(indexStats.lastIndexed).toLocaleTimeString()}` : 'Never'}</span>
+				<div className='flex flex-wrap gap-2 text-xs text-void-fg-3 bg-void-bg-2 p-2 rounded'>
+					<span>📁 Files: {indexStats.totalFiles}</span>
+					<span>🧩 Chunks: {indexStats.totalChunks}</span>
+					<span>{indexStats.lastIndexed ? `Last: ${new Date(indexStats.lastIndexed).toLocaleTimeString()}` : 'Never'}</span>
 				</div>
 			)}
 
 			<div className='flex flex-wrap gap-2'>
 				<button
 					onClick={handleIndex}
-					disabled={indexing}
-					className='flex-1 min-w-[55px] px-2 py-1.5 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 whitespace-nowrap'
+					disabled={indexing || !codeIndexService}
+					className='flex-1 min-w-[60px] px-3 py-2 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50'
 				>
 					{indexing ? 'Indexing...' : 'Index Codebase'}
 				</button>
 				<button
 					onClick={refreshStats}
-					disabled={indexing}
-					className='min-w-[50px] px-2 py-1.5 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 whitespace-nowrap'
+					disabled={indexing || !codeIndexService}
+					className='px-3 py-2 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50'
 				>
 					Refresh
 				</button>
@@ -121,7 +141,7 @@ export const CodeIndexPanel = () => {
 				<select
 					value={searchType}
 					onChange={e => setSearchType(e.target.value as any)}
-					className='text-xs border border-void-border-2 bg-void-bg-2 p-1 rounded text-void-fg-1 min-w-[55px]'
+					className='text-xs border border-void-border-2 bg-void-bg-2 p-1 rounded text-void-fg-1'
 				>
 					<option value='semantic'>Semantic</option>
 					<option value='keyword'>Keyword</option>
@@ -137,44 +157,38 @@ export const CodeIndexPanel = () => {
 				/>
 				<button
 					onClick={handleSearch}
-					disabled={searching || !searchQuery.trim()}
-					className='min-w-[45px] px-2 py-1.5 text-[10px] rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 whitespace-nowrap'
+					disabled={searching || !searchQuery.trim() || !codeIndexService}
+					className='px-3 py-1.5 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50'
 				>
 					{searching ? 'Searching...' : 'Search'}
 				</button>
 				<button
 					onClick={handleClear}
-					className='min-w-[40px] px-2 py-1.5 text-[10px] rounded border border-void-border-2 bg-void-bg-2 text-void-fg-3 hover:bg-void-bg-3 whitespace-nowrap'
+					className='px-2 py-1.5 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-3 hover:bg-void-bg-3'
 				>
 					Clear
 				</button>
 			</div>
 
-			{error && (
-				<div className='text-[10px] text-red-500 bg-red-500/10 p-2 rounded border border-red-500/30 break-words'>
-					{error}
-				</div>
-			)}
-
 			{searchResults.length > 0 && (
 				<div className='space-y-1 max-h-[200px] overflow-y-auto'>
 					{searchResults.map((r, i) => (
-						<div key={i} className='p-1.5 border border-void-border-2 bg-void-bg-1 rounded text-[9px]'>
+						<div key={i} className='p-1.5 border border-void-border-2 bg-void-bg-1 rounded text-xs'>
 							<div className='flex items-center gap-1 mb-0.5'>
-								<span className='text-[9px] font-semibold text-void-fg-3 uppercase'>{r.kind}</span>
-								<span className='text-[9px] text-void-fg-3 truncate'>{r.filePath.split('/').pop()}</span>
-								<span className='text-[9px] text-void-fg-4'>:${r.startLine}</span>
-								<span className='ml-auto text-[9px] text-void-fg-3'>score: ${(r.score * 100).toFixed(0)}%</span>
+								<span className='text-[10px] font-semibold text-void-fg-3 uppercase'>{r.kind}</span>
+								<span className='text-[10px] text-void-fg-3 truncate'>{r.filePath.split('/').pop()}</span>
+								<span className='text-[10px] text-void-fg-4'>:${r.startLine}</span>
+								<span className='ml-auto text-[10px] text-void-fg-3'>score: ${(r.score * 100).toFixed(0)}%</span>
 							</div>
 							<div className='text-void-fg-2 font-medium truncate'>{r.name}</div>
-							<div className='text-[9px] text-void-fg-3 mt-0.5 truncate'>{r.content.replace(/\n/g, ' ')}</div>
+							<div className='text-[10px] text-void-fg-3 mt-0.5 truncate'>{r.content.replace(/\n/g, ' ')}</div>
 						</div>
 					))}
 				</div>
 			)}
 
 			{searchResults.length === 0 && searchQuery && !searching && (
-				<div className='text-[10px] text-void-fg-3 italic'>No results found.</div>
+				<div className='text-xs text-void-fg-3 italic'>No results found.</div>
 			)}
 		</div>
 	)

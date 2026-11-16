@@ -121,6 +121,12 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'dev_server_stop': 'terminal',
 	'dev_server_list': 'terminal',
 	'dev_server_status': 'terminal',
+	'dep_install': 'terminal',
+	'db_migrate': 'terminal',
+	'lint_run': 'terminal',
+	'test_run': 'terminal',
+	'log_read': 'terminal',
+	'autonomous_dev_cycle': 'terminal',
 	// Direct API testing - calling backend APIs outside the browser
 	'api_request': 'web pages',
 	'port_check': 'terminal',
@@ -212,6 +218,13 @@ export type BuiltinToolCallParams = {
 	'browser_download': { sessionId: string, tabId: string, url: string },
 	'browser_list_downloads': { sessionId: string },
 	'browser_shutdown': {},
+	// Autonomous dev cycle tools
+	'dep_install': { command: string, cwd?: string | null },
+	'db_migrate': { command: string, cwd?: string | null },
+	'lint_run': { command: string, cwd?: string | null },
+	'test_run': { command: string, cwd?: string | null },
+	'log_read': { path: string, lines?: number },
+	'autonomous_dev_cycle': { project_type: string, project_description: string, port?: number, cwd?: string | null, max_cycles?: number },
 	// Dev server automation
 	'dev_server_start': { command: string, cwd?: string | null, port?: number, name?: string },
 	'dev_server_stop': { name?: string, terminal_id?: string },
@@ -348,6 +361,13 @@ export type BuiltinToolResultType = {
 	'browser_download': { downloadId: string, url: string, suggestedFilename: string, status: 'in_progress' | 'completed' | 'failed' | 'cancelled', path?: string, failureText?: string },
 	'browser_list_downloads': { downloads: Array<{ downloadId: string, url: string, suggestedFilename: string, status: 'in_progress' | 'completed' | 'failed' | 'cancelled', path?: string, failureText?: string }> },
 	'browser_shutdown': {},
+	// Autonomous dev cycle results
+	'dep_install': { command: string, cwd: string, success: boolean, output: string, exit_code?: number },
+	'db_migrate': { command: string, cwd: string, success: boolean, output: string, exit_code?: number },
+	'lint_run': { command: string, cwd: string, success: boolean, output: string, exit_code?: number, errors_found: number },
+	'test_run': { command: string, cwd: string, success: boolean, output: string, exit_code?: number, tests_passed: number, tests_failed: number },
+	'log_read': { path: string, lines: number, content: string },
+	'autonomous_dev_cycle': { project_type: string, cycles_run: number, success: boolean, final_status: string, errors_fixed: number, files_created: number, url?: string },
 	// Dev server automation results
 	'dev_server_start': { name: string, terminal_id: string, command: string, cwd: string, port?: number, url?: string, pid: number },
 	'dev_server_stop': { name: string, stopped: boolean },

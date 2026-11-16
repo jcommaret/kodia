@@ -49,6 +49,13 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'browser_download',
 	'browser_list_downloads',
 	'browser_shutdown',
+	// Autonomous dev cycle tools
+	'dep_install',
+	'db_migrate',
+	'lint_run',
+	'test_run',
+	'log_read',
+	'autonomous_dev_cycle',
 	// Dev server automation
 	'dev_server_start',
 	'dev_server_stop',
@@ -304,6 +311,17 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'dev_server_list':
 		case 'dev_server_status':
 			return 'low';
+
+		// Autonomous dev cycle tools - install/migrate/lint/test are medium risk (run commands)
+		case 'dep_install':
+		case 'db_migrate':
+		case 'lint_run':
+		case 'test_run':
+			return 'medium';
+		case 'log_read':
+			return 'low';
+		case 'autonomous_dev_cycle':
+			return 'medium';
 
 		// Direct API testing - reading from APIs is low risk
 		case 'api_request':

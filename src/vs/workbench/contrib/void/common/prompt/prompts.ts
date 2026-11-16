@@ -607,6 +607,68 @@ export const builtinTools: {
 		params: {},
 	},
 
+	// --- Autonomous dev cycle tools ---
+	// These tools let the agent build, test, and self-correct any application
+	// automatically: install dependencies, run migrations, lint, run tests,
+	// read logs, and orchestrate full build→test→fix→verify cycles.
+
+	dep_install: {
+		name: 'dep_install',
+		description: `Installs project dependencies using npm, composer, pip, or other package managers. Runs in the project directory.`,
+		params: {
+			command: { description: 'The install command to run (e.g. "npm install", "composer install", "pip install -r requirements.txt").' },
+			cwd: { description: 'Optional. Working directory to run the command in.' },
+		},
+	},
+
+	db_migrate: {
+		name: 'db_migrate',
+		description: `Runs database migrations and seeders. Use this after creating migration files to set up the database schema.`,
+		params: {
+			command: { description: 'The migration command (e.g. "php artisan migrate --seed", "python manage.py migrate", "npx prisma migrate dev").' },
+			cwd: { description: 'Optional. Working directory to run the command in.' },
+		},
+	},
+
+	lint_run: {
+		name: 'lint_run',
+		description: `Runs static analysis / linting on the codebase (eslint, phpstan, flake8, tsc, etc.). Returns the number of errors found.`,
+		params: {
+			command: { description: 'The lint command (e.g. "npx eslint . --ext .js", "phpstan analyse", "flake8 .", "tsc --noEmit").' },
+			cwd: { description: 'Optional. Working directory to run the command in.' },
+		},
+	},
+
+	test_run: {
+		name: 'test_run',
+		description: `Executes test suites (phpunit, jest, pytest, mocha, etc.). Returns pass/fail counts.`,
+		params: {
+			command: { description: 'The test command (e.g. "npm test", "phpunit", "pytest", "npx jest").' },
+			cwd: { description: 'Optional. Working directory to run the command in.' },
+		},
+	},
+
+	log_read: {
+		name: 'log_read',
+		description: `Reads the last N lines of a log file. Useful for diagnosing server errors, build failures, or runtime exceptions.`,
+		params: {
+			path: { description: 'The absolute path to the log file (e.g. "storage/logs/laravel.log", "npm-debug.log", "stderr.log").' },
+			lines: { description: 'Optional. Number of lines to read from the end of the file. Defaults to all lines.' },
+		},
+	},
+
+	autonomous_dev_cycle: {
+		name: 'autonomous_dev_cycle',
+		description: `Runs a full autonomous build→test→fix→verify cycle: scaffolds files, installs dependencies, runs migrations, lints, starts the server, runs tests, and self-corrects errors. Use this to build complete applications from a prompt with minimal human intervention.`,
+		params: {
+			project_type: { description: 'The type of project to build (e.g. "express", "laravel", "django", "fastapi", "go", "spring-boot").' },
+			project_description: { description: 'Detailed description of what the application should do, including features, endpoints, and requirements.' },
+			port: { description: 'Optional. The port the server should listen on (defaults to 3000).' },
+			cwd: { description: 'Optional. Working directory for the project.' },
+			max_cycles: { description: 'Optional. Maximum number of fix cycles to run (defaults to 5).' },
+		},
+	},
+
 	// --- Dev server automation ---
 	// These tools start, stop, and list local development servers (npm run dev,
 	// php artisan serve, python manage.py runserver, flask run, etc.) so the

@@ -1,6 +1,5 @@
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js'
 import { URI } from '../../../../base/common/uri.js'
-import * as fs from 'fs'
 import { IReference } from '../../../../base/common/lifecycle.js'
 import { Position } from '../../../../editor/common/core/position.js'
 import { IRange } from '../../../../editor/common/core/range.js'
@@ -1864,7 +1863,8 @@ export class ToolsService implements IToolsService {
 			code_index_file: async (params: any) => {
 				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 				const uri = URI.file(params.uri)
-				const content = fs.readFileSync(uri.fsPath, 'utf8')
+				const contents = await this.fileService.readFile(uri)
+				const content = contents.value.toString()
 				await codeIndexService.indexFile(uri, content)
 				return { result: { indexed: true, filePath: uri.fsPath } }
 			},

@@ -1488,7 +1488,7 @@ export class ToolsService implements IToolsService {
 					if (!stat || !stat.isFile) {
 						throw new Error(`File not found: ${path}`)
 					}
-					const contents = await this.fileService.readFile(uri, {})
+					const contents = await this.fileService.readFile(uri)
 					const text = contents.value.toString('utf8')
 					const allLines = text.split('\n')
 					const filteredLines = lines ? allLines.slice(-lines) : allLines
@@ -1584,7 +1584,6 @@ export class ToolsService implements IToolsService {
 				// Step 5: Test APIs
 				cyclesRun++
 				const testResult = await runCmd('npm test 2>&1 || true', 'test_run')
-				const _testsPassed = (testResult.output.match(/\d+ passing/gi) || []).length
 				const testsFailed = (testResult.output.match(/\d+ failing/gi) || []).length
 				if (testsFailed > 0) {
 					errorsFixed++

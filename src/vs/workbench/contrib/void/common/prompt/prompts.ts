@@ -639,15 +639,6 @@ export const builtinTools: {
 		},
 	},
 
-	test_run: {
-		name: 'test_run',
-		description: `Executes test suites (phpunit, jest, pytest, mocha, etc.). Returns pass/fail counts.`,
-		params: {
-			command: { description: 'The test command (e.g. "npm test", "phpunit", "pytest", "npx jest").' },
-			cwd: { description: 'Optional. Working directory to run the command in.' },
-		},
-	},
-
 	log_read: {
 		name: 'log_read',
 		description: `Reads the last N lines of a log file. Useful for diagnosing server errors, build failures, or runtime exceptions.`,

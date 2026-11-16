@@ -124,7 +124,6 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'dep_install': 'terminal',
 	'db_migrate': 'terminal',
 	'lint_run': 'terminal',
-	'test_run': 'terminal',
 	'log_read': 'terminal',
 	'autonomous_dev_cycle': 'terminal',
 	// Direct API testing - calling backend APIs outside the browser
@@ -222,7 +221,6 @@ export type BuiltinToolCallParams = {
 	'dep_install': { command: string, cwd?: string | null },
 	'db_migrate': { command: string, cwd?: string | null },
 	'lint_run': { command: string, cwd?: string | null },
-	'test_run': { command: string, cwd?: string | null },
 	'log_read': { path: string, lines?: number },
 	'autonomous_dev_cycle': { project_type: string, project_description: string, port?: number, cwd?: string | null, max_cycles?: number },
 	// Dev server automation
@@ -365,7 +363,6 @@ export type BuiltinToolResultType = {
 	'dep_install': { command: string, cwd: string, success: boolean, output: string, exit_code?: number },
 	'db_migrate': { command: string, cwd: string, success: boolean, output: string, exit_code?: number },
 	'lint_run': { command: string, cwd: string, success: boolean, output: string, exit_code?: number, errors_found: number },
-	'test_run': { command: string, cwd: string, success: boolean, output: string, exit_code?: number, tests_passed: number, tests_failed: number },
 	'log_read': { path: string, lines: number, content: string },
 	'autonomous_dev_cycle': { project_type: string, cycles_run: number, success: boolean, final_status: string, errors_fixed: number, files_created: number, url?: string },
 	// Dev server automation results

@@ -242,7 +242,7 @@ export class ToolsService implements IToolsService {
 	public stringOfResult: BuiltinToolResultToString;
 
 	constructor(
-		@IFileService fileService: IFileService,
+		@IFileService private readonly fileService: IFileService,
 		@IWorkspaceContextService workspaceContextService: IWorkspaceContextService,
 		@ISearchService searchService: ISearchService,
 		@IInstantiationService instantiationService: IInstantiationService,
@@ -612,11 +612,6 @@ export class ToolsService implements IToolsService {
 				return { command, cwd }
 			},
 			lint_run: (params: RawToolParamsObj) => {
-				const command = validateStr('command', params.command)
-				const cwd = validateOptionalStr('cwd', params.cwd) ?? undefined
-				return { command, cwd }
-			},
-			test_run: (params: RawToolParamsObj) => {
 				const command = validateStr('command', params.command)
 				const cwd = validateOptionalStr('cwd', params.cwd) ?? undefined
 				return { command, cwd }
@@ -1427,7 +1422,9 @@ export class ToolsService implements IToolsService {
 					cwd: cwdPath,
 					terminalId: `dep-install-${Date.now()}`,
 				})
-				const output = await resPromise
+				void interrupt
+				const result = await resPromise
+				const output = result.result
 				return {
 					result: {
 						command,
@@ -1447,7 +1444,9 @@ export class ToolsService implements IToolsService {
 					cwd: cwdPath,
 					terminalId: `db-migrate-${Date.now()}`,
 				})
-				const output = await resPromise
+				void interrupt
+				const result = await resPromise
+				const output = result.result
 				return {
 					result: {
 						command,
@@ -1467,7 +1466,9 @@ export class ToolsService implements IToolsService {
 					cwd: cwdPath,
 					terminalId: `lint-run-${Date.now()}`,
 				})
-				const output = await resPromise
+				void interrupt
+				const result = await resPromise
+				const output = result.result
 				const errorsFound = (output.match(/error/gi) || []).length
 				return {
 					result: {
@@ -1480,38 +1481,14 @@ export class ToolsService implements IToolsService {
 					},
 				}
 			},
-			test_run: async ({ command, cwd }) => {
-				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
-				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? undefined
-				const wrappedCommand = wrapCommandForShell(command)
-				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, {
-					type: 'temporary',
-					cwd: cwdPath,
-					terminalId: `test-run-${Date.now()}`,
-				})
-				const output = await resPromise
-				const testsPassed = (output.match(/passed/gi) || []).length
-				const testsFailed = (output.match(/failed/gi) || []).length
-				return {
-					result: {
-						command,
-						cwd: cwdPath ?? '',
-						success: testsFailed === 0,
-						output,
-						exit_code: testsFailed > 0 ? 1 : 0,
-						tests_passed: testsPassed,
-						tests_failed: testsFailed,
-					},
-				}
-			},
 			log_read: async ({ path, lines }) => {
 				try {
 					const uri = URI.file(path)
-					const stat = await this._fileService.stat(uri)
+					const stat = await this.fileService.stat(uri)
 					if (!stat || !stat.isFile) {
 						throw new Error(`File not found: ${path}`)
 					}
-					const contents = await this._fileService.readFile(uri)
+					const contents = await this.fileService.readFile(uri)
 					const text = contents.value.toString('utf8')
 					const allLines = text.split('\n')
 					const filteredLines = lines ? allLines.slice(-lines) : allLines
@@ -1550,18 +1527,19 @@ export class ToolsService implements IToolsService {
 						cwd: cwdPath,
 						terminalId: `autonomous-${label}-${Date.now()}`,
 					})
-					const output = await resPromise
+					const result = await resPromise
+					const output = result.result
 					const exitCode = output.includes('error') || output.includes('Error') ? 1 : 0
 					return { success: exitCode === 0, output, exitCode }
 				}
 
 				// Step 1: Scaffold project files
 				cyclesRun++
-				const hasPackageJson = await this._fileService.stat(URI.file(`${cwdPath}/package.json`)).then(() => true).catch(() => false)
-				const hasServerJs = await this._fileService.stat(URI.file(`${cwdPath}/server.js`)).then(() => true).catch(() => false)
+				const hasPackageJson = await this.fileService.stat(URI.file(`${cwdPath}/package.json`)).then(() => true).catch(() => false)
+				const hasServerJs = await this.fileService.stat(URI.file(`${cwdPath}/server.js`)).then(() => true).catch(() => false)
 
 				if (!hasPackageJson) {
-					await this._fileService.writeFile(URI.file(`${cwdPath}/package.json`), Buffer.from(JSON.stringify({
+					await this.fileService.writeFile(URI.file(`${cwdPath}/package.json`), Buffer.from(JSON.stringify({
 						name: 'autonomous-app',
 						version: '1.0.0',
 						scripts: { start: 'node server.js', test: 'echo "no tests specified" && exit 0' },
@@ -1569,7 +1547,7 @@ export class ToolsService implements IToolsService {
 					filesCreated++
 				}
 				if (!hasServerJs) {
-					await this._fileService.writeFile(URI.file(`${cwdPath}/server.js`), Buffer.from(`const express = require('express')\nconst app = express()\napp.use(express.json())\napp.get('/', (req, res) => res.json({ status: 'ok', service: '${project_type}' }))\napp.get('/api/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString() }))\nconst PORT = ${portToUse}\napp.listen(PORT, () => console.log('Server running on port ' + PORT))\n`))
+					await this.fileService.writeFile(URI.file(`${cwdPath}/server.js`), Buffer.from(`const express = require('express')\nconst app = express()\napp.use(express.json())\napp.get('/', (req, res) => res.json({ status: 'ok', service: '${project_type}' }))\napp.get('/api/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString() }))\nconst PORT = ${portToUse}\napp.listen(PORT, () => console.log('Server running on port ' + PORT))\n`))
 					filesCreated++
 				}
 
@@ -1578,7 +1556,6 @@ export class ToolsService implements IToolsService {
 				const depResult = await runCmd('npm install', 'dep_install')
 				if (!depResult.success) {
 					errorsFixed++
-					const logResult = await this._fileService.readFile(URI.file(`${cwdPath}/npm-debug.log`)).catch(() => ({ value: Buffer.from('No log file') }))
 					// Try fixing common issues
 					const fixResult = await runCmd('npm install --legacy-peer-deps', 'dep_install_fix')
 					if (fixResult.success) errorsFixed--
@@ -1604,11 +1581,14 @@ export class ToolsService implements IToolsService {
 				// Wait briefly for server to start
 				await new Promise(r => setTimeout(r, 2000))
 
-				// Step 5: Test APIs using the visible browser / api_request would be called by agent
+				// Step 5: Test APIs
 				cyclesRun++
 				const testResult = await runCmd('npm test 2>&1 || true', 'test_run')
-				const testsPassed = (lintResult.output.match(/\d+ passing/gi) || []).length
-				const testsFailed = (lintResult.output.match(/\d+ failing/gi) || []).length
+				const testsPassed = (testResult.output.match(/\d+ passing/gi) || []).length
+				const testsFailed = (testResult.output.match(/\d+ failing/gi) || []).length
+				if (testsFailed > 0) {
+					errorsFixed++
+				}
 
 				success = depResult.success && serverTerminalId !== undefined
 				finalStatus = success ? 'All systems operational' : 'Completed with warnings'
@@ -2827,12 +2807,6 @@ export class ToolsService implements IToolsService {
 				const status = success ? 'PASS' : `FAIL (${errors_found} errors)`
 				const outputPreview = output.length > 300 ? output.slice(0, 300) + '...' : output
 				return `lint_run: ${status}\nCommand: ${command}\nCWD: ${cwd}\nErrors found: ${errors_found}\nOutput:\n${outputPreview}`
-			},
-			test_run: (_params, result) => {
-				const { command, cwd, success, output, exit_code, tests_passed, tests_failed } = result
-				const status = success ? 'PASS' : `FAIL (${tests_failed} failed)`
-				const outputPreview = output.length > 300 ? output.slice(0, 300) + '...' : output
-				return `test_run: ${status}\nCommand: ${command}\nCWD: ${cwd}\nPassed: ${tests_passed}, Failed: ${tests_failed}\nOutput:\n${outputPreview}`
 			},
 			log_read: (_params, result) => {
 				const { path, lines, content } = result

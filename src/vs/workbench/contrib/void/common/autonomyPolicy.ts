@@ -49,6 +49,14 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'browser_download',
 	'browser_list_downloads',
 	'browser_shutdown',
+	// Dev server automation
+	'dev_server_start',
+	'dev_server_stop',
+	'dev_server_list',
+	'dev_server_status',
+	// Direct API testing
+	'api_request',
+	'port_check',
 	// Debugger automation
 	'debug_list_configurations',
 	'debug_list_sessions',
@@ -289,19 +297,19 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'browser_shutdown':
 			return 'low';
 
-		// Dev server automation - starting/stopping servers is terminal-level
+		// Dev server automation - starting/stopping servers is medium risk
 		case 'dev_server_start':
 		case 'dev_server_stop':
-			return 'terminal';
+			return 'medium';
 		case 'dev_server_list':
 		case 'dev_server_status':
 			return 'low';
 
-		// Direct API testing - reading from APIs is web-page-level
+		// Direct API testing - reading from APIs is low risk
 		case 'api_request':
-			return 'web pages';
+			return 'low';
 		case 'port_check':
-			return 'terminal';
+			return 'low';
 
 		// Debugger automation - inspection is low risk.
 		case 'debug_list_configurations':

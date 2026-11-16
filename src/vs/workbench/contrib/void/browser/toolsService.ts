@@ -630,7 +630,7 @@ export class ToolsService implements IToolsService {
 				return { url, method, headers, body, timeout_ms: timeoutMs }
 			},
 			port_check: (params: RawToolParamsObj) => {
-				const port = validateNumber('port', params.port)
+				const port = validateNumber(params.port, { default: null })
 				if (port === null) throw new Error('Invalid LLM output: port must be a number.')
 				return { port }
 			},
@@ -1391,11 +1391,11 @@ export class ToolsService implements IToolsService {
 				// Wrap command for safe execution
 				const wrappedCommand = wrapCommandForShell(command)
 
-				// Start in a persistent terminal so it keeps running
+				// Create a persistent terminal with the working directory, then run the command in it
+				const terminalId = await this.terminalToolService.createPersistentTerminal({ cwd: cwdPath })
 				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, {
 					type: 'persistent',
-					cwd: cwdPath,
-					terminalId: `dev-server-${serverName}`,
+					persistentTerminalId: terminalId,
 				})
 
 				// Give the server a moment to start, then check if the port is responding
@@ -1404,13 +1404,10 @@ export class ToolsService implements IToolsService {
 					serverUrl = `http://localhost:${port}`
 				}
 
-				// Store in active servers map (we'll track via terminalId)
-				// The terminalToolService manages the actual process
-
 				return {
 					result: {
 						name: serverName,
-						terminal_id: `dev-server-${serverName}`,
+						terminal_id: terminalId,
 						command,
 						cwd: cwdPath ?? '',
 						port,
@@ -2586,14 +2583,14 @@ export class ToolsService implements IToolsService {
 				}).join('\n')
 			},
 			dev_server_status: (_params, result) => {
-				const { name, running, port, url } = result
+				const { name, running, url } = result
 				const status = running ? 'running' : 'stopped'
 				const urlStr = url ? ` at ${url}` : ''
 				return `Dev server "${name}" is ${status}${urlStr}`
 			},
 			// --- Direct API testing ---
 			api_request: (_params, result) => {
-				const { ok, status, status_text, method, url, elapsed_ms, body_type, body } = result
+				const { status, status_text, method, url, elapsed_ms, body_type, body } = result
 				const bodyPreview = body.length > 200 ? body.slice(0, 200) + '...' : body
 				return `${method} ${url} → ${status} ${status_text} (${elapsed_ms}ms)\nContent-Type: ${body_type}\nBody: ${bodyPreview}`
 			},

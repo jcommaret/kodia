@@ -5,12 +5,15 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 
-import { useAccessor } from '../util/services.js';
+import { ProxyChannel } from '../../../../../../../base/parts/ipc/common/ipc.js';
+import { IMainProcessService } from '../../../../../../../platform/ipc/common/mainProcessService.js';
 import { ICodeIndexService, SearchResult } from '../../../common/codeIndexServiceTypes.js';
+import { useAccessor } from '../util/services.js';
 
 export const CodeIndexPanel = () => {
 	const accessor = useAccessor()
-	const codeIndexService = accessor.get('ICodeIndexService') as ICodeIndexService
+	const mainProcessService = accessor.get('IMainProcessService')
+	const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 
 	const [indexing, setIndexing] = useState(false)
 	const [indexStats, setIndexStats] = useState<{ totalFiles: number, totalChunks: number, lastIndexed: number | null } | null>(null)
@@ -54,7 +57,7 @@ export const CodeIndexPanel = () => {
 	const handleSearch = async () => {
 		if (!searchQuery.trim()) return
 		if (!codeIndexService) {
-			setError('Code index service not available. Please reload Kodia.')
+			setError('Code index service not available')
 			return
 		}
 		setSearching(true)
@@ -85,7 +88,7 @@ export const CodeIndexPanel = () => {
 	return (
 		<div className='p-3 space-y-3 min-w-0'>
 			<div className='flex items-center gap-2 mb-2'>
-				<h2 className='text-xs font-semibold text-void-fg-1 truncate'>🔍 Code Index</h2>
+				<h2 className='text-xs font-semibold text-void-fg-1'>🔍 Code Index</h2>
 				{indexing && <span className='text-[10px] text-void-fg-3 animate-pulse'>Indexing...</span>}
 			</div>
 
@@ -101,7 +104,7 @@ export const CodeIndexPanel = () => {
 				<button
 					onClick={handleIndex}
 					disabled={indexing}
-					className='flex-1 min-w-[60px] px-2 py-1.5 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 whitespace-nowrap'
+					className='flex-1 min-w-[55px] px-2 py-1.5 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 whitespace-nowrap'
 				>
 					{indexing ? 'Indexing...' : 'Index Codebase'}
 				</button>
@@ -118,7 +121,7 @@ export const CodeIndexPanel = () => {
 				<select
 					value={searchType}
 					onChange={e => setSearchType(e.target.value as any)}
-					className='text-xs border border-void-border-2 bg-void-bg-2 p-1 rounded text-void-fg-1 min-w-[70px]'
+					className='text-xs border border-void-border-2 bg-void-bg-2 p-1 rounded text-void-fg-1 min-w-[55px]'
 				>
 					<option value='semantic'>Semantic</option>
 					<option value='keyword'>Keyword</option>
@@ -135,13 +138,13 @@ export const CodeIndexPanel = () => {
 				<button
 					onClick={handleSearch}
 					disabled={searching || !searchQuery.trim()}
-					className='min-w-[45px] px-2 py-1.5 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 whitespace-nowrap'
+					className='min-w-[45px] px-2 py-1.5 text-[10px] rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 whitespace-nowrap'
 				>
 					{searching ? 'Searching...' : 'Search'}
 				</button>
 				<button
 					onClick={handleClear}
-					className='min-w-[40px] px-2 py-1.5 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-3 hover:bg-void-bg-3 whitespace-nowrap'
+					className='min-w-[40px] px-2 py-1.5 text-[10px] rounded border border-void-border-2 bg-void-bg-2 text-void-fg-3 hover:bg-void-bg-3 whitespace-nowrap'
 				>
 					Clear
 				</button>
@@ -160,7 +163,7 @@ export const CodeIndexPanel = () => {
 							<div className='flex items-center gap-1 mb-0.5'>
 								<span className='text-[9px] font-semibold text-void-fg-3 uppercase'>{r.kind}</span>
 								<span className='text-[9px] text-void-fg-3 truncate'>{r.filePath.split('/').pop()}</span>
-								<span className='text-[9px] text-void-fg-4'>{r.startLine}</span>
+								<span className='text-[9px] text-void-fg-4'>:${r.startLine}</span>
 								<span className='ml-auto text-[9px] text-void-fg-3'>score: ${(r.score * 100).toFixed(0)}%</span>
 							</div>
 							<div className='text-void-fg-2 font-medium truncate'>{r.name}</div>
@@ -171,7 +174,7 @@ export const CodeIndexPanel = () => {
 			)}
 
 			{searchResults.length === 0 && searchQuery && !searching && (
-				<div className='text-[9px] text-void-fg-3 italic'>No results found.</div>
+				<div className='text-[10px] text-void-fg-3 italic'>No results found.</div>
 			)}
 		</div>
 	)

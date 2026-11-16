@@ -3,7 +3,8 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { useIsDark, useState } from 'react';
+import { useState } from 'react';
+import { useIsDark } from '../util/services.js';
 
 import '../styles.css'
 import { SidebarChat } from './SidebarChat.js';

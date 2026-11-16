@@ -73,11 +73,11 @@ suite('Kodia - filesystemToolChain', () => {
 		DUMMY as any, instantiationService as any,
 		voidModelService as any,
 		editCodeService as any,
-		DUMMY as any, DUMMY as any, DUMMY as any, commandBarServiceMock as any, DUMMY as any, DUMMY as any,
+		DUMMY as any, DUMMY as any, DUMMY as any, DUMMY as any, commandBarServiceMock as any, DUMMY as any, DUMMY as any,
 		voidSettingsService as any,
 		DUMMY as any, DUMMY as any, DUMMY as any,
 		mainProcessService as any,
-		DUMMY as any, DUMMY as any, DUMMY as any, // Notebook services
+		DUMMY as any, DUMMY as any, DUMMY as any, DUMMY as any, // Notebook services
 	);
 
 	setup(() => {

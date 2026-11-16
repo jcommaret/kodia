@@ -367,6 +367,447 @@ export const builtinTools: {
 		},
 	},
 
+	// --- Browser automation ---
+	// These tools let the agent drive a real Chromium browser. Ordinary browsing
+	// (launch, navigate, inspect, read console) is read-like and auto-allowed in
+	// agent/autonomous mode. Page interactions (click, fill, submit, download)
+	// are consequential and respect the autonomy policy.
+
+	browser_launch: {
+		name: 'browser_launch',
+		description: `Launches a real Chromium browser and returns a session_id. Use the session_id in all subsequent browser tools. The browser persists across tool calls within the same session.`,
+		params: {
+			headless: { description: 'Optional. Run the browser without a visible window (default false). Set true to run headless.' },
+		},
+	},
+
+	browser_close: {
+		name: 'browser_close',
+		description: `Closes a browser session and releases all its tabs and processes. Pass the session_id returned by browser_launch.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+		},
+	},
+
+	browser_list_sessions: {
+		name: 'browser_list_sessions',
+		description: `Lists all active browser sessions with their tab counts.`,
+		params: {},
+	},
+
+	browser_new_tab: {
+		name: 'browser_new_tab',
+		description: `Opens a new tab in a browser session. Optionally navigates to a URL immediately. Returns a tab_id to use with other browser tools.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			url: { description: 'Optional. A URL to navigate to in the new tab.' },
+		},
+	},
+
+	browser_list_tabs: {
+		name: 'browser_list_tabs',
+		description: `Lists all open tabs in a browser session, with their URLs, titles, and loading state.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+		},
+	},
+
+	browser_switch_tab: {
+		name: 'browser_switch_tab',
+		description: `Switches the active tab in a browser session.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID to switch to.' },
+		},
+	},
+
+	browser_close_tab: {
+		name: 'browser_close_tab',
+		description: `Closes a tab in a browser session.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID to close.' },
+		},
+	},
+
+	browser_navigate: {
+		name: 'browser_navigate',
+		description: `Navigates a tab to a URL and waits for the page to load. Returns the resulting URL and title.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID to navigate.' },
+			url: { description: 'The full URL to open.' },
+		},
+	},
+
+	browser_back: {
+		name: 'browser_back',
+		description: `Goes back one page in a tab's history.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+		},
+	},
+
+	browser_forward: {
+		name: 'browser_forward',
+		description: `Goes forward one page in a tab's history.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+		},
+	},
+
+	browser_reload: {
+		name: 'browser_reload',
+		description: `Reloads the current page of a tab.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+		},
+	},
+
+	browser_inspect_page: {
+		name: 'browser_inspect_page',
+		description: `Inspects the current page of a tab: returns the URL, title, visible text, interactive elements (buttons, links, inputs, selects, checkboxes, radios) with selectors, and forms. Use the returned selectors with click_element, fill_element, etc.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID to inspect.' },
+		},
+	},
+
+	browser_click_element: {
+		name: 'browser_click_element',
+		description: `Clicks an element on the page by its CSS selector (as returned by inspect_page). Waits for the element to be visible before clicking.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			selector: { description: 'A CSS selector for the element to click (e.g. a button or link selector from inspect_page).' },
+		},
+	},
+
+	browser_fill_element: {
+		name: 'browser_fill_element',
+		description: `Fills an input or textarea element with text by its CSS selector. Waits for the element to be visible first.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			selector: { description: 'A CSS selector for the input/textarea to fill.' },
+			text: { description: 'The text to type into the field.' },
+		},
+	},
+
+	browser_select_option: {
+		name: 'browser_select_option',
+		description: `Selects an option in a <select> dropdown by its value and CSS selector.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			selector: { description: 'A CSS selector for the <select> element.' },
+			value: { description: 'The value attribute of the option to select.' },
+		},
+	},
+
+	browser_check_element: {
+		name: 'browser_check_element',
+		description: `Checks or unchecks a checkbox or radio button by its CSS selector.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			selector: { description: 'A CSS selector for the checkbox or radio.' },
+			checked: { description: 'true to check, false to uncheck.' },
+		},
+	},
+
+	browser_submit_form: {
+		name: 'browser_submit_form',
+		description: `Submits a form by its CSS selector. Use after filling the form's fields.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			selector: { description: 'A CSS selector for the <form> element.' },
+		},
+	},
+
+	browser_wait_for_element: {
+		name: 'browser_wait_for_element',
+		description: `Waits for an element matching a CSS selector to become visible on the page. Useful after navigation or clicks that load new content.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			selector: { description: 'A CSS selector to wait for.' },
+			timeout_ms: { description: 'Optional. Max milliseconds to wait. Defaults to 30000.' },
+		},
+	},
+
+	browser_screenshot: {
+		name: 'browser_screenshot',
+		description: `Captures a screenshot of a tab (viewport, full page, or a single element) and returns it as a base64 data URL the agent can inspect.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			type: { description: 'Optional. "viewport" (default), "fullpage", or "element".' },
+			selector: { description: 'Optional. A CSS selector for a single element to screenshot (only used with type "element").' },
+		},
+	},
+
+	browser_console: {
+		name: 'browser_console',
+		description: `Reads console messages and uncaught errors captured for a tab. Use it to inspect JavaScript errors, failed resource loads, and application logs.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			level: { description: 'Optional. Filter by level: debug, info, warning, or error.' },
+			limit: { description: 'Optional. Maximum number of messages to return (1-500).' },
+		},
+	},
+
+	browser_network_failures: {
+		name: 'browser_network_failures',
+		description: `Returns failed network requests captured for a tab (e.g. ERR_CONNECTION_REFUSED, 404s), useful for detecting broken pages and missing resources.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+		},
+	},
+
+	browser_download: {
+		name: 'browser_download',
+		description: `Downloads a URL in a tab and saves it to disk, returning the download id and local path.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+			tab_id: { description: 'The tab ID.' },
+			url: { description: 'The URL of the file to download.' },
+		},
+	},
+
+	browser_list_downloads: {
+		name: 'browser_list_downloads',
+		description: `Lists downloads for a browser session with their status and local file paths.`,
+		params: {
+			session_id: { description: 'The browser session ID returned by browser_launch.' },
+		},
+	},
+
+	browser_shutdown: {
+		name: 'browser_shutdown',
+		description: `Shuts down the browser automation service and closes all sessions. Use when finished browsing.`,
+		params: {},
+	},
+
+	// --- Debugger automation ---
+	// These tools drive VS Code's real Debug Adapter Protocol (DAP) debugging
+	// infrastructure. Inspection tools (list sessions, stack trace, variables,
+	// exceptions) are read-like. Session control, breakpoint, execution control
+	// and expression evaluation are consequential and respect the autonomy policy.
+
+	debug_list_configurations: {
+		name: 'debug_list_configurations',
+		description: `Lists all available debug configurations (from launch.json and the global launch config). Returns each configuration's name, type and request (launch/attach).`,
+		params: {},
+	},
+
+	debug_list_sessions: {
+		name: 'debug_list_sessions',
+		description: `Lists all active debug sessions with their IDs, names, types, and states (inactive, initializing, stopped, running).`,
+		params: {},
+	},
+
+	debug_get_session_status: {
+		name: 'debug_get_session_status',
+		description: `Returns the status of a debug session: its state, configuration, and type. Pass the sessionId returned by debug_list_sessions or debug_start_session.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+		},
+	},
+
+	debug_start_session: {
+		name: 'debug_start_session',
+		description: `Starts a debug session using a named launch configuration. Returns the new sessionId.`,
+		params: {
+			configuration_name: { description: 'The name of the debug configuration to start.' },
+			folder: { description: 'Optional. The workspace folder to launch in.' },
+			no_debug: { description: 'Optional. Run without debugging (just start the program).' },
+		},
+	},
+
+	debug_attach_session: {
+		name: 'debug_attach_session',
+		description: `Attaches to a running process using a named 'attach' debug configuration. Returns the new sessionId.`,
+		params: {
+			configuration_name: { description: 'The name of the attach debug configuration.' },
+			folder: { description: 'Optional. The workspace folder.' },
+		},
+	},
+
+	debug_stop_session: {
+		name: 'debug_stop_session',
+		description: `Stops a debug session. Pass the sessionId.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			restart: { description: 'Optional. Whether the session will be restarted.' },
+			suspend: { description: 'Optional. Whether to suspend the debuggee.' },
+		},
+	},
+
+	debug_restart_session: {
+		name: 'debug_restart_session',
+		description: `Restarts a debug session. Pass the sessionId.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+		},
+	},
+
+	debug_set_breakpoint: {
+		name: 'debug_set_breakpoint',
+		description: `Sets a breakpoint in a source file at a given line (and optional column). Optionally scoped to a session. Returns the breakpoint id.`,
+		params: {
+			session_id: { description: 'Optional. The debug session ID to associate the breakpoint with.' },
+			uri: { description: 'The full file URI or path to set the breakpoint in.' },
+			line_number: { description: 'The 1-based line number.' },
+			column: { description: 'Optional. The 1-based column number.' },
+			condition: { description: 'Optional. An expression that must be true for the breakpoint to hit.' },
+			hit_condition: { description: 'Optional. A hit count condition.' },
+			log_message: { description: 'Optional. A message to log instead of breaking (logpoint).' },
+		},
+	},
+
+	debug_remove_breakpoint: {
+		name: 'debug_remove_breakpoint',
+		description: `Removes a breakpoint by its id.`,
+		params: {
+			breakpoint_id: { description: 'The breakpoint id returned by debug_set_breakpoint or debug_list_breakpoints.' },
+		},
+	},
+
+	debug_set_breakpoint_enabled: {
+		name: 'debug_set_breakpoint_enabled',
+		description: `Enables or disables a breakpoint by its id.`,
+		params: {
+			breakpoint_id: { description: 'The breakpoint id.' },
+			enabled: { description: 'true to enable, false to disable.' },
+		},
+	},
+
+	debug_list_breakpoints: {
+		name: 'debug_list_breakpoints',
+		description: `Lists all breakpoints with their ids, locations, verification status, and conditions.`,
+		params: {},
+	},
+
+	debug_continue: {
+		name: 'debug_continue',
+		description: `Continues execution of a stopped thread. Pass the sessionId and threadId.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			thread_id: { description: 'The thread id.' },
+		},
+	},
+
+	debug_pause: {
+		name: 'debug_pause',
+		description: `Pauses a running thread. Pass the sessionId and threadId.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			thread_id: { description: 'The thread id.' },
+		},
+	},
+
+	debug_step_over: {
+		name: 'debug_step_over',
+		description: `Steps over the current line in a stopped thread. Pass the sessionId and threadId.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			thread_id: { description: 'The thread id.' },
+		},
+	},
+
+	debug_step_into: {
+		name: 'debug_step_into',
+		description: `Steps into the current call in a stopped thread. Pass the sessionId and threadId.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			thread_id: { description: 'The thread id.' },
+		},
+	},
+
+	debug_step_out: {
+		name: 'debug_step_out',
+		description: `Steps out of the current function in a stopped thread. Pass the sessionId and threadId.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			thread_id: { description: 'The thread id.' },
+		},
+	},
+
+	debug_list_threads: {
+		name: 'debug_list_threads',
+		description: `Lists all threads in a debug session with their ids, names, and stopped state.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+		},
+	},
+
+	debug_get_stack_trace: {
+		name: 'debug_get_stack_trace',
+		description: `Retrieves the call stack for a thread: frame ids, names, source locations, and line numbers.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			thread_id: { description: 'The thread id.' },
+			start_frame: { description: 'Optional. The index of the first frame to return (0-based).' },
+			levels: { description: 'Optional. The number of frames to return.' },
+		},
+	},
+
+	debug_get_scopes: {
+		name: 'debug_get_scopes',
+		description: `Retrieves the variable scopes (local, argument, global, ...) for a stack frame. Pass the sessionId and frameId (optionally threadId).`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			frame_id: { description: 'The stack frame id.' },
+			thread_id: { description: 'Optional. The thread id. Defaults to the stopped thread.' },
+		},
+	},
+
+	debug_get_variables: {
+		name: 'debug_get_variables',
+		description: `Retrieves the variables in a scope or object (identified by variablesReference). Supports pagination via start and count.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			variables_reference: { description: 'The variables reference from a scope or variable.' },
+			start: { description: 'Optional. The index of the first variable to return.' },
+			count: { description: 'Optional. The number of variables to return.' },
+		},
+	},
+
+	debug_evaluate_expression: {
+		name: 'debug_evaluate_expression',
+		description: `Evaluates an expression in the context of a stopped stack frame. Returns the result, type, and whether it has children.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			expression: { description: 'The expression to evaluate.' },
+			frame_id: { description: 'Optional. The stack frame id to evaluate in.' },
+		},
+	},
+
+	debug_get_exception_info: {
+		name: 'debug_get_exception_info',
+		description: `Returns information about the exception that caused a thread to stop (message, type, break mode).`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			thread_id: { description: 'The thread id.' },
+		},
+	},
+
+	debug_get_console_output: {
+		name: 'debug_get_console_output',
+		description: `Returns buffered debug console output (program stdout/stderr and debugger output) for a session.`,
+		params: {
+			session_id: { description: 'Optional. The debug session ID. Omits to return output from all sessions.' },
+			limit: { description: 'Optional. Maximum number of output entries to return.' },
+		},
+	},
+
 	// --- editing (create/delete) ---
 
 	create_file_or_folder: {

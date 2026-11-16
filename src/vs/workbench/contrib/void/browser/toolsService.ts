@@ -11,6 +11,7 @@ import { getWorkspaceSymbols, WorkspaceSymbolProviderRegistry } from '../../sear
 import { IFileService } from '../../../../platform/files/common/files.js'
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js'
 import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js'
+import { IBrowserService } from '../common/browserServiceTypes.js'
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js'
 import { QueryBuilder } from '../../../services/search/common/queryBuilder.js'
 import { ISearchService } from '../../../services/search/common/search.js'
@@ -18,6 +19,8 @@ import { IEditCodeService } from './editCodeServiceInterface.js'
 import { ITerminalToolService } from './terminalToolService.js'
 import { IGitToolService } from './gitToolService.js'
 import { ITestToolService } from './testToolService.js'
+import { IDebugToolService } from '../common/debugServiceTypes.js'
+import { IDebuggerActivityService, DebuggerActivityType } from '../common/debuggerActivityServiceTypes.js'
 import { LintErrorItem, BuiltinToolCallParams, BuiltinToolResultType, BuiltinToolName, CodeLocation, NotebookCellOutput } from '../common/toolsServiceTypes.js'
 import { IVoidModelService } from '../common/voidModelService.js'
 import { EndOfLinePreference } from '../../../../editor/common/model.js'
@@ -247,6 +250,7 @@ export class ToolsService implements IToolsService {
 		@ITerminalToolService private readonly terminalToolService: ITerminalToolService,
 		@IGitToolService private readonly gitToolService: IGitToolService,
 		@ITestToolService private readonly testToolService: ITestToolService,
+		@IDebugToolService private readonly debugToolService: IDebugToolService,
 		@IVoidCommandBarService private readonly commandBarService: IVoidCommandBarService,
 		@IDirectoryStrService private readonly directoryStrService: IDirectoryStrService,
 		@IMarkerService private readonly markerService: IMarkerService,
@@ -255,6 +259,7 @@ export class ToolsService implements IToolsService {
 		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
 		@ITextModelService textModelService: ITextModelService,
 		@IMainProcessService mainProcessService: IMainProcessService,
+		@IDebuggerActivityService private readonly debuggerActivityService: IDebuggerActivityService,
 		@INotebookService private readonly notebookService: INotebookService,
 		@INotebookKernelService private readonly notebookKernelService: INotebookKernelService,
 		@INotebookExecutionService private readonly notebookExecutionService: INotebookExecutionService,
@@ -262,6 +267,7 @@ export class ToolsService implements IToolsService {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
 		const webFetchService = ProxyChannel.toService<IKodiaWebFetchService>(mainProcessService.getChannel('void-channel-webFetch'))
 		const webSearchService = ProxyChannel.toService<IWebSearchService>(mainProcessService.getChannel('void-channel-webSearch'))
+		const browserService = ProxyChannel.toService<IBrowserService>(mainProcessService.getChannel('void-channel-browser'))
 
 		const recentPages = new Map<string, WebFetchResult>()
 		const fetchPage = async (url: string) => {
@@ -271,6 +277,33 @@ export class ToolsService implements IToolsService {
 			recentPages.set(url, page)
 			if (recentPages.size > MAX_RECENT_PAGES) recentPages.delete(recentPages.keys().next().value!)
 			return page
+		}
+
+		// Helper to wrap debugger tool calls with activity tracking for live chat UI.
+		const withDebugActivity = async <T>(
+			type: DebuggerActivityType,
+			title: string,
+			description: string,
+			sessionId: string | undefined,
+			fn: () => Promise<T>
+		): Promise<T> => {
+			const activityId = this.debuggerActivityService.startActivity({
+				type,
+				title,
+				description,
+				sessionId,
+			})
+			try {
+				const result = await fn()
+				this.debuggerActivityService.completeActivity(activityId, { details: result })
+				return result
+			} catch (e) {
+				this.debuggerActivityService.failActivity(
+					activityId,
+					e instanceof Error ? e.message : String(e)
+				)
+				throw e
+			}
 		}
 
 		const modelOfFile = async (uri: URI) => {
@@ -423,6 +456,246 @@ export class ToolsService implements IToolsService {
 					maxResults = parsed
 				}
 				return { query, maxResults }
+			},
+
+			// --- Browser automation ---
+			browser_launch: (params: RawToolParamsObj) => {
+				const headless = validateBoolean(params.headless, { default: false })
+				return { headless }
+			},
+			browser_close: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				return { sessionId }
+			},
+			browser_list_sessions: () => ({}),
+			browser_new_tab: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const url = validateOptionalStr('url', params.url) ?? undefined
+				return { sessionId, url }
+			},
+			browser_list_tabs: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				return { sessionId }
+			},
+			browser_switch_tab: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				return { sessionId, tabId }
+			},
+			browser_close_tab: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				return { sessionId, tabId }
+			},
+			browser_navigate: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const url = validateStr('url', params.url)
+				return { sessionId, tabId, url }
+			},
+			browser_back: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				return { sessionId, tabId }
+			},
+			browser_forward: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				return { sessionId, tabId }
+			},
+			browser_reload: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				return { sessionId, tabId }
+			},
+			browser_inspect_page: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				return { sessionId, tabId }
+			},
+			browser_click_element: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const selector = validateStr('selector', params.selector)
+				return { sessionId, tabId, selector }
+			},
+			browser_fill_element: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const selector = validateStr('selector', params.selector)
+				const text = validateStr('text', params.text)
+				return { sessionId, tabId, selector, text }
+			},
+			browser_select_option: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const selector = validateStr('selector', params.selector)
+				const value = validateStr('value', params.value)
+				return { sessionId, tabId, selector, value }
+			},
+			browser_check_element: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const selector = validateStr('selector', params.selector)
+				const checked = validateBoolean(params.checked, { default: false })
+				return { sessionId, tabId, selector, checked }
+			},
+			browser_submit_form: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const selector = validateStr('selector', params.selector)
+				return { sessionId, tabId, selector }
+			},
+			browser_wait_for_element: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const selector = validateStr('selector', params.selector)
+				const timeoutMs = params.timeout_ms === undefined || params.timeout_ms === null ? undefined : Number(params.timeout_ms)
+				return { sessionId, tabId, selector, timeoutMs }
+			},
+			browser_screenshot: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const type = params.type === 'viewport' || params.type === 'fullpage' || params.type === 'element' ? params.type : 'viewport'
+				const selector = validateOptionalStr('selector', params.selector) ?? undefined
+				return { sessionId, tabId, type, selector }
+			},
+			browser_console: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const level = params.level === 'debug' || params.level === 'info' || params.level === 'warning' || params.level === 'error' ? params.level : undefined
+				const limit = params.limit === undefined || params.limit === null ? undefined : Number(params.limit)
+				return { sessionId, tabId, level, limit }
+			},
+			browser_network_failures: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				return { sessionId, tabId }
+			},
+			browser_download: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const url = validateStr('url', params.url)
+				return { sessionId, tabId, url }
+			},
+			browser_list_downloads: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				return { sessionId }
+			},
+			browser_shutdown: () => ({}),
+
+			// --- Debugger automation ---
+			debug_list_configurations: () => ({}),
+			debug_list_sessions: () => ({}),
+			debug_get_session_status: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				return { sessionId }
+			},
+			debug_list_threads: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				return { sessionId }
+			},
+			debug_start_session: (params: RawToolParamsObj) => {
+				const configurationName = validateStr('configurationName', params.configuration_name)
+				const folder = validateOptionalStr('folder', params.folder) ?? undefined
+				const noDebug = validateBoolean(params.no_debug, { default: false })
+				return { configurationName, folder, noDebug }
+			},
+			debug_attach_session: (params: RawToolParamsObj) => {
+				const configurationName = validateStr('configurationName', params.configuration_name)
+				const folder = validateOptionalStr('folder', params.folder) ?? undefined
+				return { configurationName, folder }
+			},
+			debug_stop_session: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const restart = validateBoolean(params.restart, { default: false })
+				const suspend = validateBoolean(params.suspend, { default: false })
+				return { sessionId, restart, suspend }
+			},
+			debug_restart_session: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				return { sessionId }
+			},
+			debug_set_breakpoint: (params: RawToolParamsObj) => {
+				const sessionId = validateOptionalStr('sessionId', params.session_id) ?? undefined
+				const uri = validateStr('uri', params.uri)
+				const lineNumber = validateLine(params.line_number)
+				const column = params.column === undefined || params.column === null ? undefined : validateLine(params.column)
+				const condition = validateOptionalStr('condition', params.condition) ?? undefined
+				const hitCondition = validateOptionalStr('hitCondition', params.hit_condition) ?? undefined
+				const logMessage = validateOptionalStr('logMessage', params.log_message) ?? undefined
+				return { sessionId, uri, lineNumber, column, condition, hitCondition, logMessage }
+			},
+			debug_remove_breakpoint: (params: RawToolParamsObj) => {
+				const breakpointId = validateStr('breakpointId', params.breakpoint_id)
+				return { breakpointId }
+			},
+			debug_set_breakpoint_enabled: (params: RawToolParamsObj) => {
+				const breakpointId = validateStr('breakpointId', params.breakpoint_id)
+				const enabled = validateBoolean(params.enabled, { default: true })
+				return { breakpointId, enabled }
+			},
+			debug_list_breakpoints: () => ({}),
+			debug_continue: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				return { sessionId, threadId }
+			},
+			debug_pause: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				return { sessionId, threadId }
+			},
+			debug_step_over: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				return { sessionId, threadId }
+			},
+			debug_step_into: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				return { sessionId, threadId }
+			},
+			debug_step_out: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				return { sessionId, threadId }
+			},
+			debug_get_stack_trace: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				const startFrame = params.start_frame === undefined || params.start_frame === null ? 0 : Number(params.start_frame)
+				const levels = params.levels === undefined || params.levels === null ? 50 : Number(params.levels)
+				return { sessionId, threadId, startFrame, levels }
+			},
+			debug_get_scopes: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const frameId = params.frame_id === undefined || params.frame_id === null ? 0 : Number(params.frame_id)
+				const threadId = params.thread_id === undefined || params.thread_id === null ? undefined : Number(params.thread_id)
+				return { sessionId, frameId, threadId }
+			},
+			debug_get_variables: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const variablesReference = params.variables_reference === undefined || params.variables_reference === null ? 0 : Number(params.variables_reference)
+				const start = params.start === undefined || params.start === null ? undefined : Number(params.start)
+				const count = params.count === undefined || params.count === null ? undefined : Number(params.count)
+				return { sessionId, variablesReference, start, count }
+			},
+			debug_get_exception_info: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				return { sessionId, threadId }
+			},
+			debug_evaluate_expression: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const expression = validateStr('expression', params.expression)
+				const frameId = params.frame_id === undefined || params.frame_id === null ? undefined : Number(params.frame_id)
+				return { sessionId, expression, frameId }
+			},
+			debug_get_console_output: (params: RawToolParamsObj) => {
+				const sessionId = validateOptionalStr('sessionId', params.session_id) ?? undefined
+				const limit = params.limit === undefined || params.limit === null ? 200 : Number(params.limit)
+				return { sessionId, limit }
 			},
 
 			// ---
@@ -954,6 +1227,382 @@ export class ToolsService implements IToolsService {
 				const response = await webSearchService.search(request)
 				const result: BuiltinToolResultType['web_search'] = { results: response.results }
 				return { result }
+			},
+
+			// --- Browser automation ---
+			browser_launch: async ({ headless }) => {
+				const result = await browserService.launchBrowser({ headless })
+				return { result: { sessionId: result.sessionId, engine: result.engine, headless: result.headless, version: result.version } }
+			},
+			browser_close: async ({ sessionId }) => {
+				await browserService.closeBrowser(sessionId)
+				return { result: {} }
+			},
+			browser_list_sessions: async () => {
+				const sessions = await browserService.listSessions()
+				return { result: { sessions } }
+			},
+			browser_new_tab: async ({ sessionId, url }) => {
+				const result = await browserService.newTab(sessionId, { url })
+				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+			},
+			browser_list_tabs: async ({ sessionId }) => {
+				const tabs = await browserService.listTabs(sessionId)
+				return { result: { tabs } }
+			},
+			browser_switch_tab: async ({ sessionId, tabId }) => {
+				const result = await browserService.switchTab(sessionId, tabId)
+				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+			},
+			browser_close_tab: async ({ sessionId, tabId }) => {
+				await browserService.closeTab(sessionId, tabId)
+				return { result: {} }
+			},
+			browser_navigate: async ({ sessionId, tabId, url }) => {
+				const result = await browserService.navigate(sessionId, tabId, url)
+				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+			},
+			browser_back: async ({ sessionId, tabId }) => {
+				const result = await browserService.goBack(sessionId, tabId)
+				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+			},
+			browser_forward: async ({ sessionId, tabId }) => {
+				const result = await browserService.goForward(sessionId, tabId)
+				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+			},
+			browser_reload: async ({ sessionId, tabId }) => {
+				const result = await browserService.reload(sessionId, tabId)
+				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+			},
+			browser_inspect_page: async ({ sessionId, tabId }) => {
+				const result = await browserService.inspectPage(sessionId, tabId)
+				return { result: { url: result.url, title: result.title, text: result.text, elements: result.elements, forms: result.forms, consoleErrors: result.consoleErrors, networkFailures: result.networkFailures } }
+			},
+			browser_click_element: async ({ sessionId, tabId, selector }) => {
+				await browserService.clickElement(sessionId, tabId, selector)
+				return { result: {} }
+			},
+			browser_fill_element: async ({ sessionId, tabId, selector, text }) => {
+				await browserService.fillElement(sessionId, tabId, selector, text)
+				return { result: {} }
+			},
+			browser_select_option: async ({ sessionId, tabId, selector, value }) => {
+				await browserService.selectOption(sessionId, tabId, selector, value)
+				return { result: {} }
+			},
+			browser_check_element: async ({ sessionId, tabId, selector, checked }) => {
+				await browserService.checkElement(sessionId, tabId, selector, checked)
+				return { result: {} }
+			},
+			browser_submit_form: async ({ sessionId, tabId, selector }) => {
+				const result = await browserService.submitForm(sessionId, tabId, selector)
+				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+			},
+			browser_wait_for_element: async ({ sessionId, tabId, selector, timeoutMs }) => {
+				const result = await browserService.waitForElement(sessionId, tabId, selector, { timeoutMs })
+				return { result: { found: result.found } }
+			},
+			browser_screenshot: async ({ sessionId, tabId, type, selector }) => {
+				const result = await browserService.takeScreenshot(sessionId, tabId, { type, selector })
+				return { result: { dataUrl: result.dataUrl, width: result.width, height: result.height, type: result.type } }
+			},
+			browser_console: async ({ sessionId, tabId, level, limit }) => {
+				const messages = await browserService.getConsoleMessages(sessionId, tabId, { level, limit })
+				return { result: { messages, truncated: false, dropped: 0 } }
+			},
+			browser_network_failures: async ({ sessionId, tabId }) => {
+				const failures = await browserService.getNetworkFailures(sessionId, tabId)
+				return { result: { failures } }
+			},
+			browser_download: async ({ sessionId, tabId, url }) => {
+				const result = await browserService.startDownload(sessionId, tabId, url)
+				return { result: { downloadId: result.downloadId, url: result.url, suggestedFilename: result.suggestedFilename, status: result.status, path: result.path, failureText: result.failureText } }
+			},
+			browser_list_downloads: async ({ sessionId }) => {
+				const downloads = await browserService.listDownloads(sessionId)
+				return { result: { downloads } }
+			},
+			browser_shutdown: async () => {
+				await browserService.shutdown()
+				return { result: {} }
+			},
+
+			// --- Debugger automation ---
+			debug_list_configurations: async () => {
+				return withDebugActivity(
+					'list_configurations',
+					'List debug configurations',
+					'Listing available debug configurations',
+					undefined,
+					async () => {
+						const result = await this.debugToolService.listConfigurations()
+						return { result }
+					}
+				)
+			},
+			debug_list_sessions: async () => {
+				return withDebugActivity(
+					'list_sessions',
+					'List debug sessions',
+					'Listing active debug sessions',
+					undefined,
+					async () => {
+						const result = await this.debugToolService.listSessions()
+						return { result }
+					}
+				)
+			},
+			debug_get_session_status: async ({ sessionId }) => {
+				return withDebugActivity(
+					'get_session_status',
+					'Get session status',
+					`Getting status of session ${sessionId}`,
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.getSessionStatus(sessionId)
+						return { result }
+					}
+				)
+			},
+			debug_start_session: async ({ configurationName, folder, noDebug }) => {
+				return withDebugActivity(
+					'start_session',
+					'Start debug session',
+					`Starting debug session "${configurationName}"`,
+					undefined,
+					async () => {
+						const result = await this.debugToolService.startSession(configurationName, folder, noDebug)
+						return { result }
+					}
+				)
+			},
+			debug_attach_session: async ({ configurationName, folder }) => {
+				return withDebugActivity(
+					'attach_session',
+					'Attach debug session',
+					`Attaching debug session "${configurationName}"`,
+					undefined,
+					async () => {
+						const result = await this.debugToolService.attachSession(configurationName, folder)
+						return { result }
+					}
+				)
+			},
+			debug_stop_session: async ({ sessionId, restart, suspend }) => {
+				return withDebugActivity(
+					'stop_session',
+					'Stop debug session',
+					`Stopping debug session ${sessionId}`,
+					sessionId,
+					async () => {
+						await this.debugToolService.stopSession(sessionId, restart, suspend)
+						return { result: {} }
+					}
+				)
+			},
+			debug_restart_session: async ({ sessionId }) => {
+				return withDebugActivity(
+					'restart_session',
+					'Restart debug session',
+					`Restarting debug session ${sessionId}`,
+					sessionId,
+					async () => {
+						await this.debugToolService.restartSession(sessionId)
+						return { result: {} }
+					}
+				)
+			},
+			debug_set_breakpoint: async ({ sessionId, uri, lineNumber, column, condition, hitCondition, logMessage }) => {
+				return withDebugActivity(
+					'set_breakpoint',
+					'Set breakpoint',
+					`Setting breakpoint at ${uri}:${lineNumber}`,
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.setBreakpoint(sessionId, uri, lineNumber, column, condition, hitCondition, logMessage)
+						return { result }
+					}
+				)
+			},
+			debug_remove_breakpoint: async ({ breakpointId }) => {
+				return withDebugActivity(
+					'remove_breakpoint',
+					'Remove breakpoint',
+					`Removing breakpoint ${breakpointId}`,
+					undefined,
+					async () => {
+						await this.debugToolService.removeBreakpoint(breakpointId)
+						return { result: {} }
+					}
+				)
+			},
+			debug_set_breakpoint_enabled: async ({ breakpointId, enabled }) => {
+				return withDebugActivity(
+					'set_breakpoint_enabled',
+					'Toggle breakpoint',
+					`${enabled ? 'Enabling' : 'Disabling'} breakpoint ${breakpointId}`,
+					undefined,
+					async () => {
+						await this.debugToolService.setBreakpointEnabled(breakpointId, enabled)
+						return { result: {} }
+					}
+				)
+			},
+			debug_list_breakpoints: async () => {
+				return withDebugActivity(
+					'list_breakpoints',
+					'List breakpoints',
+					'Listing all breakpoints',
+					undefined,
+					async () => {
+						const result = await this.debugToolService.listBreakpoints()
+						return { result }
+					}
+				)
+			},
+			debug_continue: async ({ sessionId, threadId }) => {
+				return withDebugActivity(
+					'continue',
+					'Continue execution',
+					'Continuing debug execution',
+					sessionId,
+					async () => {
+						await this.debugToolService.continue(sessionId, threadId)
+						return { result: {} }
+					}
+				)
+			},
+			debug_pause: async ({ sessionId, threadId }) => {
+				return withDebugActivity(
+					'pause',
+					'Pause execution',
+					'Pausing debug execution',
+					sessionId,
+					async () => {
+						await this.debugToolService.pause(sessionId, threadId)
+						return { result: {} }
+					}
+				)
+			},
+			debug_step_over: async ({ sessionId, threadId }) => {
+				return withDebugActivity(
+					'step_over',
+					'Step over',
+					'Stepping over execution',
+					sessionId,
+					async () => {
+						await this.debugToolService.stepOver(sessionId, threadId)
+						return { result: {} }
+					}
+				)
+			},
+			debug_step_into: async ({ sessionId, threadId }) => {
+				return withDebugActivity(
+					'step_into',
+					'Step into',
+					'Stepping into execution',
+					sessionId,
+					async () => {
+						await this.debugToolService.stepInto(sessionId, threadId)
+						return { result: {} }
+					}
+				)
+			},
+			debug_step_out: async ({ sessionId, threadId }) => {
+				return withDebugActivity(
+					'step_out',
+					'Step out',
+					'Stepping out of execution',
+					sessionId,
+					async () => {
+						await this.debugToolService.stepOut(sessionId, threadId)
+						return { result: {} }
+					}
+				)
+			},
+			debug_list_threads: async ({ sessionId }) => {
+				return withDebugActivity(
+					'list_threads',
+					'List threads',
+					'Listing threads in debug session',
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.listThreads(sessionId)
+						return { result }
+					}
+				)
+			},
+			debug_get_stack_trace: async ({ sessionId, threadId, startFrame, levels }) => {
+				return withDebugActivity(
+					'get_stack_trace',
+					'Get stack trace',
+					`Getting stack trace for thread ${threadId}`,
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.getStackTrace(sessionId, threadId, startFrame, levels)
+						return { result }
+					}
+				)
+			},
+			debug_get_scopes: async ({ sessionId, frameId, threadId }) => {
+				return withDebugActivity(
+					'get_scopes',
+					'Get scopes',
+					`Getting variable scopes for frame ${frameId}`,
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.getScopes(sessionId, frameId, threadId)
+						return { result }
+					}
+				)
+			},
+			debug_get_variables: async ({ sessionId, variablesReference, start, count }) => {
+				return withDebugActivity(
+					'get_variables',
+					'Get variables',
+					`Getting variables (ref ${variablesReference})`,
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.getVariables(sessionId, variablesReference, start, count)
+						return { result }
+					}
+				)
+			},
+			debug_evaluate_expression: async ({ sessionId, expression, frameId }) => {
+				return withDebugActivity(
+					'evaluate_expression',
+					'Evaluate expression',
+					`Evaluating: ${expression}`,
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.evaluateExpression(sessionId, expression, frameId)
+						return { result }
+					}
+				)
+			},
+			debug_get_exception_info: async ({ sessionId, threadId }) => {
+				return withDebugActivity(
+					'get_exception_info',
+					'Get exception info',
+					'Getting exception information',
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.getExceptionInfo(sessionId, threadId)
+						return { result }
+					}
+				)
+			},
+			debug_get_console_output: async ({ sessionId, limit }) => {
+				return withDebugActivity(
+					'get_console_output',
+					'Read console output',
+					'Reading debug console output',
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.getConsoleOutput(sessionId, limit)
+						return { result }
+					}
+				)
 			},
 
 			// ---
@@ -1696,6 +2345,148 @@ export class ToolsService implements IToolsService {
 					return `${i + 1}. ${r.title}\n${r.url}${date}\n${snippet}`
 				})
 				return lines.join('\n\n')
+			},
+
+			// --- Browser automation ---
+			browser_launch: (_params, result) => {
+				return `Browser launched (session ${result.sessionId}, ${result.engine}, headless=${result.headless}, v${result.version}).`
+			},
+			browser_close: () => 'Browser session closed.',
+			browser_list_sessions: (_params, result) => {
+				if (result.sessions.length === 0) return 'No active browser sessions.'
+				return result.sessions.map(s => `Session ${s.sessionId}: ${s.engine} headless=${s.headless}, tabs=${s.tabCount}`).join('\n')
+			},
+			browser_new_tab: (_params, result) => `Opened tab ${result.tabId} (${result.url}).`,
+			browser_list_tabs: (_params, result) => {
+				if (result.tabs.length === 0) return 'No open tabs.'
+				return result.tabs.map(t => {
+					const active = t.isActive ? ' (active)' : ''
+					const load = t.loading ? ' loading' : ''
+					const err = t.loadError ? ` [load error: ${t.loadError}]` : ''
+					return `Tab ${t.tabId}: ${t.url}${active}${load}${err}${t.title ? ` — ${t.title}` : ''}`
+				}).join('\n')
+			},
+			browser_switch_tab: (_params, result) => `Switched to tab ${result.tabId} (${result.url}).`,
+			browser_close_tab: () => 'Tab closed.',
+			browser_navigate: (_params, result) => `Navigated to ${result.url} — ${result.title || '(no title)'}`,
+			browser_back: (_params, result) => `Went back to ${result.url} — ${result.title || '(no title)'}`,
+			browser_forward: (_params, result) => `Went forward to ${result.url} — ${result.title || '(no title)'}`,
+			browser_reload: (_params, result) => `Reloaded ${result.url} — ${result.title || '(no title)'}`,
+			browser_inspect_page: (_params, result) => {
+				const lines: string[] = []
+				lines.push(`Page: ${result.title || '(no title)'}`)
+				lines.push(`URL: ${result.url}`)
+				lines.push(`Visible text:\n${result.text.slice(0, 3000)}${result.text.length > 3000 ? '...' : ''}`)
+				if (result.elements.length > 0) {
+					lines.push('\nInteractive elements:')
+					for (const e of result.elements.slice(0, 40)) {
+						const state = e.disabled ? ' disabled' : ''
+						const checked = e.checked !== undefined ? ` [${e.checked ? 'checked' : 'unchecked'}]` : ''
+						const opts = e.options && e.options.length > 0 ? ` options=[${e.options.join(', ')}]` : ''
+						lines.push(`  [${e.type}] ${e.selector} — ${e.label || '(no label)'}${state}${checked}${opts}${e.value !== undefined ? ` value="${e.value}"` : ''}`)
+					}
+					if (result.elements.length > 40) lines.push(`  ... and ${result.elements.length - 40} more elements`)
+				}
+				if (result.forms.length > 0) {
+					lines.push('\nForms:')
+					for (const f of result.forms) lines.push(`  form ${f.selector} action="${f.action ?? ''}" method="${f.method ?? ''}"`)
+				}
+				lines.push(`\nConsole errors captured: ${result.consoleErrors}, Network failures: ${result.networkFailures}`)
+				return lines.join('\n')
+			},
+			browser_click_element: () => 'Element clicked.',
+			browser_fill_element: () => 'Element filled.',
+			browser_select_option: () => 'Option selected.',
+			browser_check_element: () => 'Element check state changed.',
+			browser_submit_form: (_params, result) => `Form submitted (${result.url}).`,
+			browser_wait_for_element: (_params, result) => result.found ? 'Element found.' : 'Element not found within the timeout.',
+			browser_screenshot: (_params, result) => `Screenshot captured (${result.type}, ${result.width}x${result.height}).`,
+			browser_console: (_params, result) => {
+				if (!result.messages || result.messages.length === 0) return 'No console messages.'
+				return result.messages.map(m => `[${m.level}] ${m.text}`).join('\n')
+			},
+			browser_network_failures: (_params, result) => {
+				if (!result.failures || result.failures.length === 0) return 'No network failures.'
+				return result.failures.map(f => `[${f.type}] ${f.url} — ${f.errorText}`).join('\n')
+			},
+			browser_download: (_params, result) => {
+				const status = result.path ? `saved to ${result.path}` : result.failureText || 'failed'
+				return `Download ${result.downloadId} (${result.suggestedFilename}): ${result.status} — ${status}`
+			},
+			browser_list_downloads: (_params, result) => {
+				if (!result.downloads || result.downloads.length === 0) return 'No downloads.'
+				return result.downloads.map(d => `  ${d.downloadId}: ${d.suggestedFilename} — ${d.status}${d.path ? ` (${d.path})` : ''}${d.failureText ? ` [${d.failureText}]` : ''}`).join('\n')
+			},
+			browser_shutdown: () => 'Browser automation service shut down. All sessions closed.',
+
+			// --- Debugger automation ---
+			debug_list_configurations: (_params, result) => {
+				if (result.configurations.length === 0) return 'No debug configurations found.'
+				return result.configurations.map(c => `${c.name} [${c.type}, ${c.request}]${c.folder ? ` (${c.folder})` : ''}`).join('\n')
+			},
+			debug_list_sessions: (_params, result) => {
+				if (result.sessions.length === 0) return 'No active debug sessions.'
+				return result.sessions.map(s => `Session ${s.sessionId}: ${s.name} [${s.type}, ${s.request}] state=${s.state}`).join('\n')
+			},
+			debug_get_session_status: (_params, result) => {
+				return `Session ${result.sessionId}: ${result.name}\nType: ${result.type} (${result.request})\nState: ${result.state}${result.folder ? `\nFolder: ${result.folder}` : ''}`
+			},
+			debug_start_session: (_params, result) => `Started debug session ${result.sessionId}: ${result.name} [${result.type}, ${result.request}] state=${result.state}`,
+			debug_attach_session: (_params, result) => `Attached debug session ${result.sessionId}: ${result.name} [${result.type}, ${result.request}] state=${result.state}`,
+			debug_stop_session: () => 'Debug session stopped.',
+			debug_restart_session: () => 'Debug session restarted.',
+			debug_set_breakpoint: (_params, result) => {
+				const v = result.verified ? 'verified' : 'UNVERIFIED';
+				return `Breakpoint ${result.id} at ${result.uri}:${result.lineNumber} (${v}, ${result.enabled ? 'enabled' : 'disabled'})`;
+			},
+			debug_remove_breakpoint: () => 'Breakpoint removed.',
+			debug_set_breakpoint_enabled: (_params, result) => 'Breakpoint enabled state updated.',
+			debug_list_breakpoints: (_params, result) => {
+				if (result.breakpoints.length === 0) return 'No breakpoints.'
+				return result.breakpoints.map(b => `  ${b.id}: ${b.uri}:${b.lineNumber} (${b.enabled ? 'enabled' : 'disabled'}, ${b.verified ? 'verified' : 'unverified'})`).join('\n')
+			},
+			debug_continue: () => 'Execution continued.',
+			debug_pause: () => 'Execution paused.',
+			debug_step_over: () => 'Stepped over.',
+			debug_step_into: () => 'Stepped into.',
+			debug_step_out: () => 'Stepped out.',
+			debug_list_threads: (_params, result) => {
+				if (result.threads.length === 0) return 'No threads.'
+				return result.threads.map(t => `Thread ${t.threadId}: ${t.name} (${t.stateLabel}, ${t.stopped ? 'stopped' : 'running'})`).join('\n')
+			},
+			debug_get_stack_trace: (_params, result) => {
+				const lines = [`Stack trace (${result.frames.length} of ${result.totalFrames} frames):`];
+				for (const f of result.frames) {
+					const loc = f.sourcePath ? `${f.sourceName || f.sourcePath}:${f.line}:${f.column}` : '<no source>';
+					lines.push(`  Frame ${f.frameId}: ${f.name} — ${loc}`);
+				}
+				return lines.join('\n');
+			},
+			debug_get_scopes: (_params, result) => {
+				if (result.scopes.length === 0) return 'No scopes.'
+				return result.scopes.map(s => `Scope ${s.name} (ref=${s.variablesReference}, ${s.expensive ? 'expensive' : 'cheap'}, ${s.hasChildren ? 'has children' : 'no children'})`).join('\n')
+			},
+			debug_get_variables: (_params, result) => {
+				if (result.variables.length === 0) return 'No variables.'
+				return result.variables.map(v => {
+					const kids = v.hasChildren ? ` (ref=${v.variablesReference})` : '';
+					return `  ${v.name} = ${v.value}${kids} [${v.type}]`;
+				}).join('\n')
+			},
+			debug_evaluate_expression: (_params, result) => {
+				const kids = result.hasChildren ? ` (ref=${result.variablesReference})` : '';
+				return `Result: ${result.result}\nType: ${result.type}${kids}`;
+			},
+			debug_get_exception_info: (_params, result) => {
+				const lines = [`Exception info:`];
+				if (result.id) lines.push(`  Id: ${result.id}`);
+				if (result.description) lines.push(`  Description: ${result.description}`);
+				lines.push(`  Break mode: ${result.breakMode}`);
+				return lines.join('\n');
+			},
+			debug_get_console_output: (_params, result) => {
+				if (!result.output || result.output.length === 0) return 'No console output.';
+				return result.output.map(o => `[${o.sessionId.slice(0, 8)}] ${o.text}`).join('\n');
 			},
 
 			// ---

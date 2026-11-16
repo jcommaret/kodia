@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { net, session } from 'electron';
-import { pathToFileURL } from 'url';
+import { session } from 'electron';
+import * as fs from 'fs';
 import { Disposable, IDisposable, toDisposable } from '../../../base/common/lifecycle.js';
 import { COI, FileAccess, Schemas, CacheControlheaders, DocumentPolicyheaders } from '../../../base/common/network.js';
 import { basename, extname, normalize } from '../../../base/common/path.js';
@@ -150,21 +150,24 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 
 	private async createFileResponse(request: GlobalRequest, path: string, headers: Record<string, string> | undefined): Promise<GlobalResponse> {
 		try {
-			const response = await net.fetch(pathToFileURL(path).toString(), {
-				method: request.method,
-				headers: request.headers,
-				bypassCustomProtocolHandlers: true
-			});
-			if (headers) {
-				for (const [name, value] of Object.entries(headers)) {
-					response.headers.set(name, value);
-				}
+			const content = await fs.promises.readFile(path);
+			const responseHeaders = new Headers(headers ?? {});
+
+			// Ensure JavaScript files have the correct Content-Type for ESM import()
+			const ext = extname(path).toLowerCase();
+			if (ext === '.js') {
+				responseHeaders.set('content-type', 'text/javascript');
 			}
 
-			return response;
+			const uint8Array = new Uint8Array(content);
+			return new Response(uint8Array, {
+				status: 200,
+				statusText: 'OK',
+				headers: responseHeaders,
+			});
 		} catch (error) {
 			this.logService.error(`${Schemas.vscodeFileResource}: Failed to load resource ${path}`, error);
-			return Response.error();
+			return new Response(null, { status: 404, statusText: 'Not Found' });
 		}
 	}
 

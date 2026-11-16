@@ -12,6 +12,7 @@ import { ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsSer
 import { AutonomyMode, autonomyModes } from '../../../../common/autonomyPolicy.js'
 import { TaskPlan, TaskStatus, getPlanProgress } from '../../../../common/autonomousTask.js'
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
+import { ITaskPlanService } from '../../../../common/taskPlanService.js';
 import { GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
 
 // whether the agent runs this kind of tool without asking, and a setter
@@ -45,7 +46,9 @@ const labelOfApprovalType: { [T in ToolApprovalType]: string } = {
 	'edits': 'Edit files without asking',
 	'terminal': 'Run terminal commands without asking',
 	'planning': 'Plan tasks without asking',
+	'debug': 'Debug without asking',
 	'web pages': 'Fetch web pages without asking',
+	'web_search': 'Fetch web pages without asking',
 	'MCP tools': 'Use MCP tools without asking',
 	'git': 'Git operations without asking',
 	'test': 'Test operations without asking',
@@ -109,7 +112,7 @@ export const AutonomyModeSelector = () => {
 const TaskPlanDisplay = () => {
 	const accessor = useAccessor()
 	const chatThreadService = accessor.get('IChatThreadService')
-	const taskPlanService = accessor.get('TaskPlanService')
+	const taskPlanService = accessor.get(ITaskPlanService)
 	const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null)
 
 	useEffect(() => {

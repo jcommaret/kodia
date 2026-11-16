@@ -225,6 +225,8 @@ import { IKodiaWebFetchService } from '../../workbench/contrib/void/common/webFe
 import { KodiaWebFetchMainService } from '../../workbench/contrib/void/electron-main/webFetchMainService.js';
 import { IWebSearchService } from '../../workbench/contrib/void/common/webSearchTypes.js';
 import { WebSearchMainService } from '../../workbench/contrib/void/electron-main/webSearchMainService.js';
+import { IBrowserService } from '../../workbench/contrib/void/common/browserServiceTypes.js';
+import { KodiaBrowserMainService } from '../../workbench/contrib/void/electron-main/browserMainService.js';
 import { IKodiaWindowsService, KODIA_WINDOWS_CHANNEL } from '../../platform/windows/common/kodiaWindows.js';
 import { KodiaWindowsMainService } from '../../platform/windows/electron-main/kodiaWindowsMainService.js';
 /**
@@ -1368,6 +1370,7 @@ export class CodeApplication extends Disposable {
 		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
 		services.set(IKodiaWebFetchService, new SyncDescriptor(KodiaWebFetchMainService, undefined, false));
 		services.set(IWebSearchService, new SyncDescriptor(WebSearchMainService, undefined, false));
+		services.set(IBrowserService, new SyncDescriptor(KodiaBrowserMainService, undefined, false));
 		services.set(IKodiaWindowsService, new SyncDescriptor(KodiaWindowsMainService, undefined, false));
 
 		// Default Extensions Profile Init
@@ -1568,6 +1571,10 @@ export class CodeApplication extends Disposable {
 		// Kodia: the web search tool
 		const webSearchChannel = ProxyChannel.fromService(accessor.get(IWebSearchService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-webSearch', webSearchChannel);
+
+		// Kodia: the browser automation tool
+		const browserChannel = ProxyChannel.fromService(accessor.get(IBrowserService), disposables);
+		mainProcessElectronServer.registerChannel('void-channel-browser', browserChannel);
 
 		// Kodia: the Agents Window opens Kodia's settings in an editor window
 		const kodiaWindowsChannel = ProxyChannel.fromService(accessor.get(IKodiaWindowsService), disposables);

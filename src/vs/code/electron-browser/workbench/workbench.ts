@@ -508,8 +508,12 @@ import { getPartsSplashColors, getPartsSplashLayoutMetrics } from './partsSplash
 		// ESM Import
 		try {
 			let workbenchUrl: string;
-			if (!!safeProcess.env['VSCODE_DEV'] && globalThis._VSCODE_USE_RELATIVE_IMPORTS) {
-				workbenchUrl = '../../../workbench/workbench.desktop.main.js'; // for dev purposes only
+			if (!!safeProcess.env['VSCODE_DEV']) {
+				// Dev mode: use vscode-file:// URL for import().
+				// The vscode-file:// protocol handler properly serves JS files
+				// with Content-Type: text/javascript for ESM import() support.
+				globalThis._VSCODE_USE_RELATIVE_IMPORTS = true;
+				workbenchUrl = new URL(`vs/workbench/workbench.desktop.main.js`, baseUrl).href;
 			} else {
 				workbenchUrl = new URL(`vs/workbench/workbench.desktop.main.js`, baseUrl).href;
 			}

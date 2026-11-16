@@ -155,4 +155,4 @@ export class TaskPlanService extends Disposable implements ITaskPlanService {
 	}
 }
 
-registerSingleton(ITaskPlanService, TaskPlanService, InstantiationType.Delayed);
+registerSingleton(ITaskPlanService, TaskPlanService, InstantiationType.Eager);

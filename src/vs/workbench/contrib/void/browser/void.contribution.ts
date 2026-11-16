@@ -32,6 +32,9 @@ import './convertToLLMMessageWorkbenchContrib.js'
 // tools
 import './toolsService.js'
 import './terminalToolService.js'
+import './debugToolService.js'
+import './debuggerActivityService.js'
+import './debugSessionPanel.js'
 
 // register Thread History
 import './chatThreadService.js'

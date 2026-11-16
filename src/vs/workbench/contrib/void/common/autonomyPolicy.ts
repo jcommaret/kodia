@@ -24,6 +24,55 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'read_project_memory',
 	'fetch_url',
 	'web_search',
+	// Browser automation
+	'browser_launch',
+	'browser_close',
+	'browser_list_sessions',
+	'browser_new_tab',
+	'browser_list_tabs',
+	'browser_switch_tab',
+	'browser_close_tab',
+	'browser_navigate',
+	'browser_back',
+	'browser_forward',
+	'browser_reload',
+	'browser_inspect_page',
+	'browser_click_element',
+	'browser_fill_element',
+	'browser_select_option',
+	'browser_check_element',
+	'browser_submit_form',
+	'browser_wait_for_element',
+	'browser_screenshot',
+	'browser_console',
+	'browser_network_failures',
+	'browser_download',
+	'browser_list_downloads',
+	'browser_shutdown',
+	// Debugger automation
+	'debug_list_configurations',
+	'debug_list_sessions',
+	'debug_get_session_status',
+	'debug_list_threads',
+	'debug_start_session',
+	'debug_attach_session',
+	'debug_stop_session',
+	'debug_restart_session',
+	'debug_set_breakpoint',
+	'debug_remove_breakpoint',
+	'debug_set_breakpoint_enabled',
+	'debug_list_breakpoints',
+	'debug_continue',
+	'debug_pause',
+	'debug_step_over',
+	'debug_step_into',
+	'debug_step_out',
+	'debug_get_stack_trace',
+	'debug_get_scopes',
+	'debug_get_variables',
+	'debug_evaluate_expression',
+	'debug_get_exception_info',
+	'debug_get_console_output',
 	'create_file_or_folder',
 	'delete_file_or_folder',
 	'rewrite_file',
@@ -218,6 +267,66 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 			}
 			return 'high';
 		}
+
+		// Browser automation - reads and inspections are low risk.
+		case 'browser_launch':
+		case 'browser_close':
+		case 'browser_list_sessions':
+		case 'browser_new_tab':
+		case 'browser_list_tabs':
+		case 'browser_switch_tab':
+		case 'browser_close_tab':
+		case 'browser_back':
+		case 'browser_forward':
+		case 'browser_reload':
+		case 'browser_inspect_page':
+		case 'browser_wait_for_element':
+		case 'browser_screenshot':
+		case 'browser_console':
+		case 'browser_network_failures':
+		case 'browser_list_downloads':
+		case 'browser_shutdown':
+			return 'low';
+
+		// Debugger automation - inspection is low risk.
+		case 'debug_list_configurations':
+		case 'debug_list_sessions':
+		case 'debug_get_session_status':
+		case 'debug_list_threads':
+		case 'debug_get_stack_trace':
+		case 'debug_get_scopes':
+		case 'debug_get_variables':
+		case 'debug_list_breakpoints':
+		case 'debug_get_exception_info':
+		case 'debug_get_console_output':
+			return 'low';
+
+		// Debugger automation - session control, breakpoints, execution control,
+		// and expression evaluation change the target's state or run code.
+		case 'debug_start_session':
+		case 'debug_attach_session':
+		case 'debug_stop_session':
+		case 'debug_restart_session':
+		case 'debug_set_breakpoint':
+		case 'debug_remove_breakpoint':
+		case 'debug_set_breakpoint_enabled':
+		case 'debug_continue':
+		case 'debug_pause':
+		case 'debug_step_over':
+		case 'debug_step_into':
+		case 'debug_step_out':
+		case 'debug_evaluate_expression':
+			return 'medium';
+
+		// Browser interactions that change page state or trigger navigation/downloads.
+		case 'browser_navigate':
+		case 'browser_click_element':
+		case 'browser_fill_element':
+		case 'browser_select_option':
+		case 'browser_check_element':
+		case 'browser_submit_form':
+		case 'browser_download':
+			return 'medium';
 	}
 	return 'medium';
 }

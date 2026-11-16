@@ -164,6 +164,25 @@ export const catalogModelsOfProvider = {
 	liteLLM: [],
 	nvidia: [ // https://docs.api.nvidia.com/nim — discovered dynamically from GET /v1/models
 		'nvidia/nemotron-3.5-super-vl-120b-a12b',
+		'nvidia/nemotron-3-ultra-550b-a55b',
+		'nvidia/nemotron-3-nano-omni',
+		'nvidia/deepseek-v4-1-flash',
+		'nvidia/glm-5-3-flash',
+		'nvidia/step-5-preview',
+		'nvidia/diffusiongemma-26b-a4b-it',
+		'nvidia/gemma-4-31b-it',
+		'nvidia/gpt-oss-20b',
+		'nvidia/laguna-xs-2-1',
+		'nvidia/llama-3-2-11b-vision-instruct',
+		'nvidia/llama-guard-4-12b',
+		'nvidia/llama-3-1-nemotron-safety-guard-8b-v3',
+		'nvidia/llama-3-2-90b-vision-instruct',
+		'nvidia/minimax-m3-1-flash',
+		'nvidia/muse-glimmer-30b',
+		'nvidia/nemotron-3-5-content-safety',
+		'nvidia/nemotron-3-5-lightning-30b-a3b',
+		'nvidia/nemotron-voicechat',
+		'nvidia/paligemma',
 	],
 
 
@@ -1733,6 +1752,351 @@ const nvidiaModelOptions = {
 			reasoningReservedOutputTokenSpaceSource: 'verified'
 		},
 	},
+	// https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard
+	'nvidia/nemotron-3-ultra-550b-a55b': {
+		contextWindow: 1_048_576, // 1M context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: false, // Text, Tools only
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'medium', 'high'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/nvidia/nemotron-3-nano-omni/modelcard
+	'nvidia/nemotron-3-nano-omni': {
+		contextWindow: 262_144, // 256K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Audio, Video, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'high', 'max'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/deepseek/deepseek-v4-1-flash/modelcard
+	'nvidia/deepseek-v4-1-flash': {
+		contextWindow: 1_048_576, // 1M context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'low', 'high', 'max'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/z-ai/glm-5-3-flash/modelcard
+	'nvidia/glm-5-3-flash': {
+		contextWindow: 1_048_576, // 1M context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'thinking'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/stepfun/step-5-preview/modelcard
+	'nvidia/step-5-preview': {
+		contextWindow: 1_048_576, // 1M context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/google/diffusiongemma-26b-a4b-it/modelcard
+	'nvidia/diffusiongemma-26b-a4b-it': {
+		contextWindow: 262_144, // 250K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Video, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/google/gemma-4-31b-it/modelcard
+	'nvidia/gemma-4-31b-it': {
+		contextWindow: 262_144, // 256K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Video, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'thinking'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/openai/gpt-oss-20b/modelcard
+	'nvidia/gpt-oss-20b': {
+		contextWindow: 131_072, // 131K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: false, // Text, Tools only
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'low', 'medium', 'high'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/laguna-xs-2-1/modelcard
+	'nvidia/laguna-xs-2-1': {
+		contextWindow: 262_144, // 262K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: false, // Text, Tools only
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: false,
+	},
+	// https://build.nvidia.com/meta/llama-3-2-11b-vision-instruct/modelcard
+	'nvidia/llama-3-2-11b-vision-instruct': {
+		contextWindow: 131_072, // 128K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: false,
+	},
+	// https://build.nvidia.com/meta/llama-guard-4-12b/modelcard
+	'nvidia/llama-guard-4-12b': {
+		contextWindow: 163_840, // 163K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: false,
+	},
+	// https://build.nvidia.com/nvidia/llama-3-1-nemotron-safety-guard-8b-v3/modelcard
+	'nvidia/llama-3-1-nemotron-safety-guard-8b-v3': {
+		contextWindow: 131_072, // 128K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: false, // Text only
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: false,
+	},
+	// https://build.nvidia.com/meta/llama-3-2-90b-vision-instruct/modelcard
+	'nvidia/llama-3-2-90b-vision-instruct': {
+		contextWindow: 131_072, // 128K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: false,
+	},
+	// https://build.nvidia.com/minimax/minimax-m3-1-flash/modelcard
+	'nvidia/minimax-m3-1-flash': {
+		contextWindow: 262_144, // 262K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Video, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'thinking'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/muse/muse-glimmer-30b/modelcard
+	'nvidia/muse-glimmer-30b': {
+		contextWindow: 131_072, // 131K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'minimal', 'low', 'medium', 'high', 'max'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/nvidia/nemotron-3-5-content-safety/modelcard
+	'nvidia/nemotron-3-5-content-safety': {
+		contextWindow: 131_072, // 128K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'thinking'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/nvidia/nemotron-3-5-lightning-30b-a3b/modelcard
+	'nvidia/nemotron-3-5-lightning-30b-a3b': {
+		contextWindow: 262_144, // 262K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: false, // Text, Tools only
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: {
+			supportsReasoning: true as const,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'thinking'], default: 'default' },
+		},
+	},
+	// https://build.nvidia.com/nvidia/nemotron-voicechat/modelcard
+	'nvidia/nemotron-voicechat': {
+		contextWindow: 131_072, // 128K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: false, // Text, Audio, Tools
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: false,
+	},
+	// https://build.nvidia.com/google/paligemma/modelcard
+	'nvidia/paligemma': {
+		contextWindow: 131_072, // 128K context
+		contextWindowSource: 'catalog',
+		reservedOutputTokenSpace: 32_768,
+		reservedOutputTokenSpaceSource: 'catalog',
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // Text, Image
+		supportsPDF: false,
+		specialToolFormat: 'openai-style',
+		supportsSystemMessage: 'system-role',
+		reasoningCapabilities: false,
+	},
 } as const satisfies { [s: string]: VoidStaticModelInfo }
 
 const nvidiaIncludeInPayloadReasoning = (reasoningInfo: SendableReasoningInfo) => {
@@ -1751,7 +2115,7 @@ const nvidiaIncludeInPayloadReasoning = (reasoningInfo: SendableReasoningInfo) =
 
 const nvidiaSettings: VoidStaticProviderInfo = {
 	modelOptions: nvidiaModelOptions,
-	modelOptionsFallback: (modelName) => null,
+	modelOptionsFallback: (modelName) => extensiveModelOptionsFallback(modelName),
 	providerReasoningIOSettings: {
 		input: { includeInPayload: nvidiaIncludeInPayloadReasoning },
 		output: { nameOfFieldInDelta: 'reasoning_content' }, // verified: model streams `reasoning_content`

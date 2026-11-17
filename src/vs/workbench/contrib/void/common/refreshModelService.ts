@@ -49,6 +49,7 @@ const refreshBasedOn: { [k in RefreshableProviderName]: (keyof SettingsOfProvide
 	vLLM: ['_didFillInProviderSettings', 'endpoint'],
 	lmStudio: ['_didFillInProviderSettings', 'endpoint'],
 	mlx: ['_didFillInProviderSettings', 'endpoint'],
+	groq: ['_didFillInProviderSettings', 'apiKey'],
 	// openAICompatible: ['_didFillInProviderSettings', 'endpoint', 'apiKey'],
 }
 const REFRESH_INTERVAL = 5_000
@@ -147,6 +148,7 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 		vLLM: { state: 'init', timeoutId: null },
 		lmStudio: { state: 'init', timeoutId: null },
 		mlx: { state: 'init', timeoutId: null },
+		groq: { state: 'init', timeoutId: null },
 	}
 
 

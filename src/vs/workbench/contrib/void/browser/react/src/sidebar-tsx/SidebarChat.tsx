@@ -3358,7 +3358,22 @@ export const SidebarChat = () => {
 			llmMessageService.sendLLMMessage({
 				messagesType: 'chatMessages',
 				messages: [{ role: 'user', content: currentText }] as LLMChatMessage[],
-				separateSystemMessage: 'You are a prompt improvement assistant. Rewrite the user\'s prompt to be clearer, more detailed, and more likely to produce an accurate result. Do NOT change the user\'s intent or meaning. Do NOT answer the prompt — only rewrite it. Return only the rewritten prompt, with no preamble, quotes, or explanation.',
+				separateSystemMessage: `SYSTEM INSTRUCTION — READ CAREFULLY:
+
+You are a prompt REWRITING assistant. Your ONLY job is to rewrite the user's prompt to be clearer, more detailed, and more effective for an AI agent to understand and perform well.
+
+ABSOLUTE RULES — YOU MUST FOLLOW ALL OF THESE:
+1. Do NOT answer, respond to, or address the user's prompt in any way.
+2. Do NOT provide information, explanations, code, or solutions related to the prompt content.
+3. Do NOT say "Here is the rewritten prompt" or any preamble.
+4. Do NOT use quotes around the output.
+5. Do NOT add any explanation, commentary, or meta-text.
+6. Return ONLY the rewritten prompt text itself, nothing else.
+7. Do NOT change the user's intent or meaning — only improve clarity, detail, and structure.
+8. If the prompt is very short, expand it with relevant detail and context that would help an AI agent perform better.
+9. Keep the output as just the rewritten prompt, ready to be copied and sent.
+
+The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 				chatMode: null,
 				modelSelection,
 				modelSelectionOptions: settingsState.optionsOfModelSelection['Chat'][modelSelection.providerName]?.[modelSelection.modelName],

@@ -569,8 +569,10 @@ export const ButtonStop = ({ className, ...props }: ButtonHTMLAttributes<HTMLBut
 const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: string) => void }) => {
 	const [listening, setListening] = useState(false)
 	const [transcript, setTranscript] = useState('')
+	const [error, setError] = useState<string | null>(null)
 
 	const startRecording = async () => {
+		setError(null)
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
 			mediaRecorderRef.current = new MediaRecorder(stream)
@@ -578,7 +580,7 @@ const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: st
 			// Speech-to-text using Web Speech API
 			const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 			if (!SpeechRecognition) {
-				console.warn('Speech recognition not supported in this browser')
+				setError('Speech recognition not supported in this browser')
 				return
 			}
 
@@ -611,14 +613,16 @@ const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: st
 			recognitionRef.current.onerror = (event: any) => {
 				console.error('Speech recognition error:', event.error)
 				setListening(false)
+				setError(`Speech recognition error: ${event.error}`)
 				mediaRecorderRef.current?.stop()
 				stream.getTracks().forEach(t => t.stop())
 			}
 
 			recognitionRef.current.start()
 			setListening(true)
-		} catch (e) {
+		} catch (e: any) {
 			console.error('Failed to start audio recording:', e)
+			setError(`Failed to start audio recording: ${e?.message || String(e)}`)
 		}
 	}
 
@@ -640,7 +644,7 @@ const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: st
 				type='button'
 				onClick={listening ? stopRecording : startRecording}
 				className={`rounded-full flex-shrink-0 flex-grow-0 cursor-pointer flex items-center justify-center
-					${listening ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-void-fg-3 hover:bg-zinc-700/20'}
+					${listening ? 'bg-red-500 text-white animate-pulse' : 'bg-zinc-800/50 text-void-fg-1 hover:bg-zinc-700/50'}
 					transition-all duration-200
 				`}
 				title={listening ? 'Stop recording' : 'Record audio (speech-to-text)'}
@@ -650,13 +654,31 @@ const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: st
 				) : (
 					<Mic size={16} className="stroke-[2.5]" />
 				)}
-				{transcript && (
+				{error && (
+					<span className='absolute -top-2 -right-2 bg-red-500 text-white text-[8px] px-1 py-0.5 rounded-full animate-pulse'>
+						!
+					</span>
+				)}
+				{transcript && !error && (
 					<span className='absolute -top-2 -right-2 bg-red-500 text-white text-[8px] px-1 py-0.5 rounded-full animate-pulse'>
 						●
 					</span>
 				)}
 			</button>
-			{listening && transcript && (
+			{error && (
+				<div className='flex items-center gap-2 px-2 py-1 bg-red-500/10 rounded border border-red-500/30 text-xs text-red-300 w-full max-w-xs'>
+					<AlertTriangle size={12} className="text-red-400" />
+					<span className='flex-1 truncate'>{error}</span>
+					<button
+						onClick={() => setError(null)}
+						className='text-xs text-red-400 hover:text-red-200'
+						title='Dismiss error'
+					>
+						✕
+					</button>
+				</div>
+			)}
+			{listening && transcript && !error && (
 				<div className='flex items-center gap-2 px-2 py-1 bg-zinc-800/50 rounded border border-zinc-700/50 text-xs text-void-fg-2 w-full max-w-xs'>
 					<Mic size={12} className="text-zinc-400 animate-pulse" />
 					<span className='flex-1 truncate text-void-fg-2'>{transcript}</span>

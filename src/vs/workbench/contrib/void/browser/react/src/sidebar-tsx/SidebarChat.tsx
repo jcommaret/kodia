@@ -570,6 +570,8 @@ const AudioRecordButton = ({ onTranscriptReady }: { onTranscriptReady: (text: st
 	const [listening, setListening] = useState(false)
 	const [transcript, setTranscript] = useState('')
 	const [error, setError] = useState<string | null>(null)
+	const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+	const recognitionRef = useRef<any>(null)
 
 	const startRecording = async () => {
 		setError(null)

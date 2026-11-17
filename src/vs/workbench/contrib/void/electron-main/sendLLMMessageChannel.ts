@@ -145,13 +145,16 @@ export class LLMMessageChannel implements IServerChannel {
 
 	_callOpenAICompatibleList = (params: MainModelListParams<OpenaiCompatibleModelResponse>) => {
 		const { requestId, providerName } = params
-		const emitters = this.listEmitters.openaiCompat
 		const mainThreadParams: ModelListParams<OpenaiCompatibleModelResponse> = {
 			...params,
-			onSuccess: (p) => { emitters.success.fire({ requestId, ...p }); },
-			onError: (p) => { emitters.error.fire({ requestId, ...p }); },
+			onSuccess: (p) => { this.listEmitters.openaiCompat.success.fire({ requestId, ...p }); },
+			onError: (p) => { this.listEmitters.openaiCompat.error.fire({ requestId, ...p }); },
 		}
-		sendLLMMessageToProviderImplementation[providerName].list(mainThreadParams)
+		const listFn = sendLLMMessageToProviderImplementation[providerName]?.list
+		if (!listFn) {
+			return
+		}
+		listFn(mainThreadParams)
 	}
 
 

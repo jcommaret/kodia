@@ -428,7 +428,7 @@ export const displayInfoOfFeatureName = (featureName: FeatureName) => {
 
 
 // the models of these can be refreshed (in theory all can, but not all should)
-export const refreshableProviderNames = [...localProviderNames, 'groq'] as const satisfies ProviderName[]
+export const refreshableProviderNames = [...localProviderNames, ...listableProviderNames] as const satisfies ProviderName[]
 export type RefreshableProviderName = typeof refreshableProviderNames[number]
 
 // models that come with download buttons

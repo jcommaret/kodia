@@ -192,7 +192,7 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 					else if (providerName === 'vLLM' || providerName === 'lmStudio' || providerName === 'mlx') {
 						return (model as OpenaiCompatibleModelResponse).id;
 					}
-					else throw new Error('refreshMode fn: unknown provider', providerName);
+					else throw new Error(`refreshMode fn: unknown provider ${providerName}`);
 				});
 				const normalizedModelNames = normalizeAutodetectedModelNamesForProvider(providerName, modelNames);
 				this.voidSettingsService.setAutodetectedModels(

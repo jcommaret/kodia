@@ -169,7 +169,6 @@ export const catalogModelsOfProvider = {
 		'nvidia/nemotron-3.5-lightning-30b-a3b',
 		'nvidia/nemotron-3-super-120b-a12b',
 		'nvidia/nemotron-3.5-bolt-e4b',
-		'nvidia/nemotron-3.5-content-safety',
 		'nvidia/nemotron-3.5-parse',
 	],
 
@@ -196,14 +195,13 @@ export const defaultModelsOfProvider = {
 	microsoftAzure: [],
 	awsBedrock: [],
 	liteLLM: [],
-	nvidia: [ // all 8 verified catalogue models are defaults so they always appear
+	nvidia: [ // 7 verified catalogue models are defaults so they always appear
 		'nvidia/nemotron-3.5-super-vl-120b-a12b',
 		'nvidia/nemotron-3-ultra-550b-a55b',
 		'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
 		'nvidia/nemotron-3.5-lightning-30b-a3b',
 		'nvidia/nemotron-3-super-120b-a12b',
 		'nvidia/nemotron-3.5-bolt-e4b',
-		'nvidia/nemotron-3.5-content-safety',
 		'nvidia/nemotron-3.5-parse',
 	],
 } as const satisfies { [providerName in ProviderName]: typeof catalogModelsOfProvider[providerName][number][] }

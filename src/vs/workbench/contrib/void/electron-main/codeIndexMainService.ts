@@ -20,6 +20,7 @@ import { ICodeIndexService, CodeChunk, SearchResult, IndexStats } from '../commo
 import * as fs from 'fs';
 import * as path from 'path';
 import { URI } from '../../../../base/common/uri.js';
+import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 
 const INDEX_CHUNK_LINES = 50; // lines per block chunk
 
@@ -404,3 +405,5 @@ export class KodiaCodeIndexMainService implements ICodeIndexService {
 		return combined.slice(0, limit);
 	}
 }
+
+registerSingleton(ICodeIndexService, KodiaCodeIndexMainService, InstantiationType.Eager);

@@ -23,7 +23,9 @@ import { ICommandService } from '../../../../../../../platform/commands/common/c
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '../../../../common/modelCapabilities.js';
 import { estimateTokens } from '../../../../common/tokenizer.js';
-import { AlertTriangle, File, Ban, Check, ChevronRight, Circle, FileIcon, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText } from 'lucide-react';
+import { ILLMMessageService } from '../../../../common/sendLLMMessageService.js';
+import type { LLMChatMessage } from '../../../../common/sendLLMMessageTypes.js';
+import { AlertTriangle, File, Ban, Check, ChevronRight, Circle, FileIcon, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText, Sparkles } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { dataURLOfChatImage } from '../util/chatImages.js';
 import { useAttachChatFiles } from '../util/chatAttachments.js';
@@ -3337,6 +3339,53 @@ export const SidebarChat = () => {
 		await chatThreadsService.abortRunning(threadId)
 	}
 
+	// ----- Remodify Prompt -----
+	const llmMessageService = accessor.get('ILLMMessageService')
+	const [remodifying, setRemodifying] = useState(false)
+	const [remodifyError, setRemodifyError] = useState<string | null>(null)
+
+	const handleRemodify = useCallback(async () => {
+		const currentText = textAreaRef.current?.value?.trim()
+		if (!currentText || remodifying || !llmMessageService) return
+		const modelSelection = settingsState.modelSelectionOfFeature['Chat']
+		if (!modelSelection) {
+			setRemodifyError('No chat model selected')
+			return
+		}
+		setRemodifying(true)
+		setRemodifyError(null)
+		try {
+			llmMessageService.sendLLMMessage({
+				messagesType: 'chatMessages',
+				messages: [{ role: 'user', content: currentText }] as LLMChatMessage[],
+				separateSystemMessage: 'You are a prompt improvement assistant. Rewrite the user\'s prompt to be clearer, more detailed, and more likely to produce an accurate result. Do NOT change the user\'s intent or meaning. Do NOT answer the prompt — only rewrite it. Return only the rewritten prompt, with no preamble, quotes, or explanation.',
+				chatMode: null,
+				modelSelection,
+				modelSelectionOptions: settingsState.optionsOfModelSelection['Chat'][modelSelection.providerName]?.[modelSelection.modelName],
+				overridesOfModel: settingsState.overridesOfModel,
+				logging: { loggingName: 'Remodify Prompt' },
+				onText: () => { },
+				onFinalMessage: ({ fullText }) => {
+					if (fullText) {
+						textAreaFnsRef.current?.setValue(fullText.trim())
+						textAreaRef.current?.focus()
+						setInstructionsAreEmpty(!fullText.trim())
+						setTokenEstimate(estimateTokens(fullText.trim()))
+					}
+					setRemodifying(false)
+				},
+				onError: ({ message }) => {
+					setRemodifyError(message)
+					setRemodifying(false)
+				},
+				onAbort: () => setRemodifying(false),
+			})
+		} catch (e) {
+			setRemodifyError(e instanceof Error ? e.message : String(e))
+			setRemodifying(false)
+		}
+	}, [llmMessageService, settingsState, textAreaRef, textAreaFnsRef, setInstructionsAreEmpty, setTokenEstimate, remodifying])
+
 	const keybindingString = accessor.get('IKeybindingService').lookupKeybinding(VOID_CTRL_L_ACTION_ID)?.getLabel()
 
 	const threadId = currentThread.id
@@ -3514,6 +3563,23 @@ export const SidebarChat = () => {
 		</div>
 		<div className='px-2 pb-2'>
 			{inputChatArea}
+			{/* Remodify Prompt button */}
+			{(textAreaRef.current?.value?.trim() && !isRunning) && (
+				<div className='flex items-center gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>
+					<button
+						onClick={handleRemodify}
+						disabled={remodifying || !llmMessageService}
+						title={remodifyError || 'Rewrite your prompt to be clearer and more detailed before sending'}
+						className='flex items-center gap-1 px-2 py-1 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 disabled:cursor-not-allowed transition-all'
+					>
+						<Sparkles size={13} className={remodifying ? 'animate-pulse' : ''} />
+						{remodifying ? 'Remodifying...' : 'Remodify Prompt'}
+					</button>
+					{remodifyError && (
+						<span className='text-xs text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/30'>{remodifyError}</span>
+					)}
+				</div>
+			)}
 		</div>
 	</div>
 

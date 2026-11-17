@@ -39,6 +39,7 @@ import { IPathService } from '../../../../../../../workbench/services/path/commo
 import { IMetricsService } from '../../../../../../../workbench/contrib/void/common/metricsService.js'
 import { URI } from '../../../../../../../base/common/uri.js'
 import { IChatThreadService, ThreadsState, ThreadStreamState } from '../../../chatThreadService.js'
+import { IMainProcessService } from '../../../../../../../platform/ipc/common/mainProcessService.js';
 import { ITaskPlanService } from '../../../../common/taskPlanService.js'
 import { ITerminalToolService } from '../../../terminalToolService.js'
 import { ILanguageService } from '../../../../../../../editor/common/languages/language.js'
@@ -242,6 +243,7 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IWorkbenchThemeService: accessor.get(IWorkbenchThemeService),
 		IPromptsService: accessor.get(IPromptsService),
 		IWebSearchService: accessor.get(IWebSearchService),
+		IMainProcessService: accessor.get(IMainProcessService),
 
 	} as const
 	return reactAccessor

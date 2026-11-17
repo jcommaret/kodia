@@ -312,4 +312,9 @@ class EmptyTextEditorHintContentWidget extends Disposable implements IContentWid
 	}
 }
 
-registerEditorContribution(EmptyTextEditorHintContribution.ID, EmptyTextEditorHintContribution, EditorContributionInstantiation.Eager); // eager because it needs to render a help message
+// Defer to AfterFirstRender rather than Eager: the contribution injects IInlineChatSessionService,
+// which is registered InstantiationType.Delayed (inlineChat.contribution.ts). At eager editor
+// creation time that service is not yet instantiated, so strict instantiation throws
+// "depends on UNKNOWN service IInlineChatSessionService". AfterFirstRender still renders the
+// empty-editor hint promptly while letting the delayed service instantiate on first access.
+registerEditorContribution(EmptyTextEditorHintContribution.ID, EmptyTextEditorHintContribution, EditorContributionInstantiation.AfterFirstRender);

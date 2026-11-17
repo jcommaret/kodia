@@ -167,9 +167,7 @@ export const catalogModelsOfProvider = {
 		'nvidia/nemotron-3-ultra-550b-a55b',
 		'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
 		'nvidia/nemotron-3.5-lightning-30b-a3b',
-		'nvidia/nemotron-3-super-120b-a12b',
 		'nvidia/nemotron-3.5-bolt-e4b',
-		'nvidia/nemotron-3.5-parse',
 	],
 
 
@@ -195,14 +193,12 @@ export const defaultModelsOfProvider = {
 	microsoftAzure: [],
 	awsBedrock: [],
 	liteLLM: [],
-	nvidia: [ // 7 verified catalogue models are defaults so they always appear
+	nvidia: [ // 5 verified catalogue models are defaults so they always appear
 		'nvidia/nemotron-3.5-super-vl-120b-a12b',
 		'nvidia/nemotron-3-ultra-550b-a55b',
 		'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
 		'nvidia/nemotron-3.5-lightning-30b-a3b',
-		'nvidia/nemotron-3-super-120b-a12b',
 		'nvidia/nemotron-3.5-bolt-e4b',
-		'nvidia/nemotron-3.5-parse',
 	],
 } as const satisfies { [providerName in ProviderName]: typeof catalogModelsOfProvider[providerName][number][] }
 
@@ -1866,21 +1862,6 @@ const nvidiaModelOptions = {
 			canIOReasoning: true,
 			reasoningSlider: { type: 'effort_slider' as const, values: ['default', 'none', 'thinking'], default: 'default' },
 		},
-	},
-	// https://build.nvidia.com/nvidia/nemotron-3.5-parse/modelcard
-	'nvidia/nemotron-3.5-parse': {
-		contextWindow: 131_072, // 128K context
-		contextWindowSource: 'catalog',
-		reservedOutputTokenSpace: 32_768,
-		reservedOutputTokenSpaceSource: 'catalog',
-		cost: { input: 0, output: 0 },
-		downloadable: false,
-		supportsFIM: false,
-		supportsVision: true, // Text, Image, Video (document parsing)
-		supportsPDF: false,
-		specialToolFormat: 'openai-style',
-		supportsSystemMessage: 'system-role',
-		reasoningCapabilities: false, // document parsing model
 	},
 } as const satisfies { [s: string]: VoidStaticModelInfo }
 

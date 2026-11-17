@@ -71,4 +71,9 @@ export class EmptyCellEditorHintContribution extends EmptyTextEditorHintContribu
 	}
 }
 
-registerEditorContribution(EmptyCellEditorHintContribution.CONTRIB_ID, EmptyCellEditorHintContribution, EditorContributionInstantiation.Eager); // eager because it needs to render a help message
+// Defer to AfterFirstRender rather than Eager: the contribution injects IInlineChatSessionService,
+// which is registered InstantiationType.Delayed (inlineChat.contribution.ts). At eager editor
+// creation time that service is not yet instantiated, so strict instantiation throws
+// "depends on UNKNOWN service IInlineChatSessionService". AfterFirstRender still renders the
+// empty-cell hint promptly while letting the delayed service instantiate on first access.
+registerEditorContribution(EmptyCellEditorHintContribution.CONTRIB_ID, EmptyCellEditorHintContribution, EditorContributionInstantiation.AfterFirstRender);

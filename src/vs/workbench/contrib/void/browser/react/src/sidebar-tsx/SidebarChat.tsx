@@ -3564,16 +3564,16 @@ export const SidebarChat = () => {
 		<div className='px-2 pb-2'>
 			{inputChatArea}
 			{/* Remodify Prompt button */}
-			{(textAreaRef.current?.value?.trim() && !isRunning) && (
+			{!isRunning && (
 				<div className='flex items-center gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>
 					<button
 						onClick={handleRemodify}
-						disabled={remodifying || !llmMessageService}
-						title={remodifyError || 'Rewrite your prompt to be clearer and more detailed before sending'}
+						disabled={remodifying || !textAreaRef.current?.value?.trim() || !llmMessageService}
+						title={!textAreaRef.current?.value?.trim() ? 'Enter a prompt first to remodify it' : remodifyError || 'Rewrite your prompt to be clearer and more detailed before sending'}
 						className='flex items-center gap-1 px-2 py-1 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 disabled:cursor-not-allowed transition-all'
 					>
 						<Sparkles size={13} className={remodifying ? 'animate-pulse' : ''} />
-						{remodifying ? 'Remodifying...' : 'Remodify Prompt'}
+						{remodifying ? 'Remodifying...' : !textAreaRef.current?.value?.trim() ? 'Enter prompt to modify' : 'Remodify Prompt'}
 					</button>
 					{remodifyError && (
 						<span className='text-xs text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/30'>{remodifyError}</span>
@@ -3586,6 +3586,23 @@ export const SidebarChat = () => {
 	const landingPageInput = <div>
 		<div className='pt-8'>
 			{inputChatArea}
+			{/* Remodify Prompt button */}
+			{!isRunning && (
+				<div className='flex items-center gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>
+					<button
+						onClick={handleRemodify}
+						disabled={remodifying || !textAreaRef.current?.value?.trim() || !llmMessageService}
+						title={!textAreaRef.current?.value?.trim() ? 'Enter a prompt first to remodify it' : remodifyError || 'Rewrite your prompt to be clearer and more detailed before sending'}
+						className='flex items-center gap-1 px-2 py-1 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 disabled:cursor-not-allowed transition-all'
+					>
+						<Sparkles size={13} className={remodifying ? 'animate-pulse' : ''} />
+						{remodifying ? 'Remodifying...' : !textAreaRef.current?.value?.trim() ? 'Enter prompt to modify' : 'Remodify Prompt'}
+					</button>
+					{remodifyError && (
+						<span className='text-xs text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/30'>{remodifyError}</span>
+					)}
+				</div>
+			)}
 		</div>
 	</div>
 

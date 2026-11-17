@@ -228,6 +228,10 @@ export const detectedModelsOfProvider = (providerName: ListableProviderName, res
 	for (const model of detected) {
 		const lower = model.modelName.toLowerCase();
 		if (notChat?.test(lower) || notOffered?.test(lower)) continue;
+		// NVIDIA: only offer models in the verified catalogue. Drop anything else NVIDIA's API lists
+		// (embed, safety, reranker, third-party models on NVIDIA's endpoints, etc.) so the model
+		// picker shows only the verified working models.
+		if (providerName === 'nvidia' && !catalog.has(lower) && !catalog.has(withoutSnapshotSuffix(lower))) continue;
 		const modelName = catalog.get(lower) ?? catalog.get(withoutSnapshotSuffix(lower)) ?? model.modelName;
 		if (isDefaultModel(providerName, modelName) || kept.has(modelName)) continue;
 		kept.set(modelName, { ...model, modelName });

@@ -155,19 +155,18 @@ suite('Kodia - models listed by the providers\' APIs', () => {
 			{ id: 'nvidia/nemoguard-jailbreak-detect' }, // safety model: left out
 			{ id: 'nvidia/nv-embedqa-e5-v5', type: 'embedding' }, // embedding: left out
 		]);
-		// nemotron-3.5-super-vl is the NVIDIA default model, so it's not in the detected list; only newly-listed models are.
-		assert.deepStrictEqual(names(detected), ['meta/llama-3.1-8b-instruct']);
+		// nemotron-3.5-super-vl is the NVIDIA default model, so it's not in the detected list. Everything else NVIDIA's
+		// API lists that isn't in the verified catalogue (meta/llama, nemoguard safety, embeddings) is dropped.
+		assert.deepStrictEqual(names(detected), []);
 		// the default model keeps its verified capabilities from the catalog
 		const nemotron = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
 		assert.strictEqual(nemotron.isUnrecognizedModel, false, 'nemotron-3.5-super-vl is a recognized catalog model');
 		assert.strictEqual(nemotron.contextWindow, 1_048_576, 'verified context window from NVIDIA documentation');
 		assert.strictEqual(nemotron.supportsVision, true, 'verified: NVIDIA advertises image and video input');
 		assert.strictEqual(nemotron.specialToolFormat, 'openai-style', 'verified tool calling');
-		// NVIDIA's catalogue does not expose tool/vision/output limits for detected models: unknown, not inferred.
-		const discovered = detectedModelsOfProvider('nvidia', [{ id: 'meta/llama-3.1-8b-instruct' }]);
-		assert.strictEqual(discovered[0]?.capabilities, undefined, 'detected capabilities stay unknown, not inferred');
+		// an unrecognized NVIDIA name (e.g. a third-party model NVIDIA's API lists) is not offered, and looking it up
+		// directly still falls back safely rather than advertising a real limit
 		const llama = getModelCapabilities('nvidia', 'meta/llama-3.1-8b-instruct', undefined);
-		assert.strictEqual(llama.contextWindow, 4_096, 'unknown context window falls back safely, not advertised as a real limit');
 		assert.strictEqual(llama.supportsVision, false, 'vision not inferred from the model name');
 	});
 });

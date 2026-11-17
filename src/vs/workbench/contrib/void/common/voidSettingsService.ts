@@ -11,7 +11,7 @@ import { registerSingleton, InstantiationType } from '../../../../platform/insta
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IMetricsService } from './metricsService.js';
-import { defaultModelsOfProvider, defaultProviderSettings, getModelCapabilities, ModelOverrides, setDetectedModelOptions, VoidStaticModelInfo } from './modelCapabilities.js';
+import { catalogModelsOfProvider, defaultModelsOfProvider, defaultProviderSettings, getModelCapabilities, ModelOverrides, setDetectedModelOptions, VoidStaticModelInfo } from './modelCapabilities.js';
 import { DetectedModel } from './providerModels.js';
 import { VOID_SETTINGS_STORAGE_KEY } from './storageKeys.js';
 import { isMacintosh } from '../../../../base/common/platform.js';
@@ -258,6 +258,22 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 				},
 			}
 		}
+		// NVIDIA: drop any stored models that aren't in the verified catalogue,
+		// so previously-detected non-catalog models (meta/llama, mistralai,
+		// deepseek, google/gemma, qwen, etc.) are removed from settings.
+		if (providerName === 'nvidia') {
+			const catalog = new Set((catalogModelsOfProvider.nvidia as readonly string[]).map(m => m.toLowerCase()));
+			const filtered = newSettingsOfProvider[providerName].models.filter(m => catalog.has(m.modelName.toLowerCase()));
+			if (filtered.length !== newSettingsOfProvider[providerName].models.length) {
+				newSettingsOfProvider = {
+					...newSettingsOfProvider,
+					[providerName]: {
+						...newSettingsOfProvider[providerName],
+						models: filtered,
+					},
+				}
+			}
+		}
 	}
 
 	// the capabilities of the models detected through a provider's API, for getModelCapabilities
@@ -497,6 +513,14 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 					providerName,
 					readS.settingsOfProvider[providerName].models,
 				)
+				// NVIDIA: drop any stored models that aren't in the verified catalogue,
+				// so previously-detected non-catalog models (meta/llama, mistralai,
+				// deepseek, google/gemma, qwen, etc.) are removed from settings.
+				if (providerName === 'nvidia') {
+					const catalog = new Set((catalogModelsOfProvider.nvidia as readonly string[]).map(m => m.toLowerCase()));
+					readS.settingsOfProvider[providerName].models =
+						readS.settingsOfProvider[providerName].models.filter(m => catalog.has(m.modelName.toLowerCase()));
+				}
 			}
 		}
 

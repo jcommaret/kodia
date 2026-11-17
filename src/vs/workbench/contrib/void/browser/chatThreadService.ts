@@ -581,11 +581,23 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				}
 			}
 
-			const selected = autoSelectModel(userMessage, availableModels, this._settingsService.state.overridesOfModel)
+			let selected
+			try {
+				selected = autoSelectModel(userMessage, availableModels, this._settingsService.state.overridesOfModel)
+			} catch (e) {
+				console.error('Auto model selection failed:', e)
+			}
 			if (selected) {
 				this._autoResolvedModels.set(threadId, { modelSelection: { providerName: selected.providerName, modelName: selected.modelName }, reason: selected.reason })
 				const modelSelectionOptions = this._settingsService.state.optionsOfModelSelection[featureName][selected.providerName]?.[selected.modelName]
 				return { modelSelection: { providerName: selected.providerName, modelName: selected.modelName }, modelSelectionOptions, autoReason: selected.reason }
+			}
+			// Fallback: auto-select failed (no models or scoring error). Use the first available model
+			// instead of falling through to '__auto__' which is not a real model.
+			if (availableModels.length > 0) {
+				const fallback = availableModels[0]
+				const modelSelectionOptions = this._settingsService.state.optionsOfModelSelection[featureName][fallback.providerName]?.[fallback.modelName]
+				return { modelSelection: fallback, modelSelectionOptions, autoReason: 'auto-select fallback: first available model' }
 			}
 		}
 

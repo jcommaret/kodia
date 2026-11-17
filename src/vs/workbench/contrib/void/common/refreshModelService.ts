@@ -7,7 +7,7 @@ import { IVoidSettingsService } from './voidSettingsService.js';
 import { ILLMMessageService } from './sendLLMMessageService.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
-import { RefreshableProviderName, refreshableProviderNames, SettingsOfProvider } from './voidSettingsTypes.js';
+import { ProviderName, RefreshableProviderName, refreshableProviderNames, SettingsOfProvider } from './voidSettingsTypes.js';
 import { normalizeAutodetectedModelNamesForProvider } from './localSingleModelProviders.js';
 import { OllamaModelResponse, OpenaiCompatibleModelResponse } from './sendLLMMessageTypes.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
@@ -111,7 +111,7 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 				this.startRefreshingModels(providerName, autoOptions)
 
 				// every time providerName.enabled changes, refresh models too, like a useEffect
-				let relevantVals = () => refreshBasedOn[providerName].map(settingName => voidSettingsService.state.settingsOfProvider[providerName][settingName])
+				let relevantVals = () => refreshBasedOn[providerName].map(settingName => voidSettingsService.state.settingsOfProvider[providerName as ProviderName][settingName])
 				let prevVals = relevantVals() // each iteration of a for loop has its own context and vars, so this is ok
 				disposables.add(
 					voidSettingsService.onDidChangeState(() => { // we might want to debounce this

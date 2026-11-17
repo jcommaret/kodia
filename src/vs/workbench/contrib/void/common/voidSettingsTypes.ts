@@ -5,6 +5,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { defaultModelsOfProvider, defaultProviderSettings, ModelOverrides, VoidStaticModelInfo } from './modelCapabilities.js';
+import { listableProviderNames } from './providerModels.js';
 import { ToolApprovalType } from './toolsServiceTypes.js';
 import { AutonomyMode, defaultAutonomyMode } from './autonomyPolicy.js';
 import { InstructionsFramework } from './instructionsFrameworks.js';

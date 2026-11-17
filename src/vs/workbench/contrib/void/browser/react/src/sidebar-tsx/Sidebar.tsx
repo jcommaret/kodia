@@ -5,18 +5,17 @@
 
 import { useState } from 'react';
 import { useIsDark } from '../util/services.js';
-import { MessageCircle, Search, ClipboardList } from 'lucide-react';
+import { MessageCircle, ClipboardList } from 'lucide-react';
 
 import '../styles.css'
 import { SidebarChat } from './SidebarChat.js';
-import { CodeIndexPanel } from './CodeIndexPanel.js';
 import { TaskPlanPanel } from './TaskPlanPanel.js';
 import ErrorBoundary from './ErrorBoundary.js';
 
 export const Sidebar = ({ className }: { className: string }) => {
 
 	const isDark = useIsDark()
-	const [activePanel, setActivePanel] = useState<'chat' | 'code-index' | 'task-plan'>('chat')
+	const [activePanel, setActivePanel] = useState<'chat' | 'task-plan'>('chat')
 	return <div
 		className={`@@void-scope ${isDark ? 'dark' : ''}`}
 		style={{ width: '100%', height: '100%' }}
@@ -33,23 +32,6 @@ export const Sidebar = ({ className }: { className: string }) => {
 							<div className='w-full h-full'>
 								<ErrorBoundary>
 									<SidebarChat />
-								</ErrorBoundary>
-							</div>
-						)}
-						{/* Code Index panel */}
-						{activePanel === 'code-index' && (
-							<div className='w-full h-full overflow-y-auto bg-void-bg-2 text-void-fg-1'>
-								<div className='flex items-center justify-between p-2 border-b border-void-border-2'>
-									<h3 className='text-xs font-semibold text-void-fg-1'>Code Index</h3>
-									<button
-										onClick={() => setActivePanel('chat')}
-										className='px-2 py-1 text-[10px] rounded border border-void-border-2 bg-void-bg-3 text-void-fg-3 hover:bg-void-bg-4'
-									>
-										×
-									</button>
-								</div>
-								<ErrorBoundary>
-									<CodeIndexPanel />
 								</ErrorBoundary>
 							</div>
 						)}
@@ -80,12 +62,6 @@ export const Sidebar = ({ className }: { className: string }) => {
 						className={`flex items-center gap-2 px-3 py-2 text-xs rounded border border-void-border-2 ${activePanel === 'chat' ? 'bg-void-bg-3 text-void-fg-1' : 'bg-void-bg-2 text-void-fg-3'} hover:bg-void-bg-3 shadow-md`}
 					>
 						<MessageCircle size={12} className="mr-1" /> Chat
-					</button>
-					<button
-						onClick={() => setActivePanel('code-index')}
-						className={`flex items-center gap-2 px-3 py-2 text-xs rounded border border-void-border-2 ${activePanel === 'code-index' ? 'bg-void-bg-3 text-void-fg-1' : 'bg-void-bg-2 text-void-fg-3'} hover:bg-void-bg-3 shadow-md`}
-					>
-						<Search size={12} className="mr-1" /> Index
 					</button>
 					<button
 						onClick={() => setActivePanel('task-plan')}

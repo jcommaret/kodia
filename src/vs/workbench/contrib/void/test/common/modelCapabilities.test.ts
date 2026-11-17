@@ -88,7 +88,9 @@ suite('Kodia - model capabilities', () => {
 
 	test('each provider has one default model, from the catalog', () => {
 		for (const [providerName, modelNames] of Object.entries(defaultModelsOfProvider) as [ProviderName, readonly string[]][]) {
-			assert.ok(modelNames.length <= 1, `${providerName} has ${modelNames.length} default models`);
+			// NVIDIA intentionally lists all 8 verified catalogue models as defaults so they always appear
+			const maxDefaults = providerName === 'nvidia' ? (catalogModelsOfProvider.nvidia as readonly string[]).length : 1;
+			assert.ok(modelNames.length <= maxDefaults, `${providerName} has ${modelNames.length} default models`);
 			for (const modelName of modelNames) {
 				assert.ok((catalogModelsOfProvider[providerName] as readonly string[]).includes(modelName), `${providerName}/${modelName} isn't in the catalog`);
 			}

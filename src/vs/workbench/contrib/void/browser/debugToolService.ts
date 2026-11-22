@@ -196,8 +196,15 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 		const d = thread.stoppedDetails;
 		const info: DebugStopInfo = { state: 'stopped', threadId: thread.threadId, reason: d?.reason, description: d?.description, text: d?.text };
 		try {
-			const top = (await session.stackTrace(thread.threadId, 0, 1, CancellationToken.None))?.body?.stackFrames[0];
-			if (top) { info.location = { name: top.name, sourcePath: top.source?.path, line: top.line, column: top.column, frameId: top.id }; }
+			const frames = (await session.stackTrace(thread.threadId, 0, 20, CancellationToken.None))?.body?.stackFrames ?? [];
+			const loc = (f: DebugProtocol.StackFrame) => ({ name: f.name, sourcePath: f.source?.path, line: f.line, column: f.column, frameId: f.id });
+			if (frames[0]) { info.location = loc(frames[0]); }
+			// stopped inside the runtime or a library (an assertion library throwing): also say where the user's code is
+			const isLibrary = (f: DebugProtocol.StackFrame) => !f.source?.path || /^<node_internals>|[\\/]node_modules[\\/]|^node:/.test(f.source.path);
+			if (frames[0] && isLibrary(frames[0])) {
+				const user = frames.find(f => !isLibrary(f));
+				if (user) { info.userLocation = loc(user); }
+			}
 		} catch { /* the location is a convenience; the stop itself is real */ }
 		return info;
 	}
@@ -238,7 +245,7 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 		return launches[0] ?? configManager.selectedConfiguration.launch;
 	}
 
-	async startSession(configurationName: string | undefined, folder?: string, noDebug?: boolean, inline?: Record<string, unknown>): Promise<DebugSessionInfo & { stop: DebugStopInfo }> {
+	async startSession(configurationName: string | undefined, folder?: string, noDebug?: boolean, inline?: Record<string, unknown>, waitMs = START_WAIT_MS): Promise<DebugSessionInfo & { stop: DebugStopInfo }> {
 		let launch: ILaunch | undefined = this.resolveLaunch(folder);
 		let config: IConfig | undefined;
 		if (inline) {
@@ -263,8 +270,33 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 		if (!newSession) { throw new Error(`No debug session appeared for "${config.name}".`); }
 		this.trackSession(newSession);
 		// the program may already have stopped (stopOnEntry, an early breakpoint) or even ended
-		const stop = this.newStop(newSession) ? await this.describeStop(newSession) : await this.runAndWaitForStop(newSession, START_WAIT_MS);
+		const stop = this.newStop(newSession) ? await this.describeStop(newSession) : await this.runAndWaitForStop(newSession, waitMs);
 		return { ...this.sessionInfo(newSession), stop };
+	}
+
+	/**
+	 * Launch with the given exception filters on, and run to the first such exception (or the end).
+	 * A debugger declares its exception filters while it initializes, before the program runs (DebugSession.initialize →
+	 * setExceptionBreakpointsForSession, synchronously announced by the model). They are enabled at that moment, so the
+	 * session's first breakpoint batch (sent at the adapter's `initialized` event) already carries them, for child
+	 * sessions too (test runners run tests in child processes). No stop on entry is needed (node --test has none).
+	 */
+	async startAndRunToException(configuration: Record<string, unknown>, filters: string[], waitMs = RUN_WAIT_MS * 2): Promise<DebugSessionInfo & { stop: DebugStopInfo; exceptionBreakpoints: DebugExceptionFilter[] }> {
+		const model = this.debugService.getModel();
+		const arm = async () => {
+			for (const e of model.getExceptionBreakpoints()) {
+				if (filters.includes(e.filter) && !e.enabled) { await this.debugService.enableOrDisableBreakpoints(true, e); } // the model change itself is synchronous
+			}
+		};
+		await arm(); // filters already known from an earlier session of this debugger
+		const listener = model.onDidChangeBreakpoints(() => { void arm(); });
+		let started: DebugSessionInfo & { stop: DebugStopInfo };
+		try {
+			started = await this.startSession(undefined, undefined, false, configuration, waitMs);
+		} finally {
+			listener.dispose();
+		}
+		return { ...started, exceptionBreakpoints: this.exceptionFilters().filter(f => filters.includes(f.filter)) };
 	}
 
 	async attachSession(configurationName: string, folder?: string): Promise<DebugSessionInfo & { stop: DebugStopInfo }> {

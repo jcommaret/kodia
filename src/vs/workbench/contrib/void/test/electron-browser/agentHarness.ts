@@ -156,7 +156,7 @@ export function removeRepo(dir: string): void {
 
 /**
  * Runs run_command's commands as real processes. It receives exactly the string Kodia's run_command builds
- * (on Windows: `cmd /c "..."`, meant for a PowerShell integrated terminal) and runs it in PowerShell there,
+ * (on Windows: `cmd /c '...'`, meant for a PowerShell integrated terminal) and runs it in PowerShell there,
  * /bin/sh elsewhere. Returns Kodia's own result shape ({ result, resolveReason }).
  */
 export class ProcessTerminalToolService {

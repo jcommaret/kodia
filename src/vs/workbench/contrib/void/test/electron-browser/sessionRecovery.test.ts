@@ -52,7 +52,7 @@ suite('Kodia - session recovery after a crash mid-task (roadmap 8, scenario 8)',
 		// wait for the command to actually be running (a fixed 300 ms was too short on a loaded machine)
 		for (const until = Date.now() + 10_000; h1.chat.streamState[threadId]?.isRunning !== 'tool' && Date.now() < until;) { await new Promise(r => setTimeout(r, 50)); }
 		await new Promise(r => setTimeout(r, 300)); // and let it run a moment
-		assert.strictEqual(h1.chat.streamState[threadId]?.isRunning, 'tool', 'process 1 is in the middle of the command');
+		assert.strictEqual(h1.chat.streamState[threadId]?.isRunning, 'tool', `process 1 is in the middle of the command; thread: ${JSON.stringify(h1.chat.state.allThreads[threadId]?.messages.slice(-3)).slice(0, 1500)} stream: ${JSON.stringify(h1.chat.streamState[threadId])?.slice(0, 500)}`);
 		const disk = storage1.crash(); // kill: only flushed storage survives
 		// a killed process does nothing more: stop process 1's loop and its command (in-process, it would live on)
 		await h1.chat.abortRunning(threadId);

@@ -97,6 +97,7 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'test_coverage': 'test',
 	'test_history': 'test',
 	'test_check_flaky': 'test',
+	'test_debug': 'test',
 	// a fetched URL can carry data out of the workspace, so the user sees it first
 	'fetch_url': 'web pages',
 	'web_search': 'web pages',
@@ -326,6 +327,7 @@ export type BuiltinToolCallParams = {
 	'test_coverage': { test_files?: string[], test_names?: string[], files?: string[] },
 	'test_history': { test_name?: string, only_problems: boolean, limit: number },
 	'test_check_flaky': { test_files?: string[], test_names?: string[], attempts: number },
+	'test_debug': { test_file: string, test_names: string[], stop_on_failure: boolean },
 	// Todo list (task tracking within a turn - OpenCode parity)
 	'todo': { todos: { id: string, content: string, status: 'pending' | 'in_progress' | 'completed' }[] },
 	// Subagent delegation (OpenCode parity - roadmap Stage 6)
@@ -533,6 +535,7 @@ export type BuiltinToolResultType = {
 	'test_coverage': { results: TestRunResultData },
 	'test_history': TestHistoryResult,
 	'test_check_flaky': TestCheckFlakyResult,
+	'test_debug': DebugSessionInfo & { framework: string, describe: string, stop: DebugStopInfo, exceptionBreakpoints: DebugExceptionFilter[] },
 		// Todo list (task tracking within a turn - OpenCode parity)
 		'todo': { done: number, inProgress: number, pending: number, todos: { id: string, content: string, status: string }[] },
 		// Subagent delegation (OpenCode parity - roadmap Stage 6)

@@ -1557,6 +1557,15 @@ export const builtinTools: {
 			attempts: { description: 'Optional. How many times to run them, 2–10 (default 3).' },
 		},
 	},
+	test_debug: {
+		name: 'test_debug',
+		description: `Run ONE failing test under the debugger and stop where it fails (the failing assertion or the error), so you can inspect the real values with debug_get_stack_trace, debug_get_variables and debug_evaluate_expression. Works for node --test, Jest and Mocha (JavaScript debugger) and pytest (Python debugger). Returns a debug session id; stop it with debug_stop_session when done. With stop_on_failure false, it stops only at breakpoints you set with debug_set_breakpoint first.`,
+		params: {
+			test_file: { description: 'The test file to run.' },
+			test_names: { description: 'Optional. JSON array of test names to run (a name filter).' },
+			stop_on_failure: { description: 'Optional. Default true: stop where the test fails.' },
+		},
+	},
 	test_cancel: {
 		name: 'test_cancel',
 		description: `Cancel a running test operation. Optionally specify a run ID; if not given, cancels the most recent run.`,

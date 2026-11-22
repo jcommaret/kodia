@@ -71,7 +71,7 @@ export async function detectTestFrameworks(p: ProjectProbe): Promise<DetectedFra
 // ---------------------------------------------------------------------------
 
 /**
- * Arguments are interpolated into a shell command (the integrated terminal runs it via `cmd /c "..."` on Windows), so
+ * Arguments are interpolated into a shell command (the integrated terminal runs it via `cmd /c '...'` on Windows), so
  * only characters that are inert in cmd, PowerShell and POSIX shells are accepted. Anything else is refused with a
  * clear error rather than risk the shell interpreting it.
  */

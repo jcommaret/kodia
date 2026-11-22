@@ -49,6 +49,7 @@ import { ITestResultService } from '../../testing/common/testResultService.js';
 import { ITerminalToolService } from './terminalToolService.js';
 import { wrapCommandForShell } from '../common/terminalUtils.js';
 import { isTestFileName, testFileStrength } from '../common/testIntegrity.js';
+import { buildTestDebugPlan, TestDebugPlan } from '../common/testDebug.js';
 import {
 	buildTestCommand, CommandFrameworkId, DetectedFramework, detectTestFrameworks, dotnetSummary, parseCargo, parseDotnet,
 	parseGoVerbose, parseJestJson, parseJUnit, summarize,
@@ -72,6 +73,7 @@ export interface ITestToolService {
 	readonly onTestRunStart: Event<{ runId: string }>;
 	readonly onTestRunComplete: Event<{ runId: string; results: TestRunResultData }>;
 	getLastResults(): TestRunResultData | null;
+	planTestDebug(file: string, names: string[]): Promise<TestDebugPlan & { framework: string }>;
 }
 
 const VSCODE_RUN_TIMEOUT_MS = 10 * 60_000;
@@ -135,6 +137,26 @@ export class TestToolService extends Disposable implements ITestToolService {
 			}
 		}
 		return { frameworks };
+	}
+
+	/** The debug launch configuration that runs one test file (optionally filtered by name) under the debugger. */
+	async planTestDebug(file: string, names: string[]): Promise<TestDebugPlan & { framework: string }> {
+		const root = this.workspaceRoot();
+		if (!root) { throw new Error('No workspace folder is open.'); }
+		const rel = this.relative(root, file);
+		const frameworks = (await detectTestFrameworks(await this.probe(root))).filter(fw => SOURCE_EXT[fw.id].test(rel));
+		if (frameworks.length === 0) { throw new Error(`No detected test framework handles ${rel} (see test_discover).`); }
+		const installed = new Set<string>();
+		for (const pkg of ['jest', 'mocha']) {
+			try { if (await this.fileService.exists(URI.joinPath(root, 'node_modules', pkg, 'package.json'))) { installed.add(pkg); } } catch { /* not installed */ }
+		}
+		const reasons: string[] = [];
+		for (const fw of frameworks) {
+			const plan = buildTestDebugPlan(fw.id, { cwd: root.fsPath, files: [rel], names, hasPackage: pkg => installed.has(pkg) });
+			if ('unavailable' in plan) { reasons.push(`${fw.name}: ${plan.unavailable}`); continue; }
+			return { ...plan, framework: fw.name };
+		}
+		throw new Error(reasons.join(' '));
 	}
 
 	async listTests(): Promise<TestListResult> {

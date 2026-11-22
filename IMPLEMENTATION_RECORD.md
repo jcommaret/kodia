@@ -791,6 +791,46 @@ The model writes the commit message and the PR text; Kodia supplies exact facts 
 
 **Next concrete task:** debug a failing test: start the test runner's command under the debugger, stopped at the failing assertion (roadmap 3 and 4 together).
 
+## 2026-11-22 (w) — Debug a failing test; run_command quoting on Windows fixed
+
+**New tool `test_debug {test_file, test_names?, stop_on_failure = true}`** (medium risk) runs one test under a real debugger and stops where it fails.
+- **Plan** (`common/testDebug.ts`, pure): builds the debug launch configuration for the detected framework. Arguments are an array, so no shell is involved.
+  - node --test, Jest and Mocha run under js-debug with exception filter `all`. Jest and Mocha run from the project's install.
+  - pytest runs under debugpy with `userUnhandled`, which stops where an exception leaves the user's code into pytest's.
+  - Refused with the reason: Vitest, Go (needs Delve), Rust (LLDB), .NET (vsdbg/netcoredbg), PHPUnit (Xdebug).
+- **Run** (`KodiaDebugToolService.startAndRunToException`): the wanted exception filters are armed before launch. They are enabled the moment the debugger declares them while initializing, which the model announces synchronously, before the program runs. So the session's first breakpoint batch already carries them, child sessions included.
+  - The first design (stop on entry, set the filters, continue) failed for real: `node --test` has no entry stop, and the session ended first.
+- **Found with a wire-level probe** against js-debug: with js-debug's default `skipFiles` (Node internals), a failing `assert` **never pauses**, because `node:assert` throws from inside a skipped file. The same was true for a plain script. The plan sets `skipFiles: []`.
+- The stop is then inside `assert`. The stop report now also names the **first frame in the user's code** (skipping `<node_internals>`, `node:` and `node_modules`).
+
+**Bug found and fixed: `run_command` broke every command containing a double quote on Windows.**
+- `wrapCommandForShell` built `cmd /c "..."` with inner quotes escaped as `\"`. PowerShell, the integrated terminal there, does not treat `\"` as an escape.
+- Measured in Windows PowerShell 5.1:
+  - `node -e "setTimeout(...)"` was a parse error.
+  - `node -e "process.exit(3)"` reported exit 1.
+  - `echo "two words"` printed stray backslashes.
+  - PowerShell expanded `$HOME` and ate backticks.
+- Now the command goes in a PowerShell single-quoted string (`cmd /c '...'`, `'` doubled), where nothing is interpreted. All 9 measured cases are correct, including pipes and `&&`.
+- The session-recovery test had been "flaky" because of this: its 60-second command never ran. It passed only when a cold PowerShell took longer than 300 ms to fail. It now really runs the command. Its failure message now includes the thread's last messages, which is how the cause was found.
+
+**Tests:**
+- `testDebug.test.ts` (3, electron, real runners and debuggers):
+  - **Agent loop, node --test:** `test_debug` with `test_names` as a plain string stops with reason `exception`, and the report points at `math.test.mjs:7`. The stack trace and `debug_evaluate_expression got` in that frame give the real wrong value, `8`. Then the session is stopped.
+  - **pytest:** stops at `test_total:8` (`assert 5 == 6`), and evaluating `got` gives `5`.
+  - **Passing test:** runs to its end. Go and an uninstalled Mocha are refused with the reason.
+- `test/common/testDebug.test.ts` (3): argument arrays, name escaping, the empty `skipFiles`, pytest `-k`, refusals, option-like files.
+- `terminalWrap.test.ts` (1, real PowerShell): quoted commands, exit codes, pipes, `&&`, `$` and backticks.
+
+**Totals:** Electron **1099 passing / 0 failing / 1 pending**; node **59/0**; Void-scoped type check clean; eslint 0 errors.
+
+**Not verified:**
+- Jest and Mocha debugging (not installed here; with an empty `skipFiles`, their own internal try/catch could pause before the failure).
+- Vitest.
+- PowerShell 7 (not installed; its Windows argument-passing mode documents cmd.exe as a legacy-quoting exception).
+- A live model.
+
+**Next concrete task:** VS Code test-controller coverage (`test_coverage` through a coverage-capable test extension), then the embedding index.
+
 ## Session report — 2026-11-21: roadmap 1–10 pass complete (mandate format)
 
 1. **Changed**:
@@ -879,6 +919,8 @@ The model writes the commit message and the PR text; Kodia supplies exact facts 
 | 8 | edit_file applies exactly what ORIGINAL matched (no whole-line widening; unique; whole-line whitespace-insensitive matches only) | **Integration-tested** | silent data loss found by scenario 3; realFilesystemEditing.test.ts +2 |
 | 4 | Kodia debug tools on VS Code's DebugSession + a real DAP adapter (debugpy): breakpoints (incl. conditional), launch inline, stop reporting, stack/scopes/variables/evaluate, step, continue-to-end, console, stop, agent-loop repair | **Integration-tested (real adapter) + agent-loop e2e** | debugTools.test.ts (5, incl. debugpy exception filters); DebugService orchestration shimmed; Xdebug not verified |
 | 4 | JavaScript debugging with Microsoft's js-debug (shipped as built-in `ms-vscode.js-debug` 1.140.1): child-session programs, launch, breakpoints, step, evaluate, logpoints, exception breakpoints (`debug_set_exception_breakpoints`), attach to `--inspect-brk`, agent loop | **Integration-tested (real js-debug DAP server, same version) + agent-loop e2e** | jsDebugTools.test.ts (6); record (v). Extension-hosted js-debug in a running Kodia window, chrome debugging and watch expressions not verified |
+| 3+4 | Debug a failing test (`test_debug`): node --test (js-debug) and pytest (debugpy) stop at the failing assertion, with the user's frame named | **Integration-tested (real runners + debuggers) + agent-loop e2e** | testDebug.test.ts (3) + common (3); record (w). Jest/Mocha planned but not run here; Vitest, Go, Rust, .NET, PHP refused with the reason |
+| 1 | `run_command` on Windows: quoted commands through PowerShell | **Fixed + tested in real PowerShell 5.1** | terminalWrap.test.ts; record (w). PowerShell 7 not verified |
 
 **Next concrete task**: weak-model resilience live run (acceptance scenario 9, e.g. `NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`); then roadmap 4 for real — drive Kodia's debug tools through a DAP adapter (js-debug) rather than raw CDP.
 

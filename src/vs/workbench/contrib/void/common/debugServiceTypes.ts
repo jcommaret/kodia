@@ -136,6 +136,8 @@ export interface DebugStopInfo {
 	description?: string;
 	/** exception text when stopped on an exception */
 	text?: string;
+	/** the first frame in the user's code, when the top frame is in the runtime or a library */
+	userLocation?: { name: string; sourcePath?: string; line: number; column: number; frameId: number };
 	/** top frame of the stopped thread */
 	location?: { name: string; sourcePath?: string; line: number; column: number; frameId: number };
 	/** set when the wait timed out while the program was still running */
@@ -157,6 +159,8 @@ export interface IDebugToolService {
 	 */
 	startSession(configurationName: string | undefined, folder?: string, noDebug?: boolean, configuration?: Record<string, unknown>): Promise<DebugSessionInfo & { stop: DebugStopInfo }>;
 	attachSession(configurationName: string, folder?: string): Promise<DebugSessionInfo & { stop: DebugStopInfo }>;
+	/** launch with the exception filters on (enabled as the debugger declares them), run to the first such exception or the end */
+	startAndRunToException(configuration: Record<string, unknown>, filters: string[], waitMs?: number): Promise<DebugSessionInfo & { stop: DebugStopInfo; exceptionBreakpoints: DebugExceptionFilter[] }>;
 	stopSession(sessionId: string, restart?: boolean, suspend?: boolean): Promise<void>;
 	restartSession(sessionId: string): Promise<void>;
 

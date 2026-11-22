@@ -161,6 +161,7 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'test_coverage',
 	'test_history',
 	'test_check_flaky',
+	'test_debug',
 ]);
 
 /**
@@ -334,6 +335,7 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'test_rerun_failed':
 		case 'test_coverage':
 		case 'test_check_flaky':
+		case 'test_debug':
 			return 'medium';
 
 		// Destructive / irreversible.

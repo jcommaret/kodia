@@ -228,7 +228,8 @@ const formatDebugStop = (s: DebugStopInfo): string => {
 	if (s.state === 'terminated') return 'The program has ended (debug session terminated).'
 	if (s.state === 'running') return `The program is running and has not stopped${s.waitedMs ? ` within ${Math.round(s.waitedMs / 1000)}s` : ''} (no breakpoint hit yet). Use debug_pause to stop it, or set a breakpoint.`
 	const where = s.location ? ` in ${s.location.name} at ${s.location.sourcePath ?? '<no source>'}:${s.location.line}:${s.location.column} (frame ${s.location.frameId})` : ''
-	return `Stopped (reason: ${s.reason ?? 'unknown'})${where}, thread ${s.threadId}.${s.description ? ` ${s.description}.` : ''}${s.text ? `\nException: ${s.text}` : ''}`
+	const user = s.userLocation ? `\nFirst frame in your code: ${s.userLocation.name} at ${s.userLocation.sourcePath ?? '<no source>'}:${s.userLocation.line}:${s.userLocation.column} (frame ${s.userLocation.frameId}).` : ''
+	return `Stopped (reason: ${s.reason ?? 'unknown'})${where}, thread ${s.threadId}.${s.description ? ` ${s.description}.` : ''}${s.text ? `\nException: ${s.text}` : ''}${user}`
 }
 
 /** Exception breakpoints a debugger offers, with which are on. */
@@ -1245,6 +1246,10 @@ export class ToolsService implements IToolsService {
 			},
 			test_rerun_failed: () => {
 				return {}
+			},
+			test_debug: (params: RawToolParamsObj) => {
+				const test_file = validateStr('test_file', params.test_file)
+				return { test_file, test_names: validateOptionalStrList(params.test_names) ?? [], stop_on_failure: validateBoolean(params.stop_on_failure, { default: true }) }
 			},
 			test_cancel: (params: RawToolParamsObj) => {
 				const { run_id: runIdUnknown } = params
@@ -2512,6 +2517,13 @@ export class ToolsService implements IToolsService {
 			test_check_flaky: async ({ test_files, test_names, attempts }) => {
 				return { result: await this.testToolService.checkFlaky({ test_files, test_names, attempts }) }
 			},
+			test_debug: async ({ test_file, test_names, stop_on_failure }) => {
+				const plan = await this.testToolService.planTestDebug(test_file, test_names)
+				const session = stop_on_failure
+					? await this.debugToolService.startAndRunToException(plan.configuration, plan.failureFilters)
+					: { ...await this.debugToolService.startSession(undefined, undefined, false, plan.configuration), exceptionBreakpoints: [] }
+				return { result: { ...session, framework: plan.framework, describe: plan.describe } }
+			},
 			test_cancel: async ({ run_id: runId }) => {
 				return { result: await this.testToolService.cancelTestRun({ run_id: runId }) }
 			},
@@ -3475,6 +3487,14 @@ export class ToolsService implements IToolsService {
 					lines.push('Recent runs (newest first):')
 					for (const r of result.recentRuns) lines.push(`  ${new Date(r.at).toISOString()} ${r.framework ?? r.source ?? ''}: ${r.passed} passed, ${r.failed} failed, ${r.skipped} skipped${r.completed ? '' : ' (incomplete)'}`)
 				}
+				return lines.join('\n')
+			},
+			test_debug: (params, result) => {
+				const lines = [`Started debug session ${result.sessionId}: ${result.describe} (${result.framework}).`]
+				if (result.exceptionBreakpoints.some(f => f.enabled)) lines.push(`Stopping where a test fails (exception breakpoints on: ${result.exceptionBreakpoints.filter(f => f.enabled).map(f => f.filter).join(', ')}).`)
+				lines.push(formatDebugStop(result.stop))
+				if (result.stop.state === 'stopped' && result.stop.reason === 'exception') lines.push('This is where the test failed: inspect it with debug_get_exception_info, debug_get_stack_trace and debug_evaluate_expression.')
+				else if (result.stop.state === 'terminated' && params.stop_on_failure) lines.push('The run ended without stopping on a failure: under the debugger these tests did not fail (or the file has no matching test).')
 				return lines.join('\n')
 			},
 			test_check_flaky: (_params, result) => {

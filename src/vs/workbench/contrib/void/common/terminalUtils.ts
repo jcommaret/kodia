@@ -101,9 +101,12 @@ export function wrapCommandForInteractiveShell(command: string): string {
 export function wrapCommandForShell(command: string): string {
 	if (isWindows) {
 		// On Windows, wrap with cmd /c to bypass PowerShell keyword parsing
-		// This prevents issues like 'new' being interpreted as a PowerShell keyword
-		const escaped = command.replace(/"/g, '\\"');
-		return `cmd /c "${escaped}"`;
+		// This prevents issues like 'new' being interpreted as a PowerShell keyword.
+		// The command goes in a PowerShell SINGLE-quoted string: nothing in it is interpreted (no $var, no `escape) and
+		// only ' needs escaping (doubled). The old `cmd /c "..."` escaped inner quotes as \", which PowerShell does not
+		// treat as an escape: every command containing a double quote (node -e "...", git commit -m "...") failed to
+		// parse or ran mangled, and $HOME / backticks were expanded by PowerShell (verified in Windows PowerShell 5.1).
+		return `cmd /c '${command.replace(/'/g, `''`)}'`;
 	}
 	return command;
 }

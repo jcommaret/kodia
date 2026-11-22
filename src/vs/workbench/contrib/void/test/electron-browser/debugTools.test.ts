@@ -125,6 +125,27 @@ suite('Kodia - debugger with a real DAP adapter (roadmap 4, scenario 4)', functi
 		await assert.rejects(debugTools.removeBreakpoint('no-such-id'), /not found/);
 	});
 
+	test('exception breakpoints with debugpy: "raised" stops where a handled exception is raised', async () => {
+		fs.writeFileSync(program, [
+			/* 1 */ 'def parse(s):',
+			/* 2 */ '    return int(s)',
+			/* 3 */ 'try:',
+			/* 4 */ '    parse("x")',
+			/* 5 */ 'except ValueError as e:',
+			/* 6 */ '    print("handled", e)',
+		].join('\n') + '\n');
+		const { sessionId, stop } = await debugTools.startSession(undefined, undefined, false, { ...launchConfig(), stopOnEntry: true });
+		assert.deepStrictEqual([stop.state, stop.reason], ['stopped', 'entry'], JSON.stringify(stop));
+		const set = await debugTools.setExceptionBreakpoints(sessionId, ['raised']);
+		assert.ok(set.exceptionBreakpoints.some(f => f.filter === 'uncaught'), `debugpy also offers "uncaught": ${JSON.stringify(set.exceptionBreakpoints)}`);
+		assert.ok(set.exceptionBreakpoints.find(f => f.filter === 'raised')?.enabled);
+		const hit = await debugTools.continue(sessionId);
+		assert.deepStrictEqual([hit.state, hit.reason, hit.location?.name, hit.location?.line], ['stopped', 'exception', 'parse', 2], JSON.stringify(hit));
+		assert.match((await debugTools.getExceptionInfo(sessionId)).description ?? '', /invalid literal for int/);
+		await debugTools.setExceptionBreakpoints(sessionId, []);
+		assert.strictEqual((await debugTools.continue(sessionId)).state, 'terminated', 'with the filters off, the program runs to its end');
+	});
+
 	test('the agent loop debugs the failure: breakpoint → launch → inspect → fix → rerun shows the right total', async () => {
 		const activity = new KodiaDebuggerActivityService();
 		const events: string[] = [];

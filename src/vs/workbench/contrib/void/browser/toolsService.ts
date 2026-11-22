@@ -23,7 +23,7 @@ import { ITerminalToolService } from './terminalToolService.js'
 import { IGitToolService } from './gitToolService.js'
 import { ITestToolService } from './testToolService.js'
 import { TestRunResultData } from '../common/testServiceTypes.js'
-import { DebugStopInfo } from '../common/debugServiceTypes.js'
+import { DebugExceptionFilter, DebugStopInfo } from '../common/debugServiceTypes.js'
 import { IDebugToolService } from '../common/debugServiceTypes.js'
 import { IDebuggerActivityService, DebuggerActivityType } from '../common/debuggerActivityServiceTypes.js'
 import { LintErrorItem, BuiltinToolCallParams, BuiltinToolResultType, BuiltinToolName, CodeLocation, NotebookCellOutput } from '../common/toolsServiceTypes.js'
@@ -229,6 +229,12 @@ const formatDebugStop = (s: DebugStopInfo): string => {
 	if (s.state === 'running') return `The program is running and has not stopped${s.waitedMs ? ` within ${Math.round(s.waitedMs / 1000)}s` : ''} (no breakpoint hit yet). Use debug_pause to stop it, or set a breakpoint.`
 	const where = s.location ? ` in ${s.location.name} at ${s.location.sourcePath ?? '<no source>'}:${s.location.line}:${s.location.column} (frame ${s.location.frameId})` : ''
 	return `Stopped (reason: ${s.reason ?? 'unknown'})${where}, thread ${s.threadId}.${s.description ? ` ${s.description}.` : ''}${s.text ? `\nException: ${s.text}` : ''}`
+}
+
+/** Exception breakpoints a debugger offers, with which are on. */
+const formatExceptionFilters = (filters: DebugExceptionFilter[]): string => {
+	if (filters.length === 0) return 'This debugger offers no exception breakpoints.'
+	return ['Exception breakpoints:', ...filters.map(f => `  ${f.enabled ? '[on] ' : '[off]'} ${f.filter}: ${f.label}`)].join('\n')
 }
 
 // Debug thread ids are adapter-specific (debugpy, js-debug, ... do not use 1). Omitted → the service picks the
@@ -903,6 +909,11 @@ export class ToolsService implements IToolsService {
 				return { breakpointId, enabled }
 			},
 			debug_list_breakpoints: () => ({}),
+			debug_set_exception_breakpoints: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const filters = validateOptionalStrList(params.filters) ?? []
+				return { sessionId, filters }
+			},
 			debug_continue: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
 				const threadId = validateOptionalThreadId(params.thread_id)
@@ -2071,6 +2082,18 @@ export class ToolsService implements IToolsService {
 					}
 				)
 			},
+			debug_set_exception_breakpoints: async ({ sessionId, filters }) => {
+				return withDebugActivity(
+					'set_exception_breakpoints',
+					'Exception breakpoints',
+					filters.length ? `Stopping on exceptions: ${filters.join(', ')}` : 'Not stopping on exceptions',
+					sessionId,
+					async () => {
+						const result = await this.debugToolService.setExceptionBreakpoints(sessionId, filters)
+						return { result }
+					}
+				)
+			},
 			debug_list_breakpoints: async () => {
 				return withDebugActivity(
 					'list_breakpoints',
@@ -3090,9 +3113,14 @@ export class ToolsService implements IToolsService {
 			debug_remove_breakpoint: () => 'Breakpoint removed.',
 			debug_set_breakpoint_enabled: (_params, result) => 'Breakpoint enabled state updated.',
 			debug_list_breakpoints: (_params, result) => {
-				if (result.breakpoints.length === 0) return 'No breakpoints.'
-				return result.breakpoints.map(b => `  ${b.id}: ${b.uri}:${b.lineNumber} (${b.enabled ? 'enabled' : 'disabled'}, ${b.verified ? 'verified' : 'unverified'})`).join('\n')
+				const lines = result.breakpoints.length === 0 ? ['No breakpoints.'] : result.breakpoints.map(b => {
+					const extra = [b.condition && `condition: ${b.condition}`, b.hitCondition && `hit count: ${b.hitCondition}`, b.logMessage && `logpoint: ${b.logMessage}`].filter(Boolean).join(', ')
+					return `  ${b.id}: ${b.uri}:${b.lineNumber} (${b.enabled ? 'enabled' : 'disabled'}, ${b.verified ? 'verified' : 'unverified'}${extra ? `, ${extra}` : ''})`
+				})
+				if (result.exceptionBreakpoints.length) lines.push(formatExceptionFilters(result.exceptionBreakpoints))
+				return lines.join('\n')
 			},
+			debug_set_exception_breakpoints: (_params, result) => formatExceptionFilters(result.exceptionBreakpoints),
 			debug_continue: (_params, result) => formatDebugStop(result),
 			debug_pause: (_params, result) => formatDebugStop(result),
 			debug_step_over: (_params, result) => formatDebugStop(result),

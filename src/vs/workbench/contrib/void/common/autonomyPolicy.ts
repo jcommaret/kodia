@@ -94,6 +94,7 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'debug_remove_breakpoint',
 	'debug_set_breakpoint_enabled',
 	'debug_list_breakpoints',
+	'debug_set_exception_breakpoints',
 	'debug_continue',
 	'debug_pause',
 	'debug_step_over',
@@ -434,6 +435,7 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'debug_set_breakpoint':
 		case 'debug_remove_breakpoint':
 		case 'debug_set_breakpoint_enabled':
+		case 'debug_set_exception_breakpoints':
 		case 'debug_continue':
 		case 'debug_pause':
 		case 'debug_step_over':

@@ -4,7 +4,7 @@ import { builtinTools } from './prompt/prompts.js';
 import { RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { SearchResult } from './webSearchTypes.js';
 import { TerminalInfo } from '../browser/terminalToolService.js';
-import { DebugConfiguration, DebugSessionInfo, DebugThread, DebugScope, DebugVariable, DebugBreakpoint, DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, ConsoleOutputEntry, DebugStopInfo } from './debugServiceTypes.js';
+import { DebugConfiguration, DebugSessionInfo, DebugThread, DebugScope, DebugVariable, DebugBreakpoint, DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, ConsoleOutputEntry, DebugStopInfo, DebugExceptionFilter } from './debugServiceTypes.js';
 import { TaskPlan, TaskStatus } from './autonomousTask.js';
 import { GitRepositoryStatus, GitDiffResult, GitCommitLogEntry, GitBranchInfo, GitOperationInProgress, GitTagInfo, GitRemoteInfo, GitWorktreeInfo, GitCommitContext, GitPrContext } from './gitService.js';
 import type { GitResetMode, GitStepResult } from './gitOperations.js';
@@ -158,6 +158,7 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'debug_get_scopes': 'debug',
 	'debug_get_variables': 'debug',
 	'debug_list_breakpoints': 'debug',
+	'debug_set_exception_breakpoints': 'debug',
 	'debug_get_exception_info': 'debug',
 	'debug_get_console_output': 'debug',
 	'debug_start_session': 'debug',
@@ -280,6 +281,7 @@ export type BuiltinToolCallParams = {
 	'debug_remove_breakpoint': { breakpointId: string },
 	'debug_set_breakpoint_enabled': { breakpointId: string, enabled: boolean },
 	'debug_list_breakpoints': {},
+	'debug_set_exception_breakpoints': { sessionId: string, filters: string[] },
 	'debug_continue': { sessionId: string, threadId?: number },
 	'debug_pause': { sessionId: string, threadId?: number },
 	'debug_step_over': { sessionId: string, threadId?: number },
@@ -454,7 +456,8 @@ export type BuiltinToolResultType = {
 	'debug_set_breakpoint': DebugBreakpoint,
 	'debug_remove_breakpoint': {},
 	'debug_set_breakpoint_enabled': {},
-	'debug_list_breakpoints': { breakpoints: DebugBreakpoint[] },
+	'debug_list_breakpoints': { breakpoints: DebugBreakpoint[], exceptionBreakpoints: DebugExceptionFilter[] },
+	'debug_set_exception_breakpoints': { exceptionBreakpoints: DebugExceptionFilter[] },
 	'debug_continue': DebugStopInfo,
 	'debug_pause': DebugStopInfo,
 	'debug_step_over': DebugStopInfo,

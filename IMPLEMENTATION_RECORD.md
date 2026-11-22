@@ -739,6 +739,58 @@ The model writes the commit message and the PR text; Kodia supplies exact facts 
 
 **Next concrete task:** roadmap 4, the debugger rows still open: JavaScript debugging through VS Code's js-debug adapter, attach, logpoints and exception breakpoints, verified with a real adapter.
 
+## 2026-11-22 (v) — Roadmap 4: JavaScript debugging (js-debug), attach, logpoints, exception breakpoints
+
+**The product had no JavaScript debugger.** `product.json` had `"builtInExtensions": []`, so Microsoft's js-debug (`ms-vscode.js-debug`, which provides the `node`, `pwa-node` and `chrome` debug types) was never shipped. No "node" launch could start in Kodia.
+- `product.json` now lists `ms-vscode.js-debug` 1.140.1, pinned by sha256, with its marketplace ids (read from the marketplace API).
+- `npm run download-builtin-extensions` downloaded it through the build's own path and verified the checksum. The GitHub release `.vsix` is byte-identical to the marketplace one.
+
+**Bug found by the first real run: the agent could never see a JavaScript program stop.**
+- js-debug runs the program in a **child** debug session that it requests from the client (DAP `startDebugging` → `IDebugger.startDebugging` → `IDebugService.startDebugging` with a parent session). The shipped extension does the same.
+- Every debug tool acted on the session it started, which never has threads.
+- Before the fix the first test failed: `{"state":"running","waitedMs":15003}` with the breakpoint hit in the child.
+- `KodiaDebugToolService` now treats a session and its descendants as one program:
+  - It waits for stops anywhere in the family, including child sessions created after the wait began.
+  - Execution and inspection go to the stopped child (or the one with threads).
+  - Console output includes the children's output, even after they end.
+  - The agent keeps using the one id it was given. `debug_list_sessions` shows `parentSessionId`.
+
+**New tool `debug_set_exception_breakpoints {session_id, filters}`** (medium risk):
+- Enables exactly the debugger's named filters and disables the rest; `[]` turns them off. An unknown filter is refused with the real list.
+- `debug_list_breakpoints` now also shows the exception filters and each breakpoint's condition, hit count and logpoint.
+- Startup exceptions: launch with `stopOnEntry`, set the filters, then continue.
+
+**Test stack:**
+- `scripts/kodia-fetch-js-debug-dap.mts` downloads js-debug's standalone DAP server (same version, sha256-checked) into `.build/js-debug-dap`. That is the same adapter code the extension runs, usable without an extension host.
+- `debugHarness.ts` connects it through VS Code's real `SocketDebugAdapter`. It handles child sessions as `common/debugger.ts` does.
+- The harness maps `node` to `pwa-node`, as the extension's alias does. The standalone server drops a `node` launch without answering (seen on the wire).
+- Exception breakpoints are now sent through the real `DebugSession.sendExceptionBreakpoints`; the harness's old `setExceptionBreakpointsForSession` did nothing.
+
+**Tests** (`jsDebugTools.test.ts`, 6, real Node programs):
+1. **Launch with a breakpoint:**
+   - Stop at `applyDiscount:3`; the started session reports `stopped`; the child session is listed.
+   - Stack and locals (`total=45`, `code='SAVE10'`, `rate=0.1`); evaluate `4.5` and `40.5`.
+   - Step out to `checkout:8` (js-debug finishes line 7's assignment); continue to the end; `total=4.5` in the console.
+2. **Logpoint:** the program never stops; `discount on 45 with SAVE10` is in the console.
+3. **Exception breakpoints:**
+   - `stopOnEntry` stops with reason `entry`. The filter `raised` is refused, and the error lists `all` and `uncaught`.
+   - With `uncaught` on, the handled throw does not stop (its `handled: SyntaxError` is printed). The timer's throw stops with reason `exception` in `parse:2`.
+   - The exception info has the SyntaxError message (js-debug puts it in `id`). `[]` turns both filters off.
+4. **Attach:** to `node --inspect-brk=0`; breakpoint hit, evaluate; continue; the process exits 0 having printed its output.
+5. **Agent loop:** start on entry, then `debug_set_exception_breakpoints` with `filters: "uncaught"` as a plain string, continue, `debug_get_exception_info`. The first run caught a real bug: the validator was called with an extra argument, so the filter became the literal word `"filters"`. The transpile step does not type-check.
+
+`debugTools.test.ts` +1 (debugpy): `raised` stops where a handled `ValueError` is raised (`parse:2`); with `[]` the program runs to its end. This checks the filter names the tool description gives for Python.
+
+**Totals:** Electron **1092 passing / 0 failing / 1 pending**; node **59/0**; Void-scoped type check clean; eslint 0 errors on the changed files.
+
+**Not verified:**
+- The extension-hosted js-debug inside a running Kodia window: launch.json resolution, the extension's own child-session path, browser (`chrome`) debugging.
+- PHP/Xdebug.
+- Watch expressions.
+- A live model using these tools.
+
+**Next concrete task:** debug a failing test: start the test runner's command under the debugger, stopped at the failing assertion (roadmap 3 and 4 together).
+
 ## Session report — 2026-11-21: roadmap 1–10 pass complete (mandate format)
 
 1. **Changed**:
@@ -825,7 +877,8 @@ The model writes the commit message and the PR text; Kodia supplies exact facts 
 | 9 | Project memory: serialized, disk-fresh writes; budgeted into the prompt by context window; used across sessions | **Integration-tested (real service, real disk) + cross-session agent loop** | lost updates/overwrites before; projectMemoryService.test.ts (4), projectMemoryBudget.test.ts (3); no automatic memory capture |
 | 8 / scenario 8 | Session recovery after a crash mid-task (durable conversation, cut-off tool marked, continue) | **Integration-tested (storage fake with flush contract)** | conversation was lost before; sessionRecovery.test.ts (1); real StorageService not exercised |
 | 8 | edit_file applies exactly what ORIGINAL matched (no whole-line widening; unique; whole-line whitespace-insensitive matches only) | **Integration-tested** | silent data loss found by scenario 3; realFilesystemEditing.test.ts +2 |
-| 4 | Kodia debug tools on VS Code's DebugSession + a real DAP adapter (debugpy): breakpoints (incl. conditional), launch inline, stop reporting, stack/scopes/variables/evaluate, step, continue-to-end, console, stop, agent-loop repair | **Integration-tested (real adapter) + agent-loop e2e** | debugTools.test.ts (4); DebugService orchestration shimmed; js-debug/Xdebug, exception filters, logpoints, attach not verified |
+| 4 | Kodia debug tools on VS Code's DebugSession + a real DAP adapter (debugpy): breakpoints (incl. conditional), launch inline, stop reporting, stack/scopes/variables/evaluate, step, continue-to-end, console, stop, agent-loop repair | **Integration-tested (real adapter) + agent-loop e2e** | debugTools.test.ts (5, incl. debugpy exception filters); DebugService orchestration shimmed; Xdebug not verified |
+| 4 | JavaScript debugging with Microsoft's js-debug (shipped as built-in `ms-vscode.js-debug` 1.140.1): child-session programs, launch, breakpoints, step, evaluate, logpoints, exception breakpoints (`debug_set_exception_breakpoints`), attach to `--inspect-brk`, agent loop | **Integration-tested (real js-debug DAP server, same version) + agent-loop e2e** | jsDebugTools.test.ts (6); record (v). Extension-hosted js-debug in a running Kodia window, chrome debugging and watch expressions not verified |
 
 **Next concrete task**: weak-model resilience live run (acceptance scenario 9, e.g. `NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`); then roadmap 4 for real — drive Kodia's debug tools through a DAP adapter (js-debug) rather than raw CDP.
 

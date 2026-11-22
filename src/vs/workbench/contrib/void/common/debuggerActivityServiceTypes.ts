@@ -28,6 +28,7 @@ export type DebuggerActivityType =
 	| 'remove_breakpoint'
 	| 'set_breakpoint_enabled'
 	| 'list_breakpoints'
+	| 'set_exception_breakpoints'
 	| 'continue'
 	| 'pause'
 	| 'step_over'

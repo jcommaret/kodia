@@ -946,8 +946,17 @@ export const builtinTools: {
 
 	debug_list_breakpoints: {
 		name: 'debug_list_breakpoints',
-		description: `Lists all breakpoints with their ids, locations, verification status, and conditions.`,
+		description: `Lists all breakpoints with their ids, locations, verification status, conditions and logpoints, and the exception breakpoints the debuggers offer.`,
 		params: {},
+	},
+
+	debug_set_exception_breakpoints: {
+		name: 'debug_set_exception_breakpoints',
+		description: `Makes the program stop where an exception is thrown. Enables exactly the given exception filters of the session's debugger and disables the others (an empty list turns them off). Filter ids come from the debugger: JavaScript (node) has "all" (caught and uncaught) and "uncaught"; Python (debugpy) has "raised" and "uncaught". To catch an exception thrown at startup, launch with "stopOnEntry": true, set the filters, then continue. After a stop with reason "exception", use debug_get_exception_info.`,
+		params: {
+			session_id: { description: 'The debug session ID.' },
+			filters: { description: 'JSON array of filter ids, e.g. ["uncaught"]. [] to stop no more on exceptions.' },
+		},
 	},
 
 	debug_continue: {

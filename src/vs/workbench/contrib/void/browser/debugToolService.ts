@@ -26,7 +26,7 @@ import { registerSingleton, InstantiationType } from '../../../../platform/insta
 import { IDebugService, State, IDebugSession, IConfig, ILaunch, IBreakpoint, IThread } from '../../debug/common/debug.js';
 import {
 	IDebugToolService, DebugSessionInfo, DebugSessionState, DebugThread, DebugStackFrame, DebugScope, DebugVariable, DebugBreakpoint,
-	DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, DebugConfiguration, DebugRequestType, ConsoleOutputEntry, DebugStopInfo,
+	DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, DebugConfiguration, DebugRequestType, ConsoleOutputEntry, DebugStopInfo, DebugExceptionFilter,
 } from '../common/debugServiceTypes.js';
 
 const MAX_CONSOLE_OUTPUT_PER_SESSION = 500;
@@ -58,6 +58,8 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 
 	private readonly consoleOutput = new Map<string, ConsoleOutputEntry[]>();
 	private readonly sessionListeners = new Map<string, DisposableStore>();
+	/** child session id → parent session id, kept after the sessions end (their console output stays queryable) */
+	private readonly parentOf = new Map<string, string>();
 
 	constructor(
 		@IDebugService private readonly debugService: IDebugService,
@@ -75,6 +77,8 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 		if (this.sessionListeners.has(id)) { return; }
 		const store = new DisposableStore();
 		this.sessionListeners.set(id, store);
+		const parent = session.parentSession?.getId();
+		if (parent) { this.parentOf.set(id, parent); }
 		this.consoleOutput.set(id, this.consoleOutput.get(id) ?? []);
 		let seen = new Set<string>();
 		const collect = () => {
@@ -101,6 +105,25 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 		return session;
 	}
 
+	/**
+	 * A session and every session it spawned. js-debug (VS Code's JavaScript debugger) runs the program in a CHILD
+	 * session it asks the client for (DAP `startDebugging`); the session the agent started never has threads or stops.
+	 */
+	private family(root: IDebugSession): IDebugSession[] {
+		const all = this.debugService.getModel().getSessions(true);
+		const out = [root];
+		for (let i = 0; i < out.length; i++) {
+			for (const s of all) { if (s.parentSession === out[i] && !out.includes(s)) { out.push(s); } }
+		}
+		return out;
+	}
+
+	/** The session running the program: a stopped one in the family, else one with threads, else the given one. */
+	private target(session: IDebugSession): IDebugSession {
+		const live = this.family(session).filter(s => s.state !== State.Inactive);
+		return live.find(s => s.state === State.Stopped) ?? live.find(s => s.getAllThreads().length > 0) ?? session;
+	}
+
 	/** The thread to act on: the given one, else the stopped one, else the only one. */
 	private resolveThread(session: IDebugSession, threadId: number | undefined): IThread {
 		const threads = session.getAllThreads();
@@ -117,27 +140,41 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 
 	// ------------------------------------------------------------------ stop/end detection
 
-	/** Snapshot identifying the current stop of every thread (the platform creates new stoppedDetails per stop). */
-	private stopMarks(session: IDebugSession): Map<number, unknown> {
-		return new Map(session.getAllThreads().map(t => [t.threadId, t.stoppedDetails]));
+	/** Snapshot identifying the current stop of every thread in the family (the platform creates new stoppedDetails per stop). */
+	private stopMarks(root: IDebugSession): Map<string, unknown> {
+		const marks = new Map<string, unknown>();
+		for (const s of this.family(root)) { for (const t of s.getAllThreads()) { marks.set(`${s.getId()}:${t.threadId}`, t.stoppedDetails); } }
+		return marks;
+	}
+
+	private newStop(root: IDebugSession, before?: Map<string, unknown>): { session: IDebugSession; thread: IThread } | undefined {
+		for (const s of this.family(root)) {
+			if (s.state !== State.Stopped) { continue; }
+			const thread = s.getAllThreads().find(t => t.stopped && t.stoppedDetails && (!before || t.stoppedDetails !== before.get(`${s.getId()}:${t.threadId}`)));
+			if (thread) { return { session: s, thread }; }
+		}
+		return undefined;
 	}
 
 	/**
-	 * Wait until a thread stops anew (relative to `before`) or the session ends, up to `timeoutMs`.
-	 * `action` (continue/step/...) runs after the listeners are attached, so its stop cannot be missed.
+	 * Wait until a thread of the session or of a child session stops anew (relative to `before`) or the session ends,
+	 * up to `timeoutMs`. `action` (continue/step/...) runs after the listeners are attached, so its stop cannot be missed.
 	 */
-	private async runAndWaitForStop(session: IDebugSession, timeoutMs: number, action?: () => Promise<unknown>): Promise<DebugStopInfo> {
-		const before = this.stopMarks(session);
+	private async runAndWaitForStop(root: IDebugSession, timeoutMs: number, action?: () => Promise<unknown>): Promise<DebugStopInfo> {
+		const before = this.stopMarks(root);
 		const started = Date.now();
 		const store = new DisposableStore();
 		try {
 			const outcome = new Promise<'stopped' | 'ended' | 'timeout'>(resolve => {
 				const check = () => {
-					if (session.state === State.Inactive) { resolve('ended'); return; }
-					if (session.state === State.Stopped && session.getAllThreads().some(t => t.stopped && t.stoppedDetails && t.stoppedDetails !== before.get(t.threadId))) { resolve('stopped'); }
+					if (root.state === State.Inactive) { resolve('ended'); return; }
+					if (this.newStop(root, before)) { resolve('stopped'); }
 				};
-				store.add(session.onDidChangeState(check));
-				store.add(this.debugService.onDidEndSession(e => { if (e.session === session) { resolve('ended'); } }));
+				const watched = new Set<IDebugSession>();
+				const watch = () => { for (const s of this.family(root)) { if (!watched.has(s)) { watched.add(s); store.add(s.onDidChangeState(check)); } } };
+				watch();
+				store.add(this.debugService.onDidNewSession(() => { watch(); check(); })); // a child session started (js-debug)
+				store.add(this.debugService.onDidEndSession(e => { if (e.session === root) { resolve('ended'); } }));
 				const timer = setTimeout(() => resolve('timeout'), timeoutMs);
 				store.add({ dispose: () => clearTimeout(timer) });
 				setTimeout(check, 0);
@@ -146,16 +183,16 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 			const result = await outcome;
 			if (result === 'ended') { return { state: 'terminated' }; }
 			if (result === 'timeout') { return { state: 'running', waitedMs: Date.now() - started }; }
-			return this.describeStop(session, before);
+			return this.describeStop(root, before);
 		} finally {
 			store.dispose();
 		}
 	}
 
-	private async describeStop(session: IDebugSession, before?: Map<number, unknown>): Promise<DebugStopInfo> {
-		const thread = session.getAllThreads().find(t => t.stopped && t.stoppedDetails && (!before || t.stoppedDetails !== before.get(t.threadId)))
-			?? session.getAllThreads().find(t => t.stopped);
-		if (!thread) { return { state: session.state === State.Inactive ? 'terminated' : 'running' }; }
+	private async describeStop(root: IDebugSession, before?: Map<string, unknown>): Promise<DebugStopInfo> {
+		const found = this.newStop(root, before) ?? this.newStop(root);
+		if (!found) { return { state: root.state === State.Inactive ? 'terminated' : 'running' }; }
+		const { session, thread } = found;
 		const d = thread.stoppedDetails;
 		const info: DebugStopInfo = { state: 'stopped', threadId: thread.threadId, reason: d?.reason, description: d?.description, text: d?.text };
 		try {
@@ -184,7 +221,10 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 
 	private sessionInfo(session: IDebugSession): DebugSessionInfo {
 		const config = session.configuration;
-		return { sessionId: session.getId(), name: session.name, type: config.type, state: stateToSessionState(session.state), request: requestOf(config), configurationName: config.name, folder: session.root?.uri.fsPath };
+		return {
+			sessionId: session.getId(), name: session.name, type: config.type, state: stateToSessionState(this.target(session).state), request: requestOf(config), configurationName: config.name, folder: session.root?.uri.fsPath,
+			parentSessionId: session.parentSession?.getId(),
+		};
 	}
 
 	async getSessionStatus(sessionId: string): Promise<DebugSessionInfo> {
@@ -223,7 +263,7 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 		if (!newSession) { throw new Error(`No debug session appeared for "${config.name}".`); }
 		this.trackSession(newSession);
 		// the program may already have stopped (stopOnEntry, an early breakpoint) or even ended
-		const stop = newSession.state === State.Stopped ? await this.describeStop(newSession) : await this.runAndWaitForStop(newSession, START_WAIT_MS);
+		const stop = this.newStop(newSession) ? await this.describeStop(newSession) : await this.runAndWaitForStop(newSession, START_WAIT_MS);
 		return { ...this.sessionInfo(newSession), stop };
 	}
 
@@ -249,34 +289,39 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 	// ------------------------------------------------------------------ execution control
 
 	async continue(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
-		const session = this.findSession(sessionId);
+		const root = this.findSession(sessionId);
+		const session = this.target(root);
 		const thread = this.resolveThread(session, threadId);
-		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.continue(thread.threadId));
+		return this.runAndWaitForStop(root, RUN_WAIT_MS, () => session.continue(thread.threadId));
 	}
 
 	async pause(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
-		const session = this.findSession(sessionId);
+		const root = this.findSession(sessionId);
+		const session = this.target(root);
 		const id = threadId ?? session.getAllThreads()[0]?.threadId;
 		if (id === undefined) { throw new Error(`Session "${sessionId}" has no threads to pause.`); }
-		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.pause(id));
+		return this.runAndWaitForStop(root, RUN_WAIT_MS, () => session.pause(id));
 	}
 
 	async stepOver(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
-		const session = this.findSession(sessionId);
+		const root = this.findSession(sessionId);
+		const session = this.target(root);
 		const thread = this.resolveThread(session, threadId);
-		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.next(thread.threadId));
+		return this.runAndWaitForStop(root, RUN_WAIT_MS, () => session.next(thread.threadId));
 	}
 
 	async stepInto(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
-		const session = this.findSession(sessionId);
+		const root = this.findSession(sessionId);
+		const session = this.target(root);
 		const thread = this.resolveThread(session, threadId);
-		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.stepIn(thread.threadId));
+		return this.runAndWaitForStop(root, RUN_WAIT_MS, () => session.stepIn(thread.threadId));
 	}
 
 	async stepOut(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
-		const session = this.findSession(sessionId);
+		const root = this.findSession(sessionId);
+		const session = this.target(root);
 		const thread = this.resolveThread(session, threadId);
-		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.stepOut(thread.threadId));
+		return this.runAndWaitForStop(root, RUN_WAIT_MS, () => session.stepOut(thread.threadId));
 	}
 
 	// ------------------------------------------------------------------ breakpoints
@@ -299,8 +344,33 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 		await this.debugService.enableOrDisableBreakpoints(enabled, bp);
 	}
 
-	async listBreakpoints(): Promise<{ breakpoints: DebugBreakpoint[] }> {
-		return { breakpoints: this.debugService.getModel().getBreakpoints().map(bp => this.mapBreakpoint(bp)) };
+	async listBreakpoints(): Promise<{ breakpoints: DebugBreakpoint[]; exceptionBreakpoints: DebugExceptionFilter[] }> {
+		return { breakpoints: this.debugService.getModel().getBreakpoints().map(bp => this.mapBreakpoint(bp)), exceptionBreakpoints: this.exceptionFilters() };
+	}
+
+	/** The exception filters debuggers have declared (deduplicated by filter id), or those of one session. */
+	private exceptionFilters(session?: IDebugSession): DebugExceptionFilter[] {
+		const model = this.debugService.getModel();
+		const list = session ? model.getExceptionBreakpointsForSession(session.getId()) : model.getExceptionBreakpoints();
+		return list.map(e => ({ filter: e.filter, label: e.label, description: e.description, enabled: e.enabled }));
+	}
+
+	/**
+	 * Stop on thrown exceptions: enables exactly the given filters (adapter-defined ids, e.g. js-debug "all"/"uncaught",
+	 * debugpy "raised"/"uncaught") and disables the others; [] turns exception breakpoints off. The choice is kept by
+	 * the platform for later sessions of the same debugger.
+	 */
+	async setExceptionBreakpoints(sessionId: string, filters: string[]): Promise<{ exceptionBreakpoints: DebugExceptionFilter[] }> {
+		const session = this.target(this.findSession(sessionId));
+		const available = this.debugService.getModel().getExceptionBreakpointsForSession(session.getId());
+		if (available.length === 0) { throw new Error(`The "${session.configuration.type}" debugger declares no exception breakpoints.`); }
+		const unknown = filters.filter(f => !available.some(a => a.filter === f));
+		if (unknown.length) { throw new Error(`Unknown exception filter${unknown.length > 1 ? 's' : ''} ${unknown.map(f => `"${f}"`).join(', ')}. This debugger has: ${available.map(a => `"${a.filter}" (${a.label})`).join(', ')}.`); }
+		for (const e of available) {
+			const want = filters.includes(e.filter);
+			if (e.enabled !== want) { await this.debugService.enableOrDisableBreakpoints(want, e); }
+		}
+		return { exceptionBreakpoints: this.exceptionFilters(session) };
 	}
 
 	private mapBreakpoint(bp: IBreakpoint): DebugBreakpoint {
@@ -313,11 +383,11 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 	// ------------------------------------------------------------------ inspection
 
 	async listThreads(sessionId: string): Promise<{ threads: DebugThread[] }> {
-		return { threads: this.findSession(sessionId).getAllThreads().map(t => ({ threadId: t.threadId, name: t.name, stateLabel: t.stateLabel, stopped: t.stopped })) };
+		return { threads: this.target(this.findSession(sessionId)).getAllThreads().map(t => ({ threadId: t.threadId, name: t.name, stateLabel: t.stateLabel, stopped: t.stopped })) };
 	}
 
 	async getStackTrace(sessionId: string, threadId?: number, startFrame = 0, levels = 50): Promise<DebugStackTrace> {
-		const session = this.findSession(sessionId);
+		const session = this.target(this.findSession(sessionId));
 		const thread = this.resolveThread(session, threadId);
 		const response = await session.stackTrace(thread.threadId, startFrame, levels, CancellationToken.None);
 		if (!response?.body) { throw new Error(`Failed to retrieve the stack trace of thread ${thread.threadId}.`); }
@@ -328,7 +398,7 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 	}
 
 	async getScopes(sessionId: string, frameId: number, threadId?: number): Promise<{ scopes: DebugScope[] }> {
-		const session = this.findSession(sessionId);
+		const session = this.target(this.findSession(sessionId));
 		const thread = this.resolveThread(session, threadId);
 		const response = await session.scopes(frameId, thread.threadId);
 		if (!response?.body) { throw new Error(`Failed to retrieve scopes for frame ${frameId}.`); }
@@ -336,14 +406,14 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 	}
 
 	async getVariables(sessionId: string, variablesReference: number, start?: number, count?: number): Promise<{ variables: DebugVariable[] }> {
-		const response = await this.findSession(sessionId).variables(variablesReference, undefined, undefined, start, count);
+		const response = await this.target(this.findSession(sessionId)).variables(variablesReference, undefined, undefined, start, count);
 		if (!response?.body) { throw new Error(`Failed to retrieve variables for reference ${variablesReference}.`); }
 		return { variables: response.body.variables.map(v => ({ name: v.name, value: v.value, type: v.type ?? '', variablesReference: v.variablesReference, hasChildren: v.variablesReference > 0, presentationHint: v.presentationHint?.kind })) };
 	}
 
 	/** Without a frameId, a stopped program evaluates in the top frame of the stopped thread (where it stopped), not globally. */
 	async evaluateExpression(sessionId: string, expression: string, frameId?: number): Promise<DebugEvaluateResult> {
-		const session = this.findSession(sessionId);
+		const session = this.target(this.findSession(sessionId));
 		if (frameId === undefined && session.state === State.Stopped) {
 			const thread = session.getAllThreads().find(t => t.stopped);
 			if (thread) { frameId = (await session.stackTrace(thread.threadId, 0, 1, CancellationToken.None))?.body?.stackFrames[0]?.id; }
@@ -354,7 +424,7 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 	}
 
 	async getExceptionInfo(sessionId: string, threadId?: number): Promise<DebugExceptionInfo> {
-		const session = this.findSession(sessionId);
+		const session = this.target(this.findSession(sessionId));
 		const info = await session.exceptionInfo(this.resolveThread(session, threadId).threadId);
 		return info ? { id: info.id, description: info.description, breakMode: info.breakMode ?? null } : { breakMode: null };
 	}
@@ -362,7 +432,8 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 	// ------------------------------------------------------------------ console
 
 	async getConsoleOutput(sessionId?: string, limit = 200): Promise<{ output: ConsoleOutputEntry[] }> {
-		const all = sessionId ? (this.consoleOutput.get(sessionId) ?? []) : [...this.consoleOutput.values()].flat();
+		const descends = (id: string): boolean => { for (let cur: string | undefined = id; cur; cur = this.parentOf.get(cur)) { if (cur === sessionId) { return true; } } return false; };
+		const all = sessionId ? [...this.consoleOutput.entries()].filter(([id]) => descends(id)).flatMap(([, entries]) => entries) : [...this.consoleOutput.values()].flat();
 		return { output: all.slice(-limit) }; // the latest entries
 	}
 }

@@ -27,6 +27,16 @@ export interface DebugSessionInfo {
 	request: DebugRequestType;
 	configurationName: string;
 	folder?: string;
+	/** set on a session another session started (js-debug runs the program in such a child session) */
+	parentSessionId?: string;
+}
+
+/** An exception filter a debugger declares (DAP exceptionBreakpointFilters), e.g. js-debug "all" / "uncaught". */
+export interface DebugExceptionFilter {
+	filter: string;
+	label: string;
+	description?: string;
+	enabled: boolean;
 }
 
 // A thread in a debug session.
@@ -162,7 +172,8 @@ export interface IDebugToolService {
 	setBreakpoint(sessionId: string | undefined, uri: string, lineNumber: number, column?: number, condition?: string, hitCondition?: string, logMessage?: string): Promise<DebugBreakpoint>;
 	removeBreakpoint(breakpointId: string): Promise<void>;
 	setBreakpointEnabled(breakpointId: string, enabled: boolean): Promise<void>;
-	listBreakpoints(): Promise<{ breakpoints: DebugBreakpoint[] }>;
+	listBreakpoints(): Promise<{ breakpoints: DebugBreakpoint[]; exceptionBreakpoints: DebugExceptionFilter[] }>;
+	setExceptionBreakpoints(sessionId: string, filters: string[]): Promise<{ exceptionBreakpoints: DebugExceptionFilter[] }>;
 
 	// --- inspection ---
 	listThreads(sessionId: string): Promise<{ threads: DebugThread[] }>;

@@ -851,7 +851,37 @@ Jest 29.7.0 and Mocha 10.7.3 are installed in git-ignored `.build/kodia-js-test-
 
 **Totals:** Electron **1101 passing / 0 failing / 1 pending**; Void-scoped type check clean (it caught `supportsCondition` missing on the `IExceptionBreakpoint` interface; the check now uses the model class); eslint 0 errors.
 
-**Not verified:** Vitest; js-debug inside a running Kodia window; a live model.
+**Not verified:** Vitest; a live model. js-debug inside a running Kodia window was verified afterwards by the user: the agent stopped at `app.js:1` with `a = 2`, `b = 3` read through `debug_get_variables`.
+
+## 2026-11-22 (y) — Roadmap 1 (terminal security): destructive commands now always ask first
+
+**Real incident.** In a running Kodia (Agent mode) the agent emptied a user's project folder, `c:\wamp64\www\wondercommerce` (8917 files), with `Remove-Item -Recurse -Force`. It never asked: the command was rated *medium*, so Agent mode allowed it.
+
+**Cause:** `isDestructiveCommand` had three flaws.
+1. It did not know PowerShell's `Remove-Item` (or its aliases `ri`, `rm`), although PowerShell is the Windows default terminal.
+2. It looked only at the **first word** of the command line: `cd x; rm -rf .` was judged by `cd`.
+3. It required **both** recursive and force flags. Its recursive regex also read `-Force` as recursive, because of the `r` in it.
+
+**Now:**
+- Every command in a line is checked (split on `;` `&&` `||` `|` `&` and newlines, outside quotes), including through `sudo`, `cmd /c` and `powershell -Command`.
+- Treated as destructive:
+  - a recursive delete in any shell, with or without force;
+  - deleting a whole folder (`*`, `*.*`);
+  - `Remove-Item` fed by a pipeline;
+  - `git clean -f`, `git reset --hard`, `git push --force`/`+ref`;
+  - format/mkfs/dd/shred/wipe/scrub/diskpart;
+  - `rimraf`, `shutil.rmtree`, `[IO.Directory]::Delete`, `fs.rmSync(..., { recursive: true })`.
+- Destructive means critical risk, which needs approval in **every** mode, even with terminal auto-approve or an explicit allow.
+- Single-file deletes and everyday commands are unchanged. The old `\bformat\s` pattern is gone, so `npm run format` no longer counts as destructive.
+
+**Tests:**
+- `test/common/destructiveCommands.test.ts` (5): the incident's exact command, PowerShell forms and aliases, chained, wrapped and piped forms, and git/other-program deletes. 18 everyday commands are not flagged. The policy result is checked in all 3 modes × {plain, terminal auto-approve, explicit allow}.
+- `destructiveApproval.test.ts` (1, agent loop, Agent mode, real PowerShell): `node --version` runs without asking. `Remove-Item -Recurse -Force <project>\*` stops for approval. The test declines, the tool result is `rejected`, and every project file still exists.
+- The existing terminalSafety and autonomy suites still pass.
+
+**Totals:** Electron **1107 passing / 0 failing / 1 pending**; Void-scoped type check clean; eslint 0 errors.
+
+**Not covered:** command-line obfuscation (variables holding the command, `Invoke-Expression` of built strings, base64-encoded PowerShell). A pattern check cannot see through these; real sandboxing or a filesystem-level guard would be needed (roadmap 10).
 
 ## Session report — 2026-11-21: roadmap 1–10 pass complete (mandate format)
 
@@ -943,6 +973,7 @@ Jest 29.7.0 and Mocha 10.7.3 are installed in git-ignored `.build/kodia-js-test-
 | 4 | JavaScript debugging with Microsoft's js-debug (shipped as built-in `ms-vscode.js-debug` 1.140.1): child-session programs, launch, breakpoints, step, evaluate, logpoints, exception breakpoints (`debug_set_exception_breakpoints`), attach to `--inspect-brk`, agent loop | **Integration-tested (real js-debug DAP server, same version) + agent-loop e2e** | jsDebugTools.test.ts (6); record (v). Extension-hosted js-debug in a running Kodia window, chrome debugging and watch expressions not verified |
 | 3+4 | Debug a failing test (`test_debug`): node --test (js-debug) and pytest (debugpy) stop at the failing assertion, with the user's frame named | **Integration-tested (real runners + debuggers: node --test, pytest, Jest 29, Mocha 10) + agent-loop e2e** | testDebug.test.ts (5) + common (3); records (w), (x). JS stops on assertion failures only; Vitest, Go, Rust, .NET, PHP refused with the reason |
 | 1 | `run_command` on Windows: quoted commands through PowerShell | **Fixed + tested in real PowerShell 5.1 and 7.7** | terminalWrap.test.ts (5.1); PowerShell 7.7 measured with the same 9 cases; record (w) |
+| 1 | Destructive terminal commands need approval (PowerShell Remove-Item, chained/wrapped/piped, git clean/reset --hard/force push) | **Existing but broken → fixed; agent-loop e2e** | was medium risk: a real agent deleted a user's project without asking; destructiveCommands.test.ts + destructiveApproval.test.ts; record (y). Obfuscated commands not covered |
 
 **Next concrete task**: weak-model resilience live run (acceptance scenario 9, e.g. `NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`); then roadmap 4 for real — drive Kodia's debug tools through a DAP adapter (js-debug) rather than raw CDP.
 

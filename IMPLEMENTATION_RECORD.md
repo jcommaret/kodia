@@ -704,6 +704,41 @@ Committed (r)+(s) first, on branch `kodia/agent-engine-roadmap` (commit `d185ffe
 - A live-model run of the new tools.
 - Real Jest, Vitest, Mocha and Go coverage runs (only their report formats are tested; Go is not installed here).
 
+## 2026-11-22 (u) — Roadmap 2 (Part K): commit messages and pull-request preparation
+
+The model writes the commit message and the PR text; Kodia supplies exact facts from git so the text can only describe what is really there.
+
+**`git_commit_context`** (low risk, read-only):
+- Lists the staged files with status, line counts, renames (old path) and binaries.
+- Includes the staged diff, truncated with a flag; the file list is always complete.
+- Lists the files **not** in the commit, so the message does not claim them.
+- Reads the repository's style from its last 20 non-merge subjects: whether they follow conventional commits, the types and scopes used, and the typical subject length.
+- With nothing staged it is an error that says what is unstaged.
+
+**`git_pr_prepare`** (low risk; the conflict check writes no ref and no working-tree file):
+- **Base:** origin's default branch (`origin/HEAD`), else main or master, never the current branch; or the one given.
+- **Facts reported:** commits (no merges), changed files with counts, totals, ahead/behind, upstream and unpushed commits, uncommitted work.
+- **Conflict check:** `git merge-tree --write-tree` shows whether merging into the base would conflict, and in which files.
+- **Tests:** this session's **last test run**, or an explicit "no tests have been run, do not claim it is tested".
+- **Refused:** detached HEAD, no commits beyond the base, an unknown base, an option-like base.
+- Kodia does not open the PR on GitHub.
+
+**Allowlist:** added `rev-list`, `merge-base` and `merge-tree`, all read-only. `symbolic-ref`, which can write, is still rejected (tested).
+
+**Tests:**
+- `gitOperations.test.ts` +3, on real repos:
+  - Staged vs unstaged, rename and binary files, conventional-style detection.
+  - A real conflict found while the working tree and index stay untouched.
+  - After pushing to a real bare remote and merging the base: upstream, 2 unpushed commits, 0 behind, no conflicts, merge commits not listed.
+  - The refusals listed above.
+- `gitAgent.test.ts` +1, through the agent loop: write → stage → `git_commit_context` (sees the user's unstaged `notes.txt` called out, and the fix/feat style) → commit in that style → `git_pr_prepare` (sees base main, not pushed, merges cleanly, no tests run). The user's edit stays uncommitted.
+
+**Flaky test fixed:** `sessionRecovery.test.ts` failed once in a full run and passed 3/3 alone. It assumed the command was running 300 ms after the model asked for it, so it fired too early on a loaded machine. It now waits for the running state, with a deadline.
+
+**Totals:** Electron **1086 passing / 0 failing / 1 pending**; node **59/0**; eslint 0 errors on the 10 changed files; Void-scoped type check clean.
+
+**Next concrete task:** roadmap 4, the debugger rows still open: JavaScript debugging through VS Code's js-debug adapter, attach, logpoints and exception breakpoints, verified with a real adapter.
+
 ## Session report — 2026-11-21: roadmap 1–10 pass complete (mandate format)
 
 1. **Changed**:
@@ -768,7 +803,8 @@ Committed (r)+(s) first, on branch `kodia/agent-engine-roadmap` (commit `d185ffe
 | 3 | Tests via VS Code test-controller extensions; debug-a-test; test generation | **Partial / Missing** | controller path fixed but not integration-tested (coverage always uses the framework's command); debug-a-test and generation not implemented |
 | 2 | Git for the agent: status/diff/log/branches/show, branch create/switch, stage/unstage, commit, fetch/pull/push, merge, stash/pop | **Integration-tested (real repos) + agent-loop e2e** | was non-functional in the app (DI), shell-injectable and fake-success; gitOperations.test.ts (15), gitAgent.test.ts (2); not launched in the packaged app |
 | 2 | Git: revert, cherry-pick, rebase (non-interactive), continue/abort of a stopped operation, reset (soft/mixed/hard with safeguards), tags, remotes (redacted), worktrees (list/add); status reports which operation is in progress | **Integration-tested (real repos) + agent-loop e2e** | gitOperations.test.ts +10, gitAgent.test.ts +1 (conflict → resolve → continue; hard reset asks approval and is still refused over uncommitted work), gitAutonomyPolicy +1; section (r) |
-| 2 | Git: PR workflows, commit-message generation, tag/branch deletion, worktree removal | **Missing** | deliberately not exposed (deletions) or not implemented |
+| 2 | Git: commit-message context (`git_commit_context`: exact staged change, what is not staged, the repository's message style) and PR preparation (`git_pr_prepare`: commits/files vs base, ahead/behind, push state, uncommitted work, real conflict check via merge-tree, last test run) | **Integration-tested (real repos, bare remote) + agent-loop e2e** | gitOperations.test.ts +3, gitAgent.test.ts +1; section (u); Kodia writes no PR on GitHub (no gh/API integration) |
+| 2 | Git: opening/reviewing PRs on GitHub, tag/branch deletion, worktree removal | **Missing** | opening a PR needs a GitHub integration and the user's credentials; deletions deliberately not exposed |
 | 1 | Terminal dev tools (dep_install, db_migrate, lint_run) report real outcomes | **Integration-tested** (real processes) | were hardcoded success; terminalDevTools.test.ts |
 | 4 | Debugger: real process debugging over V8 inspector | **Integration-tested** (real Node process) | nodeInspectorDebugging.test.ts |
 | 5 | Browser automation: launch/tabs/navigate (HTTP status)/inspect (unique selectors, visibility, measured layout defects, console + network errors)/click & submit (wait for navigation)/fill/select/check/viewport/screenshot (file)/console/network/download | **Integration-tested (real Chromium) + agent-loop e2e (scenario 3, scripted)** | browserAutomationSignals.test.ts (9, all fail at HEAD), browserAutomation.test.ts (12), browserRepair.test.ts (1, out-of-process service); packaged app not launched; no vision; no live-model run |

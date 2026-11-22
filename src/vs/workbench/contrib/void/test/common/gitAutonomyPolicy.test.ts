@@ -63,7 +63,7 @@ suite('Kodia - Git Autonomy Policy (Stage 2)', () => {
 			assert.strictEqual(assessRisk('git_merge', {}), 'medium');
 		});
 		test('history operations, tags, remotes and worktrees are classified (none falls through as unknown)', () => {
-			for (const t of ['git_tag_list', 'git_remote_list', 'git_worktree_list']) { assert.strictEqual(assessRisk(t, {}), 'low', t); }
+			for (const t of ['git_tag_list', 'git_remote_list', 'git_worktree_list', 'git_commit_context', 'git_pr_prepare']) { assert.strictEqual(assessRisk(t, {}), 'low', t); }
 			for (const t of ['git_revert', 'git_cherry_pick', 'git_continue', 'git_abort', 'git_tag_create', 'git_worktree_add']) { assert.strictEqual(assessRisk(t, {}), 'medium', t); }
 			assert.strictEqual(assessRisk('git_rebase', { onto: 'main' }), 'high');
 			assert.strictEqual(assessRisk('git_reset', { mode: 'mixed' }), 'high');

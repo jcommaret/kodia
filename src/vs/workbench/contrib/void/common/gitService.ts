@@ -49,6 +49,49 @@ export type GitTagInfo = { name: string; commit: string; annotated: boolean; sub
 export type GitRemoteInfo = { name: string; fetchUrl: string | null; pushUrl: string | null };
 export type GitWorktreeInfo = { path: string; head: string | null; branch: string | null; isMain: boolean; locked: boolean; prunable: boolean };
 
+/** A changed file with its line counts (null for binary files). */
+export type GitChangedFile = { path: string; status: GitFileStatus['status']; oldPath?: string; added: number | null; deleted: number | null };
+
+/** How this repository writes commit messages, read from its recent history. */
+export type GitCommitConvention = {
+	/** most recent subjects follow `type(scope): subject` */
+	conventional: boolean;
+	types: string[];
+	scopes: string[];
+	averageSubjectLength: number | null;
+};
+
+/** What a commit message must describe: exactly what is staged, nothing else. */
+export type GitCommitContext = {
+	branch: string | null;
+	staged: GitChangedFile[];
+	stagedDiff: string;
+	diffTruncated: boolean;
+	/** changes that the commit will NOT include */
+	notStaged: { unstaged: string[]; untracked: string[] };
+	recentSubjects: string[];
+	convention: GitCommitConvention;
+};
+
+/** Everything a pull request description needs, from git itself. */
+export type GitPrContext = {
+	branch: string;
+	base: string;
+	mergeBase: string;
+	commits: { hash: string; subject: string; body: string }[];
+	files: GitChangedFile[];
+	totals: { files: number; added: number; deleted: number };
+	/** commits on the branch that the base does not have, and the reverse */
+	ahead: number;
+	behind: number;
+	upstream: string | null;
+	/** commits not pushed to the upstream; null when the branch has no upstream */
+	unpushed: number | null;
+	uncommitted: { staged: number; unstaged: number; untracked: number };
+	/** files that would conflict when merging into the base; null when git could not check */
+	conflictsWithBase: string[] | null;
+};
+
 /**
  * A single diff hunk.
  */
@@ -134,6 +177,8 @@ export const GIT_ALLOWED_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	'rev-parse', 'status', 'diff', 'log', 'show', 'for-each-ref', 'check-ref-format',
 	'branch', 'switch', 'add', 'restore', 'rm', 'commit', 'fetch', 'pull', 'push', 'merge', 'stash',
 	'revert', 'cherry-pick', 'rebase', 'reset', 'tag', 'remote', 'worktree',
+	// read-only: commit counts, and the would-it-conflict check (merge-tree writes objects only, never the working tree or a ref)
+	'rev-list', 'merge-base', 'merge-tree',
 ]);
 
 /** Subcommands whose first argument selects an action: only these actions are allowed (no remote add/set-url, no

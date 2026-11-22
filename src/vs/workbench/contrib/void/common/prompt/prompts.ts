@@ -1475,6 +1475,20 @@ export const builtinTools: {
 			start_point: { description: 'Optional, with new_branch. The commit or branch the new branch starts from.' },
 		},
 	},
+	git_commit_context: {
+		name: 'git_commit_context',
+		description: `Before git_commit: get exactly what is staged (files, line counts, the staged diff), what is NOT staged (so the message does not claim it), and this repository's message style from its recent commits (e.g. conventional "type(scope): subject", usual types and scopes, typical subject length). Write the commit message from this, describing only the staged change, then call git_commit.`,
+		params: {
+			max_diff_chars: { description: 'Optional. How much of the staged diff to include (default 12000, max 60000).' },
+		},
+	},
+	git_pr_prepare: {
+		name: 'git_pr_prepare',
+		description: `Prepare a pull request description: the branch's commits and changed files versus the base branch, whether the branch is pushed, uncommitted work, files that would conflict when merged into the base (checked without touching the working tree), and the last test run in this session. Write the title and description from these facts only: mention tests only if a test run is reported. Kodia does not open the pull request itself.`,
+		params: {
+			base: { description: 'Optional. The branch the pull request targets (default: origin\'s default branch, else main or master).' },
+		},
+	},
 
 	// Test discovery and execution (Stage 3)
 	test_discover: {

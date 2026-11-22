@@ -357,4 +357,81 @@ suite('Kodia - git operations on real repositories (scenario 6)', function () {
 		assert.strictEqual(worktrees[1].branch, 'feature-x');
 		await assert.rejects(ops.addWorktree(repo, path.join(tmp, 'wt-2'), 'main', false), /failed/); // already checked out
 	});
+
+	// ------------------------------------------------------------------ commit messages and pull requests
+
+	const commit = (message: string) => { gitRaw(repo, 'add', '-A'); gitRaw(repo, 'commit', '-q', '-m', message); };
+
+	test('commit context: exactly what is staged (with counts, renames, binaries), what is not, and the repository style', async () => {
+		await assert.rejects(ops.commitContext(repo), /Nothing is staged/);
+		write('a.txt', 'a\n'); commit('feat(core): add a');
+		write('b.txt', 'b\n'); commit('fix(core): handle b');
+		write('c.txt', 'c\n'); commit('feat(ui): add c');
+		write('README.md', 'line one\nline 2\nline three\n');
+		gitRaw(repo, 'mv', 'a.txt', 'alpha.txt');
+		fs.writeFileSync(path.join(repo, 'logo.bin'), Buffer.from([0, 1, 2, 255, 0]));
+		gitRaw(repo, 'add', 'README.md', 'logo.bin');
+		write('user.txt', 'user v2 (not staged)\n');
+		write('scratch.txt', 'untracked\n');
+		const c = await ops.commitContext(repo);
+		assert.deepStrictEqual(c.staged.map(f => [f.status, f.path, f.oldPath, f.added, f.deleted]).sort(), [
+			['added', 'logo.bin', undefined, null, null],
+			['modified', 'README.md', undefined, 2, 1],
+			['renamed', 'alpha.txt', 'a.txt', 0, 0],
+		]);
+		assert.deepStrictEqual(c.notStaged, { unstaged: ['user.txt'], untracked: ['scratch.txt'] });
+		assert.ok(c.convention.conventional);
+		assert.deepStrictEqual(c.convention.types, ['feat', 'fix']);
+		assert.deepStrictEqual(c.convention.scopes, ['core', 'ui']);
+		assert.deepStrictEqual(c.recentSubjects.slice(0, 3), ['feat(ui): add c', 'fix(core): handle b', 'feat(core): add a']);
+		assert.match(c.stagedDiff, /\+line three/);
+		assert.strictEqual(c.diffTruncated, false);
+		assert.ok((await ops.commitContext(repo, { maxDiffChars: 1000 })).stagedDiff.length <= 1000);
+	});
+
+	test('pull request context: commits, files, ahead/behind, push state, uncommitted work and a REAL conflict with the base', async () => {
+		gitRaw(repo, 'switch', '-q', '-c', 'feature');
+		write('README.md', 'line one\nline two (feature)\n'); commit('Change line two on the feature');
+		write('src/new.js', 'export const x = 1;\n'); commit('Add new.js');
+		gitRaw(repo, 'switch', '-q', 'main');
+		write('README.md', 'line one\nline two (main)\n'); commit('Change line two on main');
+		gitRaw(repo, 'switch', '-q', 'feature');
+		write('user.txt', 'user edit in progress\n');
+
+		const pr = await ops.prContext(repo);
+		assert.strictEqual(pr.base, 'main', 'no origin: the local main');
+		assert.deepStrictEqual([pr.branch, pr.ahead, pr.behind, pr.upstream, pr.unpushed], ['feature', 2, 1, null, null]);
+		assert.deepStrictEqual(pr.commits.map(c => c.subject), ['Change line two on the feature', 'Add new.js']);
+		assert.deepStrictEqual(pr.files.map(f => [f.status, f.path, f.added, f.deleted]), [['modified', 'README.md', 1, 1], ['added', 'src/new.js', 1, 0]]);
+		assert.deepStrictEqual(pr.totals, { files: 2, added: 2, deleted: 1 });
+		assert.deepStrictEqual(pr.conflictsWithBase, ['README.md'], 'git merge-tree found the real conflict');
+		assert.deepStrictEqual(pr.uncommitted, { staged: 0, unstaged: 1, untracked: 0 });
+		assert.strictEqual(read('README.md'), 'line one\nline two (feature)\n', 'the conflict check did not touch the working tree');
+		assert.strictEqual(gitRaw(repo, 'status', '--porcelain'), ' M user.txt\n', 'nor the index');
+
+		// push it to a real (bare) remote, merge the base in (resolving the conflict), then check the push state
+		const remote = path.join(tmp, 'origin.git');
+		gitRaw(tmp, 'init', '-q', '--bare', remote);
+		gitRaw(repo, 'remote', 'add', 'origin', remote);
+		gitRaw(repo, 'push', '-q', 'origin', 'main');
+		gitRaw(repo, 'push', '-q', '-u', 'origin', 'feature');
+		gitRaw(repo, 'checkout', '-q', 'user.txt');
+		gitRaw(repo, 'merge', '-q', 'main', '-X', 'ours', '-m', 'Merge main');
+		const pushed = await ops.prContext(repo, 'origin/main');
+		assert.deepStrictEqual([pushed.base, pushed.upstream, pushed.unpushed, pushed.behind], ['origin/main', 'origin/feature', 2, 0]);
+		assert.deepStrictEqual(pushed.conflictsWithBase, []);
+		assert.deepStrictEqual(pushed.commits.map(c => c.subject), ['Change line two on the feature', 'Add new.js'], 'merge commits are not listed as changes');
+	});
+
+	test('pull request context refuses what is not a pull request', async () => {
+		await assert.rejects(ops.prContext(repo), /Could not tell which branch/, 'on main with no other base');
+		gitRaw(repo, 'switch', '-q', '-c', 'empty');
+		await assert.rejects(ops.prContext(repo), /no commits that "main" does not already have/);
+		await assert.rejects(ops.prContext(repo, 'nope'), /not a branch or commit/);
+		await assert.rejects(ops.prContext(repo, '--output=x'), /must not be empty or start with "-"/);
+		gitRaw(repo, 'switch', '-q', '--detach', 'HEAD');
+		await assert.rejects(ops.prContext(repo), /detached/);
+		assert.doesNotThrow(() => validateGitRunRequest({ cwd: repo, args: ['merge-tree', '--write-tree', 'main', 'HEAD'] }));
+		assert.throws(() => validateGitRunRequest({ cwd: repo, args: ['symbolic-ref', 'HEAD', 'refs/heads/x'] }), /not an allowed git subcommand/);
+	});
 });

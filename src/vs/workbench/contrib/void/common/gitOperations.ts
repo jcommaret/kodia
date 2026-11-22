@@ -14,7 +14,7 @@
  * - Force push uses --force-with-lease (it refuses to overwrite remote work the agent has not seen).
  */
 
-import { GitBranchInfo, GitCommitLogEntry, GitDiffHunk, GitDiffResult, GitFileDiff, GitFileStatus, GitOperationInProgress, GitRemoteInfo, GitRepositoryStatus, GitRunner, GitRunResult, GitTagInfo, GitWorktreeInfo } from './gitService.js';
+import { GitChangedFile, GitCommitContext, GitCommitConvention, GitPrContext, GitBranchInfo, GitCommitLogEntry, GitDiffHunk, GitDiffResult, GitFileDiff, GitFileStatus, GitOperationInProgress, GitRemoteInfo, GitRepositoryStatus, GitRunner, GitRunResult, GitTagInfo, GitWorktreeInfo } from './gitService.js';
 
 /** Result of an operation that can stop part-way on conflicts (revert, cherry-pick, rebase, continue). */
 export type GitStepResult = { result: string; inProgress: GitOperationInProgress | null; conflicted: string[]; head: string | null };
@@ -54,6 +54,20 @@ export function redactUrl(url: string): string {
 const statusOfCode =(c: string): GitFileStatus['status'] => ({
 	M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', T: 'type-change', U: 'conflicted',
 } as Record<string, GitFileStatus['status']>)[c] ?? 'modified';
+
+const CONVENTIONAL = /^([a-z]+)(?:\(([^)]+)\))?!?: \S/;
+
+/** Reads the repository's commit-message style from its recent subjects (no guessing when there is no history). */
+export function commitConvention(subjects: string[]): GitCommitConvention {
+	const matches = subjects.map(s => CONVENTIONAL.exec(s)).filter((m): m is RegExpExecArray => !!m);
+	const ranked = (values: string[]) => [...values.reduce((m, v) => m.set(v, (m.get(v) ?? 0) + 1), new Map<string, number>())].sort((a, b) => b[1] - a[1]).map(([v]) => v);
+	return {
+		conventional: subjects.length > 0 && matches.length / subjects.length >= 0.5,
+		types: ranked(matches.map(m => m[1])).slice(0, 8),
+		scopes: ranked(matches.map(m => m[2]).filter((s): s is string => !!s)).slice(0, 8),
+		averageSubjectLength: subjects.length ? Math.round(subjects.reduce((a, s) => a + s.length, 0) / subjects.length) : null,
+	};
+}
 
 export class GitOperations {
 	constructor(private readonly runner: GitRunner) { }
@@ -352,6 +366,92 @@ export class GitOperations {
 		const added = (await this.worktrees(root)).worktrees.find(w => w.branch === branch);
 		if (!added) { throw new Error(`git reported success but no worktree for branch "${branch}" is listed.`); }
 		return { path: added.path, branch, head: added.head ?? '' };
+	}
+
+	// ---------------------------------------------------------------- commit messages and pull requests
+
+	/** Exactly what is staged (the commit's content), what is not, and how this repository writes messages. */
+	async commitContext(root: string, opts: { maxDiffChars?: number } = {}): Promise<GitCommitContext> {
+		const status = await this.status(root);
+		if (status.staged.length === 0) {
+			throw new Error(`Nothing is staged, so there is no commit to describe.${status.unstaged.length + status.untracked.length ? ` ${status.unstaged.length} modified and ${status.untracked.length} untracked file(s) are not staged: git_stage the ones the commit should contain.` : ''}`);
+		}
+		const hasHead = await this.hasHead(root);
+		const staged = await this.changedFiles(root, ['--cached']);
+		const max = Math.max(1000, Math.min(opts.maxDiffChars ?? 12_000, 60_000));
+		const diff = await this.git(root, ['diff', '--cached', '--no-ext-diff', '-M', '--unified=2']);
+		const recentSubjects = hasHead ? (await this.git(root, ['log', '-n20', '--no-merges', '--format=%s'])).split('\n').map(s => s.trim()).filter(Boolean) : [];
+		return {
+			branch: status.branch,
+			staged,
+			stagedDiff: diff.length > max ? diff.slice(0, max) : diff,
+			diffTruncated: diff.length > max,
+			notStaged: { unstaged: status.unstaged.map(f => f.uri), untracked: status.untracked.map(f => f.uri) },
+			recentSubjects,
+			convention: commitConvention(recentSubjects),
+		};
+	}
+
+	/** A pull request's facts: commits and files versus the base, push state, uncommitted work, conflicts with the base. */
+	async prContext(root: string, base?: string | null): Promise<GitPrContext> {
+		const status = await this.status(root);
+		if (!status.branch) { throw new Error('HEAD is detached: switch to the branch the pull request is for.'); }
+		if (base) { assertNotOption('base', base); }
+		const resolvedBase = base || await this.defaultBase(root, status.branch);
+		if ((await this.tryGit(root, ['rev-parse', '-q', '--verify', `${resolvedBase}^{commit}`])).exitCode !== 0) { throw new Error(`The base "${resolvedBase}" is not a branch or commit in this repository.`); }
+		const mergeBase = (await this.git(root, ['merge-base', resolvedBase, 'HEAD']).catch(() => { throw new Error(`"${status.branch}" and "${resolvedBase}" share no history.`); })).trim();
+		const [behind, ahead] = (await this.git(root, ['rev-list', '--left-right', '--count', `${resolvedBase}...HEAD`])).trim().split(/\s+/).map(Number);
+		if (ahead === 0) { throw new Error(`"${status.branch}" has no commits that "${resolvedBase}" does not already have: there is nothing for a pull request.`); }
+		const commits = (await this.git(root, ['log', '-z', '--no-merges', '--reverse', '--format=%H%x1f%s%x1f%b', `${resolvedBase}..HEAD`])).split('\0').filter(Boolean).map(rec => {
+			const [hash, subject, body] = rec.replace(/^\n/, '').split('\x1f');
+			return { hash, subject, body: (body ?? '').trim() };
+		});
+		const files = await this.changedFiles(root, [`${mergeBase}`, 'HEAD']);
+		const merge = await this.tryGit(root, ['merge-tree', '--write-tree', '--name-only', '--no-messages', resolvedBase, 'HEAD']);
+		const conflictsWithBase = merge.exitCode === 0 ? [] : merge.exitCode === 1 ? merge.stdout.split('\n').slice(1).map(s => s.trim()).filter(Boolean) : null;
+		const unpushed = status.upstream ? Number((await this.git(root, ['rev-list', '--count', `${status.upstream}..HEAD`])).trim()) : null;
+		return {
+			branch: status.branch, base: resolvedBase, mergeBase, commits, files,
+			totals: { files: files.length, added: files.reduce((a, f) => a + (f.added ?? 0), 0), deleted: files.reduce((a, f) => a + (f.deleted ?? 0), 0) },
+			ahead, behind, upstream: status.upstream, unpushed,
+			uncommitted: { staged: status.staged.length, unstaged: status.unstaged.length, untracked: status.untracked.length },
+			conflictsWithBase,
+		};
+	}
+
+	/** The remote's default branch when known (origin/HEAD), else main/master, never the current branch. */
+	private async defaultBase(root: string, current: string): Promise<string> {
+		const originHead = await this.tryGit(root, ['rev-parse', '--abbrev-ref', 'origin/HEAD']);
+		const candidates = [originHead.exitCode === 0 ? originHead.stdout.trim() : '', 'main', 'master', 'origin/main', 'origin/master'].filter(Boolean);
+		for (const c of candidates) {
+			if (c === current || c === `origin/${current}`) { continue; }
+			if ((await this.tryGit(root, ['rev-parse', '-q', '--verify', `${c}^{commit}`])).exitCode === 0) { return c; }
+		}
+		throw new Error(`Could not tell which branch the pull request targets (no origin/HEAD, main or master other than "${current}"). Pass base.`);
+	}
+
+	/** `git diff --name-status` joined with `--numstat` for the same range. */
+	private async changedFiles(root: string, range: string[]): Promise<GitChangedFile[]> {
+		const nameStatus = (await this.git(root, ['diff', '--no-ext-diff', '-M', '--name-status', '-z', ...range])).split('\0');
+		const files: GitChangedFile[] = [];
+		for (let i = 0; i < nameStatus.length;) {
+			const code = nameStatus[i++];
+			if (!code) { continue; }
+			if (code[0] === 'R' || code[0] === 'C') { const oldPath = nameStatus[i++], path = nameStatus[i++]; files.push({ path, oldPath, status: statusOfCode(code[0]), added: null, deleted: null }); }
+			else { files.push({ path: nameStatus[i++], status: statusOfCode(code[0]), added: null, deleted: null }); }
+		}
+		// numstat -z: "added\tdeleted\tpath\0", or for a rename "added\tdeleted\t\0old\0new\0"
+		const num = (await this.git(root, ['diff', '--no-ext-diff', '-M', '--numstat', '-z', ...range])).split('\0');
+		for (let i = 0; i < num.length;) {
+			const rec = num[i++];
+			if (!rec) { continue; }
+			const [a, d, p] = rec.split('\t');
+			let path = p;
+			if (!path) { i++; path = num[i++]; } // rename: skip the old path, take the new one
+			const f = files.find(x => x.path === path);
+			if (f) { f.added = a === '-' ? null : Number(a); f.deleted = d === '-' ? null : Number(d); }
+		}
+		return files;
 	}
 
 	private async head(root: string): Promise<string | null> {

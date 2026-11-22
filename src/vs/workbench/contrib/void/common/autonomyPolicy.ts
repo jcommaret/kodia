@@ -148,6 +148,8 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'git_remote_list',
 	'git_worktree_list',
 	'git_worktree_add',
+	'git_commit_context',
+	'git_pr_prepare',
 	// Test discovery and execution (Stage 3)
 	'test_discover',
 	'test_list',
@@ -269,6 +271,8 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'git_tag_list':
 		case 'git_remote_list':
 		case 'git_worktree_list':
+		case 'git_commit_context': // read-only
+		case 'git_pr_prepare': // read-only (the conflict check writes no ref and no working-tree file)
 			return 'low';
 
 		// New commits / refs / a separate checkout; nothing existing is lost, and conflicts stop for resolution.

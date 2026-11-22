@@ -156,4 +156,39 @@ suite('Kodia - git for the agent, end to end (roadmap 2)', function () {
 			assert.strictEqual(gitRaw(repo, 'branch', '--show-current').trim(), 'main');
 		} finally { removeRepo(wtPath); }
 	});
+
+	test('the agent loop writes a commit message from the real staged change in the repository\'s style, then prepares a pull request from git\'s facts', async () => {
+		for (const [file, msg] of [['a.txt', 'feat(core): add a'], ['b.txt', 'fix(core): handle b']]) { fs.writeFileSync(path.join(repo, file), `${file}\n`); gitRaw(repo, 'add', file); gitRaw(repo, 'commit', '-q', '-m', msg); }
+		gitRaw(repo, 'switch', '-q', '-c', 'feature/hello');
+		fs.writeFileSync(path.join(repo, 'notes.txt'), 'user notes v2 (not for this commit)\n'); // the user's own pending edit
+		const message = 'feat(hello): add hello module';
+
+		const { chat } = createHarness(repo, new ScriptedLLMService((i, req): ScriptStep => {
+			const payload = JSON.stringify(req.messages);
+			switch (i) {
+				case 0: return { text: '', toolCalls: [{ name: 'write_file', params: { uri: path.join(repo, 'src', 'hello.js'), new_content: 'export const hello = () => "hello";\n' } }] };
+				case 1: return { text: '', toolCalls: [{ name: 'git_stage', params: { paths: 'src/hello.js' } }] };
+				case 2: return { text: '', toolCalls: [{ name: 'git_commit_context', params: {} }] };
+				case 3:
+					assert.ok(payload.includes('added: src/hello.js +1 -0'), 'the real staged file and counts reached the model');
+					assert.ok(payload.includes('NOT in this commit (do not describe them): notes.txt (modified)'), 'the user\'s unstaged edit is called out');
+					assert.ok(payload.includes('conventional commits') && payload.includes('types used here: fix, feat') && payload.includes('scopes: core'), 'the repository\'s style reached the model');
+					return { text: '', toolCalls: [{ name: 'git_commit', params: { message } }] };
+				case 4: return { text: '', toolCalls: [{ name: 'git_pr_prepare', params: {} }] };
+				default:
+					assert.ok(payload.includes('Pull request: feature/hello → main (1 commit(s) ahead)'), 'base found and commits counted');
+					assert.ok(payload.includes('NOT pushed: the branch has no upstream'), 'the push state is real');
+					assert.ok(payload.includes('Merges cleanly into main.'));
+					assert.ok(payload.includes(message) && payload.includes('added: src/hello.js +1 -0'));
+					assert.ok(payload.includes('Uncommitted work (not part of the pull request): 0 staged, 1 modified, 0 untracked.'));
+					assert.ok(payload.includes('No tests have been run in this session: do not claim the change is tested'), 'no invented test evidence');
+					return { text: `Title: ${message}\nAdds src/hello.js. Not pushed yet; untested.` };
+			}
+		}), store, { modelSelection: { providerName: 'openAICompatible', modelName: 'kodia-scripted-model' }, git: gitService, tests: { getLastResults: () => null }, globalSettings: { verifyBeforeFinishing: false } });
+
+		const { messages } = await runTurn(chat, 'Add a hello module, commit it with a good message, and prepare a pull request.', 60_000);
+		assert.deepStrictEqual(toolMessages(messages).map((t: any) => `${t.name}:${t.type}`), ['write_file:success', 'git_stage:success', 'git_commit_context:success', 'git_commit:success', 'git_pr_prepare:success']);
+		assert.strictEqual(gitRaw(repo, 'log', '-1', '--format=%s').trim(), message);
+		assert.strictEqual(gitRaw(repo, 'status', '--porcelain'), ' M notes.txt\n', 'the user\'s edit is still uncommitted');
+	});
 });

@@ -52,6 +52,7 @@ import { INotebookKernelService } from '../../notebook/common/notebookKernelServ
 import { INotebookExecutionService } from '../../notebook/common/notebookExecutionService.js'
 import { VSBuffer } from '../../../../base/common/buffer.js'
 import type { GitStepResult } from '../common/gitOperations.js'
+import type { GitChangedFile } from '../common/gitService.js'
 
 
 // tool use for AI
@@ -1201,6 +1202,8 @@ export class ToolsService implements IToolsService {
 				new_branch: validateBoolean(params.new_branch, { default: false }),
 				start_point: validateOptionalStr('start_point', params.start_point),
 			}),
+			git_commit_context: (params: RawToolParamsObj) => ({ max_diff_chars: validateNumber(params.max_diff_chars, { default: null }) }),
+			git_pr_prepare: (params: RawToolParamsObj) => ({ base: validateOptionalStr('base', params.base) }),
 
 			// Test discovery and execution (Stage 3)
 			test_discover: () => {
@@ -2448,6 +2451,14 @@ export class ToolsService implements IToolsService {
 				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
 				return { result: await git.ops.worktrees(root) }
 			},
+			git_commit_context: async ({ max_diff_chars: maxDiffChars }) => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.commitContext(root, { maxDiffChars: maxDiffChars ?? undefined }) }
+			},
+			git_pr_prepare: async ({ base }) => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: { pr: await git.ops.prContext(root, base), tests: this.testToolService.getLastResults() } }
+			},
 			git_worktree_add: async ({ path, branch, new_branch: newBranch, start_point: startPoint }) => {
 				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
 				return { result: await git.ops.addWorktree(root, path, branch, newBranch, startPoint) }
@@ -3365,6 +3376,34 @@ export class ToolsService implements IToolsService {
 			git_remote_list: (_params, result) => result.remotes.length === 0 ? 'No remotes.' : result.remotes.map(r => `${r.name}\tfetch: ${r.fetchUrl ?? '-'}\tpush: ${r.pushUrl ?? '-'}`).join('\n'),
 			git_worktree_list: (_params, result) => result.worktrees.map(w => `${w.path}  ${w.branch ? `[${w.branch}]` : '(detached)'}  ${w.head?.slice(0, 10) ?? ''}${w.isMain ? '  (main)' : ''}${w.locked ? '  locked' : ''}${w.prunable ? '  prunable' : ''}`).join('\n'),
 			git_worktree_add: (_params, result) => `Created worktree ${result.path} on branch ${result.branch} at ${result.head}.`,
+			git_commit_context: (_params, c) => {
+				const fileLine = (f: GitChangedFile) => `  ${f.status}${f.oldPath ? ` (from ${f.oldPath})` : ''}: ${f.path}${f.added === null ? ' (binary)' : ` +${f.added} -${f.deleted}`}`
+				const lines = [`Staged for the commit on ${c.branch ?? '(detached HEAD)'} — ${c.staged.length} file(s):`, ...c.staged.map(fileLine)]
+				const ns = c.notStaged
+				if (ns.unstaged.length || ns.untracked.length) lines.push(`NOT in this commit (do not describe them): ${[...ns.unstaged.map(p => `${p} (modified)`), ...ns.untracked.map(p => `${p} (untracked)`)].slice(0, 30).join(', ')}`)
+				const cv = c.convention
+				if (c.recentSubjects.length === 0) lines.push('Style: no earlier commits to follow; use a short imperative subject (under ~72 characters).')
+				else {
+					lines.push(cv.conventional ? `Style: conventional commits — "type(scope): subject"; types used here: ${cv.types.join(', ')}${cv.scopes.length ? `; scopes: ${cv.scopes.join(', ')}` : ''}.` : 'Style: plain subjects (not conventional commits).')
+					lines.push(`Typical subject length: ${cv.averageSubjectLength} characters. Recent subjects:`, ...c.recentSubjects.slice(0, 8).map(s => `  ${s}`))
+				}
+				lines.push(`\nStaged diff${c.diffTruncated ? ' (TRUNCATED — the file list above is complete)' : ''}:\n${c.stagedDiff}`)
+				return lines.join('\n')
+			},
+			git_pr_prepare: (_params, { pr, tests }) => {
+				const lines = [`Pull request: ${pr.branch} → ${pr.base} (${pr.ahead} commit(s) ahead${pr.behind ? `, ${pr.behind} behind — the base has moved on` : ''}).`]
+				lines.push(pr.upstream ? (pr.unpushed ? `NOT fully pushed: ${pr.unpushed} commit(s) are not on ${pr.upstream} yet.` : `Pushed: ${pr.upstream} is up to date.`) : 'NOT pushed: the branch has no upstream on a remote yet.')
+				const u = pr.uncommitted
+				if (u.staged + u.unstaged + u.untracked) lines.push(`Uncommitted work (not part of the pull request): ${u.staged} staged, ${u.unstaged} modified, ${u.untracked} untracked.`)
+				lines.push(pr.conflictsWithBase === null ? 'Conflicts with the base: could not be checked.' : pr.conflictsWithBase.length ? `WOULD CONFLICT with ${pr.base} in: ${pr.conflictsWithBase.join(', ')}` : `Merges cleanly into ${pr.base}.`)
+				lines.push(`\nCommits (oldest first):`, ...pr.commits.map(c => `  ${c.hash.slice(0, 8)} ${c.subject}${c.body ? `\n      ${c.body.split('\n').slice(0, 4).join('\n      ')}` : ''}`))
+				lines.push(`\nFiles changed: ${pr.totals.files} (+${pr.totals.added} -${pr.totals.deleted})`, ...pr.files.slice(0, 60).map(f => `  ${f.status}${f.oldPath ? ` (from ${f.oldPath})` : ''}: ${f.path}${f.added === null ? ' (binary)' : ` +${f.added} -${f.deleted}`}`))
+				if (pr.files.length > 60) lines.push(`  ... and ${pr.files.length - 60} more`)
+				lines.push(tests && tests.total > 0
+					? `\nLast test run this session: ${tests.passed} passed, ${tests.failed} failed, ${tests.skipped} skipped (${tests.total})${tests.completed ? '' : ', INCOMPLETE'}${tests.command ? ` — ${tests.command}` : ''}.`
+					: '\nNo tests have been run in this session: do not claim the change is tested (run test_run first if it should be).')
+				return lines.join('\n')
+			},
 
 			// Test discovery and execution (Stage 3)
 			test_discover: (_params, result) => {

@@ -6,7 +6,7 @@ import { SearchResult } from './webSearchTypes.js';
 import { TerminalInfo } from '../browser/terminalToolService.js';
 import { DebugConfiguration, DebugSessionInfo, DebugThread, DebugScope, DebugVariable, DebugBreakpoint, DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, ConsoleOutputEntry, DebugStopInfo } from './debugServiceTypes.js';
 import { TaskPlan, TaskStatus } from './autonomousTask.js';
-import { GitRepositoryStatus, GitDiffResult, GitCommitLogEntry, GitBranchInfo, GitOperationInProgress, GitTagInfo, GitRemoteInfo, GitWorktreeInfo } from './gitService.js';
+import { GitRepositoryStatus, GitDiffResult, GitCommitLogEntry, GitBranchInfo, GitOperationInProgress, GitTagInfo, GitRemoteInfo, GitWorktreeInfo, GitCommitContext, GitPrContext } from './gitService.js';
 import type { GitResetMode, GitStepResult } from './gitOperations.js';
 import { TestFramework, TestFileInfo, TestRunResultData, TestHistoryResult, TestCheckFlakyResult } from './testServiceTypes.js';
 import { BrowserInspectResult, BrowserTabResult } from './browserServiceTypes.js';
@@ -85,6 +85,8 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'git_remote_list': 'git',
 	'git_worktree_list': 'git',
 	'git_worktree_add': 'git',
+	'git_commit_context': 'git',
+	'git_pr_prepare': 'git',
 	// test operations - read-only
 	'test_discover': 'test',
 	'test_list': 'test',
@@ -362,6 +364,8 @@ export type BuiltinToolCallParams = {
 	'git_remote_list': {},
 	'git_worktree_list': {},
 	'git_worktree_add': { path: string, branch: string, new_branch: boolean, start_point: string | null },
+	'git_commit_context': { max_diff_chars: number | null },
+	'git_pr_prepare': { base: string | null },
 }
 
 // RESULT OF TOOL CALL
@@ -513,6 +517,9 @@ export type BuiltinToolResultType = {
 	'git_remote_list': { remotes: GitRemoteInfo[] },
 	'git_worktree_list': { worktrees: GitWorktreeInfo[] },
 	'git_worktree_add': { path: string, branch: string, head: string },
+	'git_commit_context': GitCommitContext,
+	/** tests: this session's last test run, if any — the only test evidence a PR description may cite */
+	'git_pr_prepare': { pr: GitPrContext, tests: TestRunResultData | null },
 	// Test discovery and execution (Stage 3)
 	'test_discover': { frameworks: TestFramework[] },
 	'test_list': { testFiles: TestFileInfo[] },

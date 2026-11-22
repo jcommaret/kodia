@@ -2520,7 +2520,7 @@ export class ToolsService implements IToolsService {
 			test_debug: async ({ test_file, test_names, stop_on_failure }) => {
 				const plan = await this.testToolService.planTestDebug(test_file, test_names)
 				const session = stop_on_failure
-					? await this.debugToolService.startAndRunToException(plan.configuration, plan.failureFilters)
+					? await this.debugToolService.startAndRunToException(plan.configuration, plan.failureFilters, undefined, plan.failureCondition)
 					: { ...await this.debugToolService.startSession(undefined, undefined, false, plan.configuration), exceptionBreakpoints: [] }
 				return { result: { ...session, framework: plan.framework, describe: plan.describe } }
 			},

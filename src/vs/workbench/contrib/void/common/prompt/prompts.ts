@@ -1559,7 +1559,7 @@ export const builtinTools: {
 	},
 	test_debug: {
 		name: 'test_debug',
-		description: `Run ONE failing test under the debugger and stop where it fails (the failing assertion or the error), so you can inspect the real values with debug_get_stack_trace, debug_get_variables and debug_evaluate_expression. Works for node --test, Jest and Mocha (JavaScript debugger) and pytest (Python debugger). Returns a debug session id; stop it with debug_stop_session when done. With stop_on_failure false, it stops only at breakpoints you set with debug_set_breakpoint first.`,
+		description: `Run ONE failing test under the debugger and stop where it fails (the failing assertion or the error), so you can inspect the real values with debug_get_stack_trace, debug_get_variables and debug_evaluate_expression. Works for node --test, Jest and Mocha (JavaScript debugger) and pytest (Python debugger). In JavaScript it stops on a failing assertion (assert, expect, chai); for a test that fails with another error (e.g. a TypeError), read the stack in the test output and set a breakpoint with debug_set_breakpoint, then call this with stop_on_failure false. pytest stops on any error leaving the test. Returns a debug session id; stop it with debug_stop_session when done. With stop_on_failure false, it stops only at breakpoints you set with debug_set_breakpoint first.`,
 		params: {
 			test_file: { description: 'The test file to run.' },
 			test_names: { description: 'Optional. JSON array of test names to run (a name filter).' },

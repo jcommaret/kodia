@@ -37,6 +37,8 @@ export interface DebugExceptionFilter {
 	label: string;
 	description?: string;
 	enabled: boolean;
+	/** only exceptions for which this expression is true stop the program (js-debug: the exception is `error`) */
+	condition?: string;
 }
 
 // A thread in a debug session.
@@ -160,7 +162,7 @@ export interface IDebugToolService {
 	startSession(configurationName: string | undefined, folder?: string, noDebug?: boolean, configuration?: Record<string, unknown>): Promise<DebugSessionInfo & { stop: DebugStopInfo }>;
 	attachSession(configurationName: string, folder?: string): Promise<DebugSessionInfo & { stop: DebugStopInfo }>;
 	/** launch with the exception filters on (enabled as the debugger declares them), run to the first such exception or the end */
-	startAndRunToException(configuration: Record<string, unknown>, filters: string[], waitMs?: number): Promise<DebugSessionInfo & { stop: DebugStopInfo; exceptionBreakpoints: DebugExceptionFilter[] }>;
+	startAndRunToException(configuration: Record<string, unknown>, filters: string[], waitMs?: number, condition?: string): Promise<DebugSessionInfo & { stop: DebugStopInfo; exceptionBreakpoints: DebugExceptionFilter[] }>;
 	stopSession(sessionId: string, restart?: boolean, suspend?: boolean): Promise<void>;
 	restartSession(sessionId: string): Promise<void>;
 

@@ -831,6 +831,28 @@ The model writes the commit message and the PR text; Kodia supplies exact facts 
 
 **Next concrete task:** VS Code test-controller coverage (`test_coverage` through a coverage-capable test extension), then the embedding index.
 
+## 2026-11-22 (x) — Jest and Mocha test debugging, verified (user-approved npm install)
+
+Jest 29.7.0 and Mocha 10.7.3 are installed in git-ignored `.build/kodia-js-test-deps` (`npm install --prefix .build/kodia-js-test-deps jest@29.7.0 mocha@10.7.3`). Each test project links to it through a junction, which teardown unlinks first.
+
+**The first real run failed for both.** With exception filter `all`, Jest stopped first inside `fs.statSync` (its resolver's own try/catch) and Mocha inside the CommonJS module loader, before any test ran. The open risk noted in (w) was real.
+
+**Fix: an exception-breakpoint condition.** js-debug supports conditions on its filters (`supportsExceptionFilterOptions`, `supportsCondition`, with the thrown value as `error`, read from its initialize response). The JavaScript plans now carry `JS_ASSERTION_CONDITION`, which matches:
+- an `AssertionError` by name or constructor (node:assert, chai);
+- or an error with `matcherResult` (Jest's `expect`).
+
+`startAndRunToException` applies it while arming, and **restores the user's own filter settings** (enabled state and condition) when the session ends. Without that, a later debug session would silently keep "stop on assertion errors".
+
+**Limit, stated in the tool description:** in JavaScript, a test failing with another error (for example a `TypeError` in the code under test) does not stop. The agent is told to read the stack and use a breakpoint. pytest still stops on any error leaving the test.
+
+**Tests:**
+- `testDebug.test.ts` +2 (Jest, Mocha): stop with reason `exception`; the user frame is the test file at line 4; `got` evaluates to `8` in that frame; the condition is on while running and gone after `debug_stop_session` (`all` disabled, no condition).
+- `test/common/testDebug.test.ts`: the condition evaluated on real values. AssertionError and a Jest-style error give true; ENOENT, TypeError, null and a thrown string give false.
+
+**Totals:** Electron **1101 passing / 0 failing / 1 pending**; Void-scoped type check clean (it caught `supportsCondition` missing on the `IExceptionBreakpoint` interface; the check now uses the model class); eslint 0 errors.
+
+**Not verified:** Vitest; js-debug inside a running Kodia window; a live model.
+
 ## Session report — 2026-11-21: roadmap 1–10 pass complete (mandate format)
 
 1. **Changed**:
@@ -919,7 +941,7 @@ The model writes the commit message and the PR text; Kodia supplies exact facts 
 | 8 | edit_file applies exactly what ORIGINAL matched (no whole-line widening; unique; whole-line whitespace-insensitive matches only) | **Integration-tested** | silent data loss found by scenario 3; realFilesystemEditing.test.ts +2 |
 | 4 | Kodia debug tools on VS Code's DebugSession + a real DAP adapter (debugpy): breakpoints (incl. conditional), launch inline, stop reporting, stack/scopes/variables/evaluate, step, continue-to-end, console, stop, agent-loop repair | **Integration-tested (real adapter) + agent-loop e2e** | debugTools.test.ts (5, incl. debugpy exception filters); DebugService orchestration shimmed; Xdebug not verified |
 | 4 | JavaScript debugging with Microsoft's js-debug (shipped as built-in `ms-vscode.js-debug` 1.140.1): child-session programs, launch, breakpoints, step, evaluate, logpoints, exception breakpoints (`debug_set_exception_breakpoints`), attach to `--inspect-brk`, agent loop | **Integration-tested (real js-debug DAP server, same version) + agent-loop e2e** | jsDebugTools.test.ts (6); record (v). Extension-hosted js-debug in a running Kodia window, chrome debugging and watch expressions not verified |
-| 3+4 | Debug a failing test (`test_debug`): node --test (js-debug) and pytest (debugpy) stop at the failing assertion, with the user's frame named | **Integration-tested (real runners + debuggers) + agent-loop e2e** | testDebug.test.ts (3) + common (3); record (w). Jest/Mocha planned but not run here; Vitest, Go, Rust, .NET, PHP refused with the reason |
+| 3+4 | Debug a failing test (`test_debug`): node --test (js-debug) and pytest (debugpy) stop at the failing assertion, with the user's frame named | **Integration-tested (real runners + debuggers: node --test, pytest, Jest 29, Mocha 10) + agent-loop e2e** | testDebug.test.ts (5) + common (3); records (w), (x). JS stops on assertion failures only; Vitest, Go, Rust, .NET, PHP refused with the reason |
 | 1 | `run_command` on Windows: quoted commands through PowerShell | **Fixed + tested in real PowerShell 5.1 and 7.7** | terminalWrap.test.ts (5.1); PowerShell 7.7 measured with the same 9 cases; record (w) |
 
 **Next concrete task**: weak-model resilience live run (acceptance scenario 9, e.g. `NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`); then roadmap 4 for real — drive Kodia's debug tools through a DAP adapter (js-debug) rather than raw CDP.

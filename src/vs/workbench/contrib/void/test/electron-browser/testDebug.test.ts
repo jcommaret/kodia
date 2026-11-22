@@ -15,7 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Event } from '../../../../../base/common/event.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
-import { Schemas } from '../../../../../base/common/network.js';
+import { FileAccess, Schemas } from '../../../../../base/common/network.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { FileService } from '../../../../../platform/files/common/fileService.js';
@@ -74,6 +74,9 @@ suite('Kodia - debug a failing test (roadmap 3 + 4)', function () {
 	teardown(async () => {
 		for (const s of (await debugTools.listSessions()).sessions) { await debugTools.stopSession(s.sessionId).catch(() => { }); }
 		store.dispose();
+		// a junction to the shared Jest/Mocha install: remove the link itself first, never what it points to
+		const link = path.join(dir, 'node_modules');
+		if (fs.existsSync(link) && fs.lstatSync(link).isSymbolicLink()) { fs.unlinkSync(link); }
 		removeRepo(dir);
 	});
 
@@ -141,17 +144,56 @@ suite('Kodia - debug a failing test (roadmap 3 + 4)', function () {
 		].join('\n') + '\n');
 		const plan = await tests.planTestDebug(path.join(dir, 'test_calc.py'), ['test_total']);
 		assert.strictEqual(plan.framework, 'pytest');
-		const r = await debugTools.startAndRunToException(plan.configuration, plan.failureFilters);
+		const r = await debugTools.startAndRunToException(plan.configuration, plan.failureFilters, undefined, plan.failureCondition);
 		assert.deepStrictEqual([r.stop.state, r.stop.reason, r.stop.location?.name?.replace(/ \(Current frame\)$/, ''), r.stop.location?.line], ['stopped', 'exception', 'test_total', 8], JSON.stringify(r.stop)); // debugpy marks the frame
 		assert.strictEqual((await debugTools.evaluateExpression(r.sessionId, 'got')).result, '5');
 		assert.ok(r.exceptionBreakpoints.find(f => f.filter === 'userUnhandled')?.enabled, JSON.stringify(r.exceptionBreakpoints));
 	});
 
+	/** Jest 29.7.0 and Mocha 10.7.3, installed once: npm install --prefix .build/kodia-js-test-deps jest@29.7.0 mocha@10.7.3 */
+	const JS_DEPS = path.join(FileAccess.asFileUri('').fsPath, '..', '.build', 'kodia-js-test-deps', 'node_modules');
+	const linkDeps = () => {
+		if (!fs.existsSync(path.join(JS_DEPS, 'jest')) || !fs.existsSync(path.join(JS_DEPS, 'mocha'))) {
+			throw new Error(`Jest/Mocha are not installed for these tests; run: npm install --prefix .build/kodia-js-test-deps jest@29.7.0 mocha@10.7.3`);
+		}
+		fs.symlinkSync(JS_DEPS, path.join(dir, 'node_modules'), 'junction');
+	};
+	const SUB_TEST = (expectLine: string) => [
+		/* 1 */ `const { sub } = require('./math');`,
+		/* 2 */ `${expectLine.startsWith('expect') ? 'test' : 'it'}('subtracts numbers', () => {`,
+		/* 3 */ `  const got = sub(5, 3);`,
+		/* 4 */ `  ${expectLine}`,
+		/* 5 */ `});`,
+	].join('\n') + '\n';
+
+	for (const [fw, file, expectLine] of [
+		['Jest', 'math.test.js', 'expect(got).toBe(2);'],
+		['Mocha', 'test/math.spec.js', 'require("assert").strictEqual(got, 2);'],
+	] as const) {
+		test(`${fw}: stops at the failing assertion, pointing at the test line, with the wrong value`, async () => {
+			linkDeps();
+			write('package.json', JSON.stringify({ name: 'm', scripts: { test: fw.toLowerCase() }, devDependencies: { [fw.toLowerCase()]: '*' } }));
+			write(path.join(path.dirname(file), 'math.js'), 'exports.sub = (a, b) => a + b; // bug\n');
+			write(file, SUB_TEST(expectLine));
+			const plan = await tests.planTestDebug(file, ['subtracts numbers']);
+			assert.strictEqual(plan.framework, fw);
+			const r = await debugTools.startAndRunToException(plan.configuration, plan.failureFilters, undefined, plan.failureCondition);
+			const where = r.stop.userLocation ?? r.stop.location;
+			assert.deepStrictEqual([r.stop.state, r.stop.reason, path.basename(where?.sourcePath ?? ''), where?.line], ['stopped', 'exception', path.basename(file), 4], JSON.stringify(r.stop));
+			assert.strictEqual((await debugTools.evaluateExpression(r.sessionId, 'got', where!.frameId)).result, '8');
+			assert.ok(r.exceptionBreakpoints.some(f => f.filter === 'all' && f.enabled && /AssertionError/.test(f.condition ?? '')), JSON.stringify(r.exceptionBreakpoints));
+
+			await debugTools.stopSession(r.sessionId);
+			const after = (await debugTools.listBreakpoints()).exceptionBreakpoints.find(f => f.filter === 'all');
+			assert.deepStrictEqual([after?.enabled, after?.condition], [false, undefined], 'the user\'s own exception-breakpoint settings are back once the session ends');
+		});
+	}
+
 	test('a passing test runs to its end under the debugger; unsupported frameworks are refused with the reason', async () => {
 		write('pytest.ini', '[pytest]\n');
 		write('test_fine.py', 'def test_fine():\n    assert 1 + 1 == 2\n');
 		const plan = await tests.planTestDebug('test_fine.py', []);
-		const r = await debugTools.startAndRunToException(plan.configuration, plan.failureFilters);
+		const r = await debugTools.startAndRunToException(plan.configuration, plan.failureFilters, undefined, plan.failureCondition);
 		assert.strictEqual(r.stop.state, 'terminated', JSON.stringify(r.stop));
 
 		write('go.mod', 'module example.com/m\n');

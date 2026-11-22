@@ -109,6 +109,12 @@ export class ShimDebugService {
 		}
 	}
 
+	/** As DebugService: the model change is synchronous, then the exception breakpoints are sent again. */
+	async setExceptionBreakpointCondition(e: IExceptionBreakpoint, condition: string | undefined) {
+		this.model.setExceptionBreakpointCondition(e, condition);
+		await this.sendExceptionBreakpoints();
+	}
+
 	async sendAllBreakpoints(session?: IDebugSession) {
 		const uris = new Map<string, URI>();
 		for (const bp of this.model.getBreakpoints()) { uris.set(bp.uri.toString(), bp.uri); }

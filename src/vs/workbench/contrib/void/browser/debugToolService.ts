@@ -23,7 +23,8 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
-import { IDebugService, State, IDebugSession, IConfig, ILaunch, IBreakpoint, IThread } from '../../debug/common/debug.js';
+import { IDebugService, State, IDebugSession, IConfig, ILaunch, IBreakpoint, IThread, IExceptionBreakpoint } from '../../debug/common/debug.js';
+import { ExceptionBreakpoint } from '../../debug/common/debugModel.js';
 import {
 	IDebugToolService, DebugSessionInfo, DebugSessionState, DebugThread, DebugStackFrame, DebugScope, DebugVariable, DebugBreakpoint,
 	DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, DebugConfiguration, DebugRequestType, ConsoleOutputEntry, DebugStopInfo, DebugExceptionFilter,
@@ -281,11 +282,17 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 	 * session's first breakpoint batch (sent at the adapter's `initialized` event) already carries them, for child
 	 * sessions too (test runners run tests in child processes). No stop on entry is needed (node --test has none).
 	 */
-	async startAndRunToException(configuration: Record<string, unknown>, filters: string[], waitMs = RUN_WAIT_MS * 2): Promise<DebugSessionInfo & { stop: DebugStopInfo; exceptionBreakpoints: DebugExceptionFilter[] }> {
+	async startAndRunToException(configuration: Record<string, unknown>, filters: string[], waitMs = RUN_WAIT_MS * 2, condition?: string): Promise<DebugSessionInfo & { stop: DebugStopInfo; exceptionBreakpoints: DebugExceptionFilter[] }> {
 		const model = this.debugService.getModel();
+		// the user's own exception-breakpoint settings, restored when this session ends
+		const previous = new Map<IExceptionBreakpoint, { enabled: boolean; condition: string | undefined }>();
 		const arm = async () => {
 			for (const e of model.getExceptionBreakpoints()) {
-				if (filters.includes(e.filter) && !e.enabled) { await this.debugService.enableOrDisableBreakpoints(true, e); } // the model change itself is synchronous
+				if (!filters.includes(e.filter)) { continue; }
+				if (!previous.has(e)) { previous.set(e, { enabled: e.enabled, condition: e.condition }); }
+				// both model changes are synchronous; the sends that follow are not needed before the adapter is ready
+				if (condition && e instanceof ExceptionBreakpoint && e.supportsCondition && e.condition !== condition) { void this.debugService.setExceptionBreakpointCondition(e, condition); }
+				if (!e.enabled) { await this.debugService.enableOrDisableBreakpoints(true, e); }
 			}
 		};
 		await arm(); // filters already known from an earlier session of this debugger
@@ -293,10 +300,27 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 		let started: DebugSessionInfo & { stop: DebugStopInfo };
 		try {
 			started = await this.startSession(undefined, undefined, false, configuration, waitMs);
+		} catch (err) {
+			await this.restoreExceptionBreakpoints(previous);
+			throw err;
 		} finally {
 			listener.dispose();
 		}
-		return { ...started, exceptionBreakpoints: this.exceptionFilters().filter(f => filters.includes(f.filter)) };
+		const root = model.getSession(started.sessionId, true);
+		if (!root || root.state === State.Inactive) { await this.restoreExceptionBreakpoints(previous); }
+		else {
+			const ended = this.debugService.onDidEndSession(e => { if (e.session === root) { ended.dispose(); void this.restoreExceptionBreakpoints(previous); } });
+			this._register(ended);
+		}
+		const exceptionBreakpoints = [...previous.keys()].map(e => ({ filter: e.filter, label: e.label, description: e.description, enabled: e.enabled, condition: e.condition }));
+		return { ...started, exceptionBreakpoints };
+	}
+
+	private async restoreExceptionBreakpoints(previous: Map<IExceptionBreakpoint, { enabled: boolean; condition: string | undefined }>): Promise<void> {
+		for (const [e, was] of previous) {
+			if (e.condition !== was.condition) { await this.debugService.setExceptionBreakpointCondition(e, was.condition); }
+			if (e.enabled !== was.enabled) { await this.debugService.enableOrDisableBreakpoints(was.enabled, e); }
+		}
 	}
 
 	async attachSession(configurationName: string, folder?: string): Promise<DebugSessionInfo & { stop: DebugStopInfo }> {
@@ -384,7 +408,7 @@ export class KodiaDebugToolService extends Disposable implements IDebugToolServi
 	private exceptionFilters(session?: IDebugSession): DebugExceptionFilter[] {
 		const model = this.debugService.getModel();
 		const list = session ? model.getExceptionBreakpointsForSession(session.getId()) : model.getExceptionBreakpoints();
-		return list.map(e => ({ filter: e.filter, label: e.label, description: e.description, enabled: e.enabled }));
+		return list.map(e => ({ filter: e.filter, label: e.label, description: e.description, enabled: e.enabled, condition: e.condition }));
 	}
 
 	/**

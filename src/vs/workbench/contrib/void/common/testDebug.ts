@@ -23,6 +23,8 @@ export type TestDebugPlan = {
 	configuration: Record<string, unknown>;
 	/** exception filter ids that stop at a failing test */
 	failureFilters: string[];
+	/** a condition on those filters, so only a test failure stops (not the runtime's or the runner's own try/catch) */
+	failureCondition?: string;
 	/** what is run, for the report */
 	describe: string;
 };
@@ -30,6 +32,13 @@ export type TestDebugPlan = {
 export type TestDebugUnavailable = { unavailable: string };
 
 const NODE_SKIP: string[] = [];
+
+/**
+ * js-debug exception-breakpoint condition (the thrown value is `error`): only assertion failures stop. With "all"
+ * alone, Jest and Mocha stopped first on caught exceptions inside fs.statSync and the module loader (measured).
+ * node:assert and chai throw AssertionError; Jest's expect throws an error carrying `matcherResult`.
+ */
+export const JS_ASSERTION_CONDITION = `error != null && (/AssertionError/.test(String(error.name)) || /AssertionError/.test(String(error.constructor && error.constructor.name)) || error.matcherResult !== undefined)`;
 
 /**
  * @param files test files relative to `cwd`
@@ -48,19 +57,19 @@ export function buildTestDebugPlan(fw: CommandFrameworkId, opts: { cwd: string; 
 		case 'node-test':
 			return {
 				configuration: { ...base, type: 'node', name: 'Kodia: debug test', runtimeArgs: ['--test', ...(regex ? [`--test-name-pattern=${regex}`] : []), ...files], skipFiles: NODE_SKIP },
-				failureFilters: ['all'], describe: `node --test ${what}`,
+				failureFilters: ['all'], failureCondition: JS_ASSERTION_CONDITION, describe: `node --test ${what}`,
 			};
 		case 'jest':
 			if (!opts.hasPackage('jest')) { return { unavailable: 'Jest is not installed in this project (node_modules/jest); install the dependencies first.' }; }
 			return {
 				configuration: { ...base, type: 'node', name: 'Kodia: debug test', program: `${opts.cwd}/node_modules/jest/bin/jest.js`, args: ['--runInBand', '--watchAll=false', ...(regex ? ['-t', regex] : []), ...files], skipFiles: NODE_SKIP },
-				failureFilters: ['all'], describe: `jest --runInBand ${what}`,
+				failureFilters: ['all'], failureCondition: JS_ASSERTION_CONDITION, describe: `jest --runInBand ${what}`,
 			};
 		case 'mocha':
 			if (!opts.hasPackage('mocha')) { return { unavailable: 'Mocha is not installed in this project (node_modules/mocha); install the dependencies first.' }; }
 			return {
 				configuration: { ...base, type: 'node', name: 'Kodia: debug test', program: `${opts.cwd}/node_modules/mocha/bin/mocha.js`, args: [...(regex ? ['-g', regex] : []), ...files], skipFiles: NODE_SKIP },
-				failureFilters: ['all'], describe: `mocha ${what}`,
+				failureFilters: ['all'], failureCondition: JS_ASSERTION_CONDITION, describe: `mocha ${what}`,
 			};
 		case 'vitest':
 			return { unavailable: 'Debugging a Vitest test is not supported yet (its worker pools need a dedicated setup). Use test_run_targeted to run it, or debug_start_session with your own configuration.' };

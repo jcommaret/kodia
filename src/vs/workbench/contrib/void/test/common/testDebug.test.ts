@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { buildTestDebugPlan, TestDebugPlan, TestDebugUnavailable } from '../../common/testDebug.js';
+import { buildTestDebugPlan, JS_ASSERTION_CONDITION, TestDebugPlan, TestDebugUnavailable } from '../../common/testDebug.js';
 
 const plan = (r: TestDebugPlan | TestDebugUnavailable): TestDebugPlan => { assert.ok(!('unavailable' in r), JSON.stringify(r)); return r as TestDebugPlan; };
 
@@ -15,7 +15,12 @@ suite('Kodia - debug-a-test plans (roadmap 3 + 4)', () => {
 		const p = plan(buildTestDebugPlan('node-test', { cwd: '/p', files: ['test\\a.test.mjs'], names: ['adds (a+b) & "more"'], hasPackage: none }));
 		assert.deepStrictEqual(p.configuration.runtimeArgs, ['--test', '--test-name-pattern=adds \\(a\\+b\\) & "more"', 'test/a.test.mjs']);
 		assert.deepStrictEqual(p.configuration.skipFiles, [], 'a skipped node:assert would never pause on the failure');
-		assert.deepStrictEqual([p.configuration.type, p.failureFilters], ['node', ['all']]);
+		assert.deepStrictEqual([p.configuration.type, p.failureFilters, p.failureCondition], ['node', ['all'], JS_ASSERTION_CONDITION], 'only assertion failures stop, not the runtime\'s own try/catch');
+		const condition = new Function('error', `return ${JS_ASSERTION_CONDITION};`) as (e: unknown) => boolean;
+		class JestAssertionError extends Error { matcherResult = { pass: false }; }
+		const assertionError = Object.assign(new Error('8 !== 2'), { name: 'AssertionError' });
+		const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+		assert.deepStrictEqual([assertionError, new JestAssertionError('x'), enoent, new TypeError('x'), null, 'thrown string'].map(condition), [true, true, false, false, false, false]);
 	});
 
 	test('pytest under debugpy stops where the exception leaves the user code; names become a -k expression', () => {

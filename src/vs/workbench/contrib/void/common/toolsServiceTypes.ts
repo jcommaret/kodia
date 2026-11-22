@@ -4,10 +4,14 @@ import { builtinTools } from './prompt/prompts.js';
 import { RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { SearchResult } from './webSearchTypes.js';
 import { TerminalInfo } from '../browser/terminalToolService.js';
-import { DebugConfiguration, DebugSessionInfo, DebugThread, DebugScope, DebugVariable, DebugBreakpoint, DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, ConsoleOutputEntry } from './debugServiceTypes.js';
+import { DebugConfiguration, DebugSessionInfo, DebugThread, DebugScope, DebugVariable, DebugBreakpoint, DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, ConsoleOutputEntry, DebugStopInfo } from './debugServiceTypes.js';
 import { TaskPlan, TaskStatus } from './autonomousTask.js';
-import { GitRepositoryStatus, GitDiffResult, GitCommitLogEntry, GitBranchInfo } from './gitService.js';
+import { GitRepositoryStatus, GitDiffResult, GitCommitLogEntry, GitBranchInfo, GitOperationInProgress, GitTagInfo, GitRemoteInfo, GitWorktreeInfo } from './gitService.js';
+import type { GitResetMode, GitStepResult } from './gitOperations.js';
 import { TestFramework, TestFileInfo, TestRunResultData } from './testServiceTypes.js';
+import { BrowserInspectResult, BrowserTabResult } from './browserServiceTypes.js';
+import { SubagentReport } from './subagents.js';
+import { CodeSearchResponse, IndexStats, LiteralSearchResponse } from './codeIndexServiceTypes.js';
 
 
 
@@ -28,19 +32,8 @@ export type ShallowDirectoryItem = {
 	isSymbolicLink: boolean;
 }
 
-// Browser element discovered on a page, safe to pass back to interaction tools.
-export type BrowserElement = {
-	selector: string;
-	type: 'button' | 'link' | 'input' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'menu' | 'other';
-	label: string;
-	value?: string;
-	placeholder?: string;
-	disabled: boolean;
-	readonly: boolean;
-	checked?: boolean;
-	options?: string[];
-	bbox?: { x: number; y: number; width: number; height: number };
-};
+// Browser elements are defined (once) with the browser service that produces them.
+export type { BrowserElement } from './browserServiceTypes.js';
 
 
 export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: 'edits' | 'terminal' | 'web pages' | 'MCP tools' | 'planning' | 'git' | 'test' | 'browser' | 'debug' }> = {
@@ -80,6 +73,18 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'git_pull': 'git',
 	'git_push': 'git',
 	'git_merge': 'git',
+	// git history rewriting / multi-step operations, tags, remotes, worktrees
+	'git_revert': 'git',
+	'git_cherry_pick': 'git',
+	'git_rebase': 'git',
+	'git_continue': 'git',
+	'git_abort': 'git',
+	'git_reset': 'git',
+	'git_tag_list': 'git',
+	'git_tag_create': 'git',
+	'git_remote_list': 'git',
+	'git_worktree_list': 'git',
+	'git_worktree_add': 'git',
 	// test operations - read-only
 	'test_discover': 'test',
 	'test_list': 'test',
@@ -262,7 +267,7 @@ export type BuiltinToolCallParams = {
 	'debug_list_sessions': {},
 	'debug_get_session_status': { sessionId: string },
 	'debug_list_threads': { sessionId: string },
-	'debug_start_session': { configurationName: string, folder?: string, noDebug?: boolean },
+	'debug_start_session': { configurationName?: string, folder?: string, noDebug?: boolean, configuration?: Record<string, unknown> },
 	'debug_attach_session': { configurationName: string, folder?: string },
 	'debug_stop_session': { sessionId: string, restart?: boolean, suspend?: boolean },
 	'debug_restart_session': { sessionId: string },
@@ -270,16 +275,16 @@ export type BuiltinToolCallParams = {
 	'debug_remove_breakpoint': { breakpointId: string },
 	'debug_set_breakpoint_enabled': { breakpointId: string, enabled: boolean },
 	'debug_list_breakpoints': {},
-	'debug_continue': { sessionId: string, threadId: number },
-	'debug_pause': { sessionId: string, threadId: number },
-	'debug_step_over': { sessionId: string, threadId: number },
-	'debug_step_into': { sessionId: string, threadId: number },
-	'debug_step_out': { sessionId: string, threadId: number },
-	'debug_get_stack_trace': { sessionId: string, threadId: number, startFrame?: number, levels?: number },
+	'debug_continue': { sessionId: string, threadId?: number },
+	'debug_pause': { sessionId: string, threadId?: number },
+	'debug_step_over': { sessionId: string, threadId?: number },
+	'debug_step_into': { sessionId: string, threadId?: number },
+	'debug_step_out': { sessionId: string, threadId?: number },
+	'debug_get_stack_trace': { sessionId: string, threadId?: number, startFrame?: number, levels?: number },
 	'debug_get_scopes': { sessionId: string, frameId: number, threadId?: number },
 	'debug_get_variables': { sessionId: string, variablesReference: number, start?: number, count?: number },
 	'debug_evaluate_expression': { sessionId: string, expression: string, frameId?: number },
-	'debug_get_exception_info': { sessionId: string, threadId: number },
+	'debug_get_exception_info': { sessionId: string, threadId?: number },
 	'debug_get_console_output': { sessionId?: string, limit?: number },
 	// ---
 	'rewrite_file': { uri: URI, newContent: string },
@@ -340,6 +345,17 @@ export type BuiltinToolCallParams = {
 	'git_stash': { message: string | null },
 	'git_stash_pop': {},
 	'git_show': { commit: string, path: string | null },
+	'git_revert': { commit: string },
+	'git_cherry_pick': { commit: string },
+	'git_rebase': { onto: string },
+	'git_continue': {},
+	'git_abort': {},
+	'git_reset': { ref: string, mode: GitResetMode },
+	'git_tag_list': {},
+	'git_tag_create': { name: string, ref: string | null, message: string | null },
+	'git_remote_list': {},
+	'git_worktree_list': {},
+	'git_worktree_add': { path: string, branch: string, new_branch: boolean, start_point: string | null },
 }
 
 // RESULT OF TOOL CALL
@@ -363,23 +379,23 @@ export type BuiltinToolResultType = {
 	'browser_launch': { sessionId: string, engine: string, headless: boolean, version: string },
 	'browser_close': {},
 	'browser_list_sessions': { sessions: Array<{ sessionId: string, engine: string, headless: boolean, tabCount: number, createdAt: number }> },
-	'browser_new_tab': { tabId: string, url: string, title: string },
+	'browser_new_tab': BrowserTabResult,
 	'browser_list_tabs': { tabs: Array<{ tabId: string, url: string, title: string, isActive: boolean, loading: boolean, loadError?: string }> },
 	'browser_switch_tab': { tabId: string, url: string, title: string },
 	'browser_close_tab': {},
-	'browser_navigate': { tabId: string, url: string, title: string },
-	'browser_back': { tabId: string, url: string, title: string },
-	'browser_forward': { tabId: string, url: string, title: string },
-	'browser_reload': { tabId: string, url: string, title: string },
-	'browser_inspect_page': { url: string, title: string, text: string, elements: BrowserElement[], forms: Array<{ selector: string, action?: string, method?: string }>, consoleErrors: number, networkFailures: number },
-	'browser_click_element': {},
+	'browser_navigate': BrowserTabResult,
+	'browser_back': BrowserTabResult,
+	'browser_forward': BrowserTabResult,
+	'browser_reload': BrowserTabResult,
+	'browser_inspect_page': BrowserInspectResult,
+	'browser_click_element': BrowserTabResult,
 	'browser_fill_element': {},
 	'browser_select_option': {},
 	'browser_check_element': {},
-	'browser_submit_form': { tabId: string, url: string, title: string },
+	'browser_submit_form': BrowserTabResult,
 	'browser_wait_for_element': { found: boolean },
 	'browser_set_viewport': { width: number, height: number },
-	'browser_screenshot': { dataUrl: string, width: number, height: number, type: 'viewport' | 'fullpage' | 'element' },
+	'browser_screenshot': { dataUrl: string, width: number, height: number, type: 'viewport' | 'fullpage' | 'element', path: string },
 	'browser_console': { messages: Array<{ id: string, timestampMs: number, level: 'debug' | 'info' | 'warning' | 'error', text: string }>, truncated: boolean, dropped: number },
 	'browser_network_failures': { failures: Array<{ id: string, timestampMs: number, url: string, type: string, errorText: string }> },
 	'browser_download': { downloadId: string, url: string, suggestedFilename: string, status: 'in_progress' | 'completed' | 'failed' | 'cancelled', path?: string, failureText?: string },
@@ -409,31 +425,31 @@ export type BuiltinToolResultType = {
 	'oauth2_exchange_code': { access_token: string, refresh_token?: string, expires_in?: number, token_type?: string, scope?: string, created_at?: number },
 	'oauth2_refresh_token': { access_token: string, refresh_token?: string, expires_in?: number, token_type?: string, scope?: string, created_at?: number },
 	// Code index & semantic search results
-	'code_index': { totalFiles: number, totalChunks: number, lastIndexed: number | null },
+	'code_index': IndexStats,
 	'code_index_file': { indexed: boolean, filePath: string },
-	'code_semantic_search': { results: Array<{ uri: string, filePath: string, startLine: number, endLine: number, kind: string, name: string, content: string, score: number }> },
-	'code_keyword_search': { results: Array<{ uri: string, filePath: string, startLine: number, endLine: number, kind: string, name: string, content: string, score: number }> },
-	'code_hybrid_search': { results: Array<{ uri: string, filePath: string, startLine: number, endLine: number, kind: string, name: string, content: string, score: number }> },
-	'code_index_stats': { totalFiles: number, totalChunks: number, lastIndexed: number | null },
+	'code_semantic_search': CodeSearchResponse & { query: string },
+	'code_keyword_search': LiteralSearchResponse & { query: string },
+	'code_hybrid_search': CodeSearchResponse & { query: string },
+	'code_index_stats': IndexStats,
 	'code_index_clear': { cleared: boolean },
 	// Debugger automation results
 	'debug_list_configurations': { configurations: DebugConfiguration[] },
 	'debug_list_sessions': { sessions: DebugSessionInfo[] },
 	'debug_get_session_status': DebugSessionInfo,
 	'debug_list_threads': { threads: DebugThread[] },
-	'debug_start_session': DebugSessionInfo,
-	'debug_attach_session': DebugSessionInfo,
+	'debug_start_session': DebugSessionInfo & { stop: DebugStopInfo },
+	'debug_attach_session': DebugSessionInfo & { stop: DebugStopInfo },
 	'debug_stop_session': {},
 	'debug_restart_session': {},
 	'debug_set_breakpoint': DebugBreakpoint,
 	'debug_remove_breakpoint': {},
 	'debug_set_breakpoint_enabled': {},
 	'debug_list_breakpoints': { breakpoints: DebugBreakpoint[] },
-	'debug_continue': {},
-	'debug_pause': {},
-	'debug_step_over': {},
-	'debug_step_into': {},
-	'debug_step_out': {},
+	'debug_continue': DebugStopInfo,
+	'debug_pause': DebugStopInfo,
+	'debug_step_over': DebugStopInfo,
+	'debug_step_into': DebugStopInfo,
+	'debug_step_out': DebugStopInfo,
 	'debug_get_stack_trace': DebugStackTrace,
 	'debug_get_scopes': { scopes: DebugScope[] },
 	'debug_get_variables': { variables: DebugVariable[] },
@@ -476,10 +492,21 @@ export type BuiltinToolResultType = {
 	'git_fetch': { result: string },
 	'git_pull': { result: string },
 	'git_push': { result: string },
-	'git_merge': { result: string, merge_in_progress: boolean },
+	'git_merge': { result: string, merge_in_progress: boolean, conflicted?: string[] },
 	'git_stash': { result: string },
 	'git_stash_pop': { result: string },
 	'git_show': { commit: string, message: string, diff: string },
+	'git_revert': GitStepResult,
+	'git_cherry_pick': GitStepResult,
+	'git_rebase': GitStepResult,
+	'git_continue': GitStepResult & { operation: GitOperationInProgress },
+	'git_abort': { operation: GitOperationInProgress, head: string | null },
+	'git_reset': { mode: GitResetMode, previousHead: string, newHead: string, detachedCommits: string[] },
+	'git_tag_list': { tags: GitTagInfo[] },
+	'git_tag_create': { name: string, commit: string },
+	'git_remote_list': { remotes: GitRemoteInfo[] },
+	'git_worktree_list': { worktrees: GitWorktreeInfo[] },
+	'git_worktree_add': { path: string, branch: string, head: string },
 	// Test discovery and execution (Stage 3)
 	'test_discover': { frameworks: TestFramework[] },
 	'test_list': { testFiles: TestFileInfo[] },
@@ -490,7 +517,7 @@ export type BuiltinToolResultType = {
 		// Todo list (task tracking within a turn - OpenCode parity)
 		'todo': { done: number, inProgress: number, pending: number, todos: { id: string, content: string, status: string }[] },
 		// Subagent delegation (OpenCode parity - roadmap Stage 6)
-		'subagent': { sessionID: string, status: string, output: string },
+		'subagent': SubagentReport,
 	// Notebook operations
 	'read_notebook': { cells: NotebookCellOutput[] },
 	'write_notebook': { uri: URI },

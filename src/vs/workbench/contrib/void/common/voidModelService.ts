@@ -5,6 +5,8 @@ import { IResolvedTextEditorModel, ITextModelService } from '../../../../editor/
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { VSBuffer } from '../../../../base/common/buffer.js';
 
 type VoidModelType = {
 	model: ITextModel | null;
@@ -31,14 +33,35 @@ class VoidModelService extends Disposable implements IVoidModelService {
 	constructor(
 		@ITextModelService private readonly _textModelService: ITextModelService,
 		@ITextFileService private readonly _textFileService: ITextFileService,
+		@IFileService private readonly _fileService: IFileService,
 	) {
 		super();
 	}
 
+	/**
+	 * Persist the FULL current contents of the model for `uri` to disk.
+	 *
+	 * - Goes through ITextFileService so the file's encoding, BOM and line endings are preserved
+	 *   and the text model stays in sync with disk (no "file is newer on disk" conflicts).
+	 * - Throws if the save did not happen, so callers (agent tools) never report a write that failed.
+	 * - Falls back to writing the full model value via IFileService for resources the text file
+	 *   service does not track.
+	 */
 	saveModel = async (uri: URI) => {
-		await this._textFileService.save(uri, { // we want [our change] -> [save] so it's all treated as one change.
-			skipSaveParticipants: true // avoid triggering extensions etc (if they reformat the page, it will add another item to the undo stack)
-		})
+		const fileModel = this._textFileService.files.get(uri)
+		if (fileModel) {
+			if (!fileModel.isDirty()) return
+			const saved = await this._textFileService.save(uri, { // we want [our change] -> [save] so it's all treated as one change.
+				skipSaveParticipants: true // avoid triggering extensions etc (if they reformat the page, it will add another item to the undo stack)
+			})
+			if (!saved || fileModel.isDirty()) {
+				throw new Error(`Failed to save ${uri.fsPath} to disk.`)
+			}
+			return
+		}
+		const { model } = this.getModel(uri)
+		if (!model) return // nothing loaded, nothing to persist
+		await this._fileService.writeFile(uri, VSBuffer.fromString(model.getValue()))
 	}
 
 	initializeModel = async (uri: URI) => {

@@ -572,14 +572,19 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 	if (lower.includes('deepseek') && (lower.includes('v4-flash') || lower.includes('v4_flash') || lower.includes('v4.1') || lower.includes('flash'))) return toFallback(deepseekModelOptions, 'deepseek-flash')
 	if (lower.includes('deepseek')) return toFallback(deepseekModelOptions, 'deepseek-flash')
 
-	// most specific first — 'llama3.1'/'3.2'/'3.3' all contain 'llama3', so those must be checked before it
-	if (lower.includes('llama3.3')) return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3.3')
-	if (lower.includes('llama3.2')) return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3.2')
-	if (lower.includes('llama3.1')) return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3.1')
-	if (lower.includes('llama3')) return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3')
+	// Llama: hosted APIs (NVIDIA, Hugging Face, Together...) write 'llama-3.1', Ollama writes 'llama3.1' — accept both.
 	if (lower.includes('maverick')) return toFallback(openSourceModelOptions_assumingOAICompat, 'llama4-maverick')
 	if (lower.includes('scout')) return toFallback(openSourceModelOptions_assumingOAICompat, 'llama4-scout')
-	if (lower.includes('llama')) return toFallback(openSourceModelOptions_assumingOAICompat, 'llama4-scout')
+	const llamaVersion = /llama[-_ ]?(\d+)(?:[._-](\d))?/.exec(lower)
+	if (llamaVersion?.[1] === '4') return toFallback(openSourceModelOptions_assumingOAICompat, 'llama4-scout')
+	if (llamaVersion?.[1] === '3') {
+		if (llamaVersion[2] === '3') return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3.3')
+		if (llamaVersion[2] === '2') return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3.2')
+		if (llamaVersion[2] === '1') return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3.1')
+		return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3')
+	}
+	// any other Llama (unversioned, Llama 2, fine-tunes): the conservative Llama 3 entry — never Llama 4's 10M window
+	if (lower.includes('llama')) return toFallback(openSourceModelOptions_assumingOAICompat, 'llama3')
 
 	if (lower.includes('qwen') && lower.includes('2.5') && lower.includes('coder')) return toFallback(openSourceModelOptions_assumingOAICompat, 'qwen2.5coder')
 	if (lower.includes('qwen') && lower.includes('3')) return toFallback(openSourceModelOptions_assumingOAICompat, 'qwen3')
@@ -2337,10 +2342,14 @@ export const getModelCapabilities = (
 	}
 
 	// an unknown family can still be a known kind of vision model (llava, moondream, minicpm-v...)
-	// For local providers, provide a more generous default context window
+	// Unknown context window: assume a modest modern window (32k). The old cloud fallback (4,096 context with
+	// 4,096 reserved for output) left NO input budget, so every request of an unconfigured bring-your-own model
+	// was "over budget" and got trimmed/summarized. If the real window is smaller, the provider's
+	// context-length error is caught by the agent loop, which learns the real limit and retries
+	// (see contextOverflow.ts / ConvertToLLMMessageService.recordContextOverflow). Still marked 'fallback'.
 	const localProviderNamesSet: readonly ProviderName[] = ['lmStudio', 'mlx', 'ollama', 'vLLM'];
 	const isLocalProvider = localProviderNamesSet.includes(providerName);
-	const fallbackContextWindow = isLocalProvider ? 32_000 : 4_096;
+	const fallbackContextWindow = 32_000;
 	const fallbackOutputTokens = isLocalProvider ? 8_192 : 4_096;
 	const clean = sanitizeOverrideValues(fallbackContextWindow, overrides);
 	return clampModelOutputToContext({
@@ -2657,8 +2666,8 @@ export const scoreModelForTask = (
 	if (caps.contextWindow < 32_000) score -= 20
 	if (caps.contextWindow < 16_000) score -= 30
 
-	// Penalty for unknown/unrecognized models (fallback context of 4K is too small)
-	if (caps.isUnrecognizedModel && caps.contextWindow <= 4_096) score -= 50
+	// Penalty for unknown/unrecognized models: their context window is only a guess
+	if (caps.isUnrecognizedModel && caps.contextWindowSource === 'fallback') score -= 50
 
 	// Cost preference (cheaper models preferred for general tasks, but not at expense of capability)
 	if (taskType === 'general' && caps.cost.output > 0 && caps.cost.output < 1) score += 5

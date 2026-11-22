@@ -9,9 +9,15 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 
 import { URI } from '../../../../base/common/uri.js';
+import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
-import { chat_userMessageContent, isABuiltinToolName, summarizeThread_systemMessage, summarizeThread_userMessage } from '../common/prompt/prompts.js';
+import { availableTools, builtinTools, chat_userMessageContent, isABuiltinToolName, summarizeThread_systemMessage, summarizeThread_userMessage } from '../common/prompt/prompts.js';
+import { formatSubagentReport, MAX_PARALLEL_SUBAGENTS, resolveSubagentType, SUBAGENT_TIMEOUT_MS, SUBAGENT_TOOL_NAME, SubagentFileClaims, SubagentReport, SubagentStatus, SubagentToolCallFact, SubagentType, subagentRoleText, subagentToolNames, summarizeSubagentRun } from '../common/subagents.js';
+import { FILE_CHANGING_TOOLS } from '../common/completionCheck.js';
+import { describeOmittedTools, toolsWithinBudget } from '../common/toolBudget.js';
+import { estimateTokens } from '../common/tokenizer.js';
+import { InternalToolInfo } from '../common/prompt/prompts.js';
 import { chooseSummaryKeepIdx, transcriptForSummary } from '../common/helpers/threadSummary.js';
 import { getModelCapabilities } from '../common/modelCapabilities.js';
 import { autoSelectModel } from '../common/modelCapabilities.js';
@@ -45,6 +51,10 @@ import { IDirectoryStrService } from '../common/directoryStrService.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IMCPService } from '../common/mcpService.js';
 import { RawMCPToolCall } from '../common/mcpServiceTypes.js';
+import { looksLikeUnfulfilledAction, UNFULFILLED_ACTION_NUDGE } from '../common/unfulfilledActionDetection.js';
+import { contextLimitFromError, isContextOverflowError } from '../common/contextOverflow.js';
+import { COMPLETION_CHECK_REQUEST, shouldRequestCompletionCheck } from '../common/completionCheck.js';
+import { isTestFilePath, testFileWithoutTestCases, testFileWithoutTestCasesNote, testWeakeningNote, testWeakeningReasons } from '../common/testIntegrity.js';
 import { IToolOutputService } from '../common/toolOutputService.js';
 import { RetryPolicy, createRetryErrorInfo } from '../common/retryPolicy.js';
 
@@ -57,6 +67,17 @@ import { RetryPolicy, createRetryErrorInfo } from '../common/retryPolicy.js';
 // Maximum number of LLM -> tool steps in one autonomous turn.
 // Set to unlimited - agent runs until work is finished and verified.
 const MAX_AGENT_STEPS_PER_TURN = 999999
+// A model stream that produces nothing for this long is treated as hung (see armInactivityTimer).
+const LLM_INACTIVITY_TIMEOUT_MS = 120_000
+// How many times one turn may shrink its budget after a provider's context-length error before giving up.
+const MAX_CONTEXT_OVERFLOW_RECOVERIES_PER_TURN = 2
+
+// Recovery snapshots are kept in the thread: bounded per file and per change (a bigger file cannot be rewound).
+const MAX_SNAPSHOT_FILE_BYTES = 2 * 1024 * 1024
+const MAX_SNAPSHOT_FILES_PER_CHANGE = 500
+const MAX_SNAPSHOT_CHARS_PER_THREAD = 20_000_000 // ~20 MB of file contents kept for rewinding, per conversation
+// conversations are written to disk this soon after a change (and at once after a file change or a tool start)
+const THREADS_FLUSH_DELAY_MS = 1_000
 
 // Stuck detection disabled - agent runs until work is complete.
 const MAX_STUCK_STEPS = 999999
@@ -174,6 +195,9 @@ export type ThreadType = {
 
 	// Autonomous task plan for this thread (Stage 5A Day 2)
 	taskPlan?: TaskPlan;
+
+	// set when this thread is a subagent started by another thread's `subagent` tool call
+	subagentOf?: { parentThreadId: string; agent: SubagentType; description: string };
 
 	// this doesn't need to go in a state object, but feels right
 	state: {
@@ -344,14 +368,15 @@ export interface IChatThreadService {
 	rejectLatestToolRequest(threadId: string): void;
 
 	// jump to history
-	jumpToCheckpointBeforeMessageIdx(opts: { threadId: string, messageIdx: number, jumpToUserModified: boolean }): void;
+	/** resolves once every file is restored on disk */
+	jumpToCheckpointBeforeMessageIdx(opts: { threadId: string, messageIdx: number, jumpToUserModified: boolean }): Promise<void>;
 
 	focusCurrentChat: () => Promise<void>
 	blurCurrentChat: () => Promise<void>
 }
 
 export const IChatThreadService = createDecorator<IChatThreadService>('voidChatThreadService');
-class ChatThreadService extends Disposable implements IChatThreadService {
+export class ChatThreadService extends Disposable implements IChatThreadService {
 	_serviceBrand: undefined;
 
 	// this fires when the current thread changes at all (a switch of currentThread, or a message added to it, etc)
@@ -364,12 +389,29 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 	readonly streamState: ThreadStreamState = {}
 	state: ThreadsState // allThreads is persisted, currentThread is not
 
-	private readonly _retryPolicy: RetryPolicy
+	// Per thread: agent loops of several threads (a parent's subagents) run at the same time, and must not reset
+	// each other's retry backoff or progress tracking.
+	private readonly _retryPolicyOfThread = new Map<string, RetryPolicy>()
+	private _retryPolicy(threadId: string): RetryPolicy {
+		let p = this._retryPolicyOfThread.get(threadId)
+		if (!p) { p = new RetryPolicy(); this._retryPolicyOfThread.set(threadId, p) }
+		return p
+	}
 	// Progress tracking for stuck detection (reset per agent turn)
-	private _progressFilesTouched: Set<string>
-	private _progressTerminalCommands: Set<string>
-	private _progressTestResults: Map<string, { passed: number; failed: number }>
-	private _progressStepsSinceLastProgress: number
+	private readonly _progressOfThread = new Map<string, { filesTouched: Set<string>; terminalCommands: Set<string>; testResults: Map<string, { passed: number; failed: number }>; stepsSinceLastProgress: number }>()
+	private _progress(threadId: string) {
+		let p = this._progressOfThread.get(threadId)
+		if (!p) { p = { filesTouched: new Set(), terminalCommands: new Set(), testResults: new Map(), stepsSinceLastProgress: 0 }; this._progressOfThread.set(threadId, p) }
+		return p
+	}
+
+	// --- subagents (roadmap 6) ---
+	// the tools a subagent thread may run (absent: the chat mode decides, as for any thread)
+	private readonly _toolPolicyOfThread = new Map<string, { agent: SubagentType; allowed: ReadonlySet<string> }>()
+	// the model each running agent loop uses, so a subagent can default to its parent's
+	private readonly _modelOfRunningThread = new Map<string, { modelSelection: ModelSelection | null; modelSelectionOptions: ModelSelectionOptions | undefined }>()
+	private readonly _subagentFileClaims = new SubagentFileClaims()
+	private readonly _runningSubagentsOfParent = new Map<string, Set<string>>()
 
 
 	constructor(
@@ -392,12 +434,6 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 	) {
 		super()
 		this.state = { allThreads: {}, currentThreadId: null as unknown as string } // default state
-		this._retryPolicy = new RetryPolicy()
-		// Progress tracking for stuck detection (reset per agent turn)
-		this._progressFilesTouched = new Set<string>()
-		this._progressTerminalCommands = new Set<string>()
-		this._progressTestResults = new Map<string, { passed: number; failed: number }>()
-		this._progressStepsSinceLastProgress = 0
 
 		// Sync taskPlan from TaskPlanService to thread.taskPlan
 		this._register(this.taskPlanService.onDidChangePlan(({ threadId, plan }) => {
@@ -413,6 +449,13 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		this.state = {
 			allThreads: allThreads,
 			currentThreadId: null as unknown as string, // gets set in startNewThread()
+		}
+		// Session recovery: nothing runs in a freshly started Kodia, so a tool saved as running was cut off by the
+		// previous one stopping. Say so in every thread now (not only when one is opened), and say why.
+		for (const threadId in allThreads) {
+			if (allThreads[threadId]?.messages.some(m => m.role === 'tool' && m.type === 'running_now')) {
+				this._rejectRunningTools(threadId, this.toolErrMsgs.interruptedByShutdown)
+			}
 		}
 
 		// always be in a thread
@@ -482,6 +525,24 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			StorageScope.APPLICATION,
 			StorageTarget.USER
 		);
+		this._scheduleThreadsFlush()
+	}
+
+	// Session recovery: the storage service writes to disk only about once a minute, but an agent changes files on
+	// disk at once — a crash in between left files the restored conversation knew nothing about. Flush soon after
+	// any change, and right away (awaited) after the agent changes a file or starts a tool.
+	private _flushTimer: ReturnType<typeof setTimeout> | undefined
+	private _scheduleThreadsFlush() {
+		if (this._flushTimer) return
+		this._flushTimer = setTimeout(() => { this._flushTimer = undefined; void this._flushThreads() }, THREADS_FLUSH_DELAY_MS)
+	}
+	private async _flushThreads() {
+		if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = undefined }
+		try { await this._storageService.flush() } catch { /* the next flush retries */ }
+	}
+	override dispose() {
+		if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = undefined }
+		super.dispose()
 	}
 
 
@@ -511,7 +572,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 			// if running now but stream state doesn't indicate it (happens if restart Kodia), cancel those tools
 			if (lastMessage && lastMessage.role === 'tool' && lastMessage.type === 'running_now') {
-				this._rejectRunningTools(threadId)
+				this._rejectRunningTools(threadId, this.toolErrMsgs.interruptedByShutdown)
 			}
 
 		}
@@ -614,7 +675,9 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		const messages = this.state.allThreads[threadId]?.messages
 		if (!messages) return false
 
-		const idx = findLastIdx(messages, m => m.role === 'tool' && m.type !== 'invalid_params' && m.id === tool.id)
+		// only a call still in progress is updated: providers can reuse ids across turns (e.g. "call_0" every time),
+		// and matching a finished result by id overwrote an earlier turn's tool call in the history
+		const idx = findLastIdx(messages, m => m.role === 'tool' && (m.type === 'running_now' || m.type === 'tool_request') && m.id === tool.id)
 		if (idx === -1) return false
 
 		this._editMessageInThread(threadId, idx, tool)
@@ -730,14 +793,14 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 	}
 
 	// every tool still marked running — several when a turn's calls run in parallel
-	private _rejectRunningTools(threadId: string) {
+	private _rejectRunningTools(threadId: string, content: string = this.toolErrMsgs.interrupted) {
 		const messages = this.state.allThreads[threadId]?.messages ?? [] // snapshot: updates below replace the array, not mutate it
 		// last first: _setState re-checks whether the *last* message is running (restart recovery), so
 		// rejecting it first keeps that check from recursing back in here
 		for (let i = messages.length - 1; i >= 0; i -= 1) {
 			const m = messages[i]
 			if (m.role !== 'tool' || m.type !== 'running_now') continue
-			this._updateLatestTool(threadId, { role: 'tool', type: 'rejected', name: m.name, params: m.params, id: m.id, content: this.toolErrMsgs.interrupted, rawParams: m.rawParams, result: null, mcpServerName: m.mcpServerName })
+			this._updateLatestTool(threadId, { role: 'tool', type: 'rejected', name: m.name, params: m.params, id: m.id, content, rawParams: m.rawParams, result: null, mcpServerName: m.mcpServerName })
 		}
 	}
 
@@ -783,6 +846,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 	private readonly toolErrMsgs = {
 		rejected: 'Tool call was rejected by the user.',
 		interrupted: 'Tool call was interrupted by the user.',
+		interruptedByShutdown: 'Tool call was interrupted because Kodia stopped (it was closed, restarted or crashed) while the tool ran; it may not have finished. Check what it changed before relying on it, or run it again.',
 		errWhenStringifying: (error: any) => `Tool call succeeded, but there was an error stringifying the output.\n${getErrorMessage(error)}`
 	}
 
@@ -862,12 +926,17 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				this._addMessageToThread(threadId, { role: 'tool', type: 'invalid_params', rawParams: opts.unvalidatedToolParams, result: null, name: toolName, content: errorMessage, id: toolId, mcpServerName })
 				return {}
 			}
-			// once validated, add checkpoint for edit
-			if (toolName === 'edit_file') { this._addToolEditCheckpoint({ threadId, uri: (toolParams as BuiltinToolCallParams['edit_file']).uri }) }
-			if (toolName === 'rewrite_file') { this._addToolEditCheckpoint({ threadId, uri: (toolParams as BuiltinToolCallParams['rewrite_file']).uri }) }
 		}
 		else {
 			toolParams = opts.validatedParams
+		}
+
+		// Subagents: a tool outside the subagent's type is refused (offering only its tools is not enough: a model
+		// can name any tool), and a file another subagent running in parallel is changing is left to that agent.
+		const subagentRefusal = this._subagentRefusal(threadId, toolName, toolParams)
+		if (subagentRefusal) {
+			this._addMessageToThread(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: subagentRefusal, name: toolName, content: subagentRefusal, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			return {}
 		}
 
 		// 2. Centralized autonomy decision. Replaces the previous
@@ -970,36 +1039,20 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			return {};
 		}
 
-		// Subagent delegation (OpenCode parity - roadmap Stage 6).
-		// Spawns a subagent in a child thread that runs autonomously in the background.
-		const subagentTools: Set<string> = new Set(['subagent']);
-		if (isBuiltInTool && subagentTools.has(toolName)) {
-			const params = toolParams as any;
-			const childThreadId = generateUuid();
-			// Create the child thread: open a new one, then switch back to the current thread.
-			const currentThreadId = threadId;
-			this.openNewThread();
-			const createdId = this.getCurrentThread()!.id;
-			this.switchToThread(currentThreadId);
-			// Use the created thread's actual ID (openNewThread may reuse an empty one)
-			const subagentThreadId = createdId === currentThreadId ? childThreadId : createdId;
-			// Ensure the thread exists (if openNewThread reused an empty thread, it already exists)
-			if (!this.state.allThreads[subagentThreadId]) {
-				const newThread = newThreadObject();
-				newThread.id = subagentThreadId;
-				const newThreads: ChatThreads = { ...this.state.allThreads, [subagentThreadId]: newThread };
-				this._setState({ allThreads: newThreads, currentThreadId: currentThreadId });
-			}
-			// Add the task as a user message to the child thread
-			this.addUserMessage({ userMessage: params.prompt, threadId: subagentThreadId });
-			// Start autonomous execution in the background (fire and forget)
-			this.runAutonomousTurn(subagentThreadId).catch(err => {
-				console.error(`[subagent] execution failed for thread ${subagentThreadId}:`, err);
-			});
-			const output = `The subagent is working in the background (sessionID: ${subagentThreadId}). You will receive updates as it works. Do not poll for its progress—continue with other tasks and check back later.`;
-			this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: { sessionID: subagentThreadId, status: 'running', output }, name: toolName, content: output, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
-			return {};
+		// Subagent delegation (roadmap 6): runs the child agent to completion and returns its report
+		if (isBuiltInTool && toolName === SUBAGENT_TOOL_NAME) {
+			return this._runSubagent(threadId, toolId, toolParams as BuiltinToolCallParams['subagent'], opts.unvalidatedToolParams, mcpServerName, parallel)
 		}
+
+		// Test-integrity guard: remember a test file's content before a change, to detect weakening afterwards
+		const testFileUri = isBuiltInTool ? this._testFileChangedBy(toolName, toolParams) : null
+		const testFileBefore = testFileUri ? await this._readTextIfExists(testFileUri) : undefined
+
+		// Recovery: what this call is about to change, as it is on disk now (a checkpoint the user can rewind to)
+		// (awaits only for file-changing tools: read-only tools of a parallel batch must reach onInterruptor below
+		// without awaiting anything, or the batch could not be interrupted)
+		const changedPaths = isBuiltInTool && FILE_CHANGING_TOOLS.has(toolName) ? await this._pathsChangedBy(toolName, toolParams) : []
+		if (changedPaths.length > 0) await this._addFileChangeCheckpoint(threadId, changedPaths)
 
 		// 3. call the tool
 		// this._setStreamState(threadId, { isRunning: 'tool' }, 'merge')
@@ -1015,6 +1068,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 			// set stream state
 			if (!parallel) this._setStreamState(threadId, { isRunning: 'tool', interrupt: interruptorPromise, toolInfo: { toolName, toolParams, id: toolId, content: 'interrupted...', rawParams: opts.unvalidatedToolParams, mcpServerName } })
+			void this._flushThreads() // a tool can run for minutes: the conversation up to it must survive a crash meanwhile
 
 			if (isBuiltInTool) {
 				const toolCallPromise = this._toolsService.callTool[toolName](toolParams as any)
@@ -1023,10 +1077,13 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				// of being killed mid-run. The terminal service itself has its own inactivity
 				// guard (MAX_TERMINAL_INACTIVE_TIME) so runaway commands are still bounded.
 				const TOOL_TIMEOUT_MS = 10 * 60_000 // 10 minutes
+				let toolTimer: ReturnType<typeof setTimeout> | undefined
 				const toolTimeout = new Promise<never>((_, reject) => {
-					setTimeout(() => reject(new Error(`Tool call '${toolName}' timed out after ${TOOL_TIMEOUT_MS / 1000} seconds`)), TOOL_TIMEOUT_MS)
+					toolTimer = setTimeout(() => reject(new Error(`Tool call '${toolName}' timed out after ${TOOL_TIMEOUT_MS / 1000} seconds`)), TOOL_TIMEOUT_MS)
 				})
-				const toolResultObj = await Promise.race([toolCallPromise, toolTimeout])
+				let toolResultObj: Awaited<typeof toolCallPromise>
+				try { toolResultObj = await Promise.race([toolCallPromise, toolTimeout]) }
+				finally { clearTimeout(toolTimer) } // don't keep a 10-minute timer alive per tool call
 				const interruptor = () => { interrupted = true; toolResultObj.interruptTool?.() }
 				resolveInterruptor(interruptor)
 
@@ -1061,6 +1118,10 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 			const errorMessage = getErrorMessage(error)
 			this._updateLatestTool(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: errorMessage, name: toolName, content: errorMessage, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			if (changedPaths.length > 0) { // a failed change may still have changed something
+				await this._addFileChangeCheckpoint(threadId, changedPaths)
+				await this._flushThreads()
+			}
 			return {}
 		}
 
@@ -1087,36 +1148,226 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			return {}
 		}
 
+		// the change weakened a test file (fewer tests/assertions, framework removed, skipped, deleted): say so to the model
+		if (testFileUri) {
+			const testFileAfter = await this._readTextIfExists(testFileUri)
+			const displayPath = this._workspaceRelativePath(testFileUri)
+			const reasons = testWeakeningReasons(testFileUri.fsPath, testFileBefore, testFileAfter)
+			if (reasons.length > 0) toolResultStr += `\n\n${testWeakeningNote(displayPath, reasons)}`
+			else if (testFileWithoutTestCases(testFileUri.fsPath, testFileAfter)) toolResultStr += `\n\n${testFileWithoutTestCasesNote(displayPath)}`
+		}
+
 		// 5. add to history and keep going
 		this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: toolResult, name: toolName, content: toolResultStr, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+		// ...and as it is after the change, so rewinding can be undone (jumping forward again); then on disk, so a
+		// crash cannot leave changed files that the restored conversation does not know about
+		if (changedPaths.length > 0) {
+			await this._addFileChangeCheckpoint(threadId, changedPaths)
+			await this._flushThreads()
+		}
 
 		// Update progress tracking for stuck detection
-		this._updateProgressTracking(toolName, toolParams, toolResult as any)
+		this._updateProgressTracking(threadId, toolName, toolParams, toolResult as any)
 
 		return {}
 	};
 
+	/** The test file a file-changing tool call will modify or delete, if any. */
+	private _testFileChangedBy(toolName: ToolName, toolParams: ToolCallParams<ToolName>): URI | null {
+		if (toolName !== 'write_file' && toolName !== 'rewrite_file' && toolName !== 'edit_file' && toolName !== 'delete_file_or_folder') return null
+		const uri = (toolParams as { uri?: URI }).uri
+		if (!uri) return null
+		if (toolName === 'delete_file_or_folder' && (toolParams as BuiltinToolCallParams['delete_file_or_folder']).isFolder) return null
+		return isTestFilePath(uri.fsPath) ? uri : null
+	}
+
+	private async _readTextIfExists(uri: URI): Promise<string | undefined> {
+		try { return (await this._fileService.readFile(uri)).value.toString() }
+		catch { return undefined }
+	}
+
+	private _workspaceRelativePath(uri: URI): string {
+		const folder = this._workspaceContextService.getWorkspaceFolder(uri)
+		return folder ? uri.fsPath.slice(folder.uri.fsPath.length).replace(/^[\\/]/, '') : uri.fsPath
+	}
+
+	// ---------- subagents (roadmap 6) ----------
+
+	private _toolInfosOf(names: ReadonlySet<string>): InternalToolInfo[] {
+		const mcpTools = this._mcpService.getMCPTools() ?? []
+		const out: InternalToolInfo[] = []
+		for (const name of names) {
+			if (isABuiltinToolName(name)) { out.push(builtinTools[name]) }
+			else { const t = mcpTools.find(m => m.name === name); if (t) { out.push(t) } }
+		}
+		return out
+	}
+
+	/** Why a subagent thread may not make this call, or undefined. Claims the file for the caller when it may. */
+	private _subagentRefusal(threadId: string, toolName: ToolName, toolParams: ToolCallParams<ToolName>): string | undefined {
+		const policy = this._toolPolicyOfThread.get(threadId)
+		if (!policy) { return undefined }
+		if (!policy.allowed.has(toolName)) {
+			return toolName === SUBAGENT_TOOL_NAME
+				? 'A subagent cannot start subagents. Do the work yourself, or finish and say what should be delegated, so the agent that started you can do it.'
+				: `A "${policy.agent}" subagent cannot use ${toolName}: its tools are ${[...policy.allowed].sort().join(', ')}.`
+		}
+		// creating a folder is not claimed: folders are shared containers (seen live: two parallel subagents both
+		// create src/ and test/, and the second one was refused), and creating one that exists changes nothing
+		const createsFolder = toolName === 'create_file_or_folder' && (!!(toolParams as { isFolder?: boolean }).isFolder || !/\.[^\\/.]+$/.test((toolParams as { uri?: URI }).uri?.fsPath ?? ''))
+		const uri = FILE_CHANGING_TOOLS.has(toolName) && !createsFolder ? (toolParams as { uri?: URI }).uri : undefined
+		if (uri) {
+			const owner = this._subagentFileClaims.claim(uri.fsPath, threadId)
+			if (owner) {
+				const desc = this.state.allThreads[owner]?.subagentOf?.description ?? owner
+				return `${this._workspaceRelativePath(uri)} is being changed by another subagent running in parallel ("${desc}", session ${owner}), so this change was not made. Leave that file to it; if your task needs a change there, say so in your final reply.`
+			}
+		}
+		return undefined
+	}
+
+	/** "provider/model" or a model name, among the models switched on in Settings; default: the parent's model. */
+	private _resolveSubagentModel(parentId: string, requested: string | undefined): { modelSelection: ModelSelection | null; modelSelectionOptions: ModelSelectionOptions | undefined } | { error: string } {
+		if (!requested) {
+			const p = this._modelOfRunningThread.get(parentId)
+			if (p) { return p }
+			const { modelSelection, modelSelectionOptions } = this._currentModelSelectionProps(parentId)
+			return { modelSelection, modelSelectionOptions }
+		}
+		const options = this._settingsService.state._modelOptions.map(o => o.selection)
+		const wanted = requested.trim().toLowerCase()
+		const matches = options.filter(s => `${s.providerName}/${s.modelName}`.toLowerCase() === wanted)
+		const byName = matches.length ? matches : options.filter(s => s.modelName.toLowerCase() === wanted)
+		if (byName.length !== 1) {
+			const list = options.slice(0, 20).map(s => `${s.providerName}/${s.modelName}`).join(', ')
+			return { error: byName.length > 1 ? `Model "${requested}" is ambiguous; use provider/model: ${byName.map(s => `${s.providerName}/${s.modelName}`).join(', ')}.` : `Model "${requested}" is not one of the models set up in Kodia: ${list || '(none)'}. Leave model out to use the current one.` }
+		}
+		const modelSelection = byName[0]
+		return { modelSelection, modelSelectionOptions: this._settingsService.state.optionsOfModelSelection['Chat'][modelSelection.providerName]?.[modelSelection.modelName] }
+	}
+
+	/**
+	 * Run a subagent to completion in its own thread and put its report in the parent's tool result. The report's
+	 * facts (status, tool calls, files changed, errors) come from the child's thread, not from its reply.
+	 */
+	private async _runSubagent(parentId: string, toolId: string, params: BuiltinToolCallParams['subagent'], rawParams: RawToolParamsObj, mcpServerName: string | undefined, parallel?: ParallelToolRun): Promise<{ interrupted?: boolean }> {
+		const name = SUBAGENT_TOOL_NAME
+		const fail = (message: string) => {
+			this._updateLatestTool(parentId, { role: 'tool', type: 'tool_error', params, result: message, name, content: message, id: toolId, rawParams, mcpServerName })
+			return {}
+		}
+		// everything up to the interruptor is synchronous: a parallel batch collects every interruptor before awaiting
+		if (this.state.allThreads[parentId]?.subagentOf) { return fail('A subagent cannot start subagents. Do the work yourself, or finish and say what should be delegated.') }
+		const running = this._runningSubagentsOfParent.get(parentId) ?? new Set<string>()
+		this._runningSubagentsOfParent.set(parentId, running)
+		if (running.size >= MAX_PARALLEL_SUBAGENTS) { return fail(`At most ${MAX_PARALLEL_SUBAGENTS} subagents can run at the same time; ${running.size} are running. Wait for their reports.`) }
+		const model = this._resolveSubagentModel(parentId, params.model)
+		if ('error' in model) { return fail(model.error) }
+
+		let childId: string
+		let agent: SubagentType
+		if (params.sessionID) {
+			const existing = this.state.allThreads[params.sessionID]
+			if (!existing?.subagentOf || existing.subagentOf.parentThreadId !== parentId) { return fail(`There is no subagent session "${params.sessionID}" started from this conversation.`) }
+			if (running.has(existing.id) || this.streamState[existing.id]?.isRunning) {
+				return fail(this.streamState[existing.id]?.isRunning === 'awaiting_user'
+					? `Subagent session ${existing.id} is waiting for the user to approve a tool call in its thread; it cannot take a follow-up until then.`
+					: `Subagent session ${existing.id} is still running.`)
+			}
+			childId = existing.id
+			agent = existing.subagentOf.agent // the type it was started with
+		} else {
+			const resolved = resolveSubagentType(params.agent)
+			if ('error' in resolved) { return fail(resolved.error) }
+			agent = resolved.type
+			// created directly: never reuse one of the user's empty threads, never switch the user's current thread
+			const thread: ThreadType = { ...newThreadObject(), subagentOf: { parentThreadId: parentId, agent, description: params.description } }
+			childId = thread.id
+			const newThreads: ChatThreads = { ...this.state.allThreads, [childId]: thread }
+			this._storeAllThreads(newThreads)
+			this._setState({ allThreads: newThreads })
+		}
+
+		const offered = (availableTools(this._settingsService.state.globalSettings.chatMode, this._mcpService.getMCPTools()) ?? []).map(t => t.name)
+		const allowed = new Set(subagentToolNames(agent, offered, n => !isABuiltinToolName(n) || n in approvalTypeOfBuiltinToolName))
+		this._toolPolicyOfThread.set(childId, { agent, allowed })
+		running.add(childId)
+
+		this._updateLatestTool(parentId, { role: 'tool', type: 'running_now', name, params, content: `(subagent "${params.description}" is working...)`, result: null, id: toolId, rawParams, mcpServerName })
+		let interrupted = false
+		const interruptor = Promise.resolve(() => { interrupted = true; this.abortRunning(childId) })
+		if (parallel) { parallel.onInterruptor(interruptor) }
+		else { this._setStreamState(parentId, { isRunning: 'tool', interrupt: interruptor, toolInfo: { toolName: name, toolParams: params, id: toolId, content: 'interrupted...', rawParams, mcpServerName } }) }
+
+		const startedAt = Date.now()
+		const startIdx = this.state.allThreads[childId]?.messages.length ?? 0
+		let timedOut = false
+		let crash: string | undefined
+		const timer = setTimeout(() => { timedOut = true; this.abortRunning(childId) }, SUBAGENT_TIMEOUT_MS)
+		try {
+			await this.addUserMessage({ userMessage: params.prompt, threadId: childId }) // awaited: the task must be in the thread before the first request
+			await this._runChatAgent({ threadId: childId, ...model })
+		} catch (e) {
+			crash = getErrorMessage(e)
+		} finally {
+			clearTimeout(timer)
+			running.delete(childId)
+			this._subagentFileClaims.releaseAll(childId)
+		}
+		if (interrupted) { return { interrupted: true } } // the parent's abort marks this call interrupted
+
+		const messages = this.state.allThreads[childId]?.messages.slice(startIdx) ?? []
+		const facts: SubagentToolCallFact[] = []
+		let awaitingApprovalOf: string | undefined
+		for (const m of messages) {
+			if (m.role !== 'tool') { continue }
+			if (m.type === 'tool_request') { awaitingApprovalOf = `${m.name} — ${m.content}`; continue }
+			if (m.type === 'running_now') { continue }
+			const uri = m.type !== 'invalid_params' ? (m.params as { uri?: URI } | undefined)?.uri : undefined
+			facts.push({ name: m.name, type: m.type, target: uri ? this._workspaceRelativePath(URI.revive(uri)) : undefined, error: m.type === 'success' ? undefined : m.content })
+		}
+		const lastReply = findLast(messages, m => m.role === 'assistant')
+		const output = lastReply?.role === 'assistant' ? lastReply.displayContent : ''
+		const streamError = this.streamState[childId]?.error?.message
+		const status: SubagentStatus = timedOut ? 'timed_out'
+			: crash || streamError ? 'failed'
+				: this.streamState[childId]?.isRunning === 'awaiting_user' ? 'awaiting_approval'
+					: /^Agent (turn reached its step limit|appears stuck)/.test(output) ? 'stopped'
+						: 'completed'
+		const summary = summarizeSubagentRun(facts, FILE_CHANGING_TOOLS)
+		const report: SubagentReport = {
+			sessionID: childId, agent, description: params.description, status, output, ...summary,
+			problems: [...summary.problems, ...[crash, streamError].filter((e): e is string => !!e).map(e => `the subagent stopped with an error: ${e}`)],
+			awaitingApprovalOf: status === 'awaiting_approval' ? awaitingApprovalOf : undefined,
+			durationMs: Date.now() - startedAt,
+		}
+		const content = formatSubagentReport(report)
+		this._updateLatestTool(parentId, { role: 'tool', type: status === 'failed' || status === 'timed_out' ? 'tool_error' : 'success', params, result: status === 'failed' || status === 'timed_out' ? content : report, name, content, id: toolId, rawParams, mcpServerName } as ChatMessage & { role: 'tool' })
+		return {}
+	}
+
 	/** Update progress tracking based on tool result, used by stuck detection. */
-	private _updateProgressTracking(toolName: ToolName, toolParams: ToolCallParams<ToolName>, toolResult: any): void {
-		this._progressStepsSinceLastProgress = 0 // reset stuck counter on any progress
+	private _updateProgressTracking(threadId: string, toolName: ToolName, toolParams: ToolCallParams<ToolName>, toolResult: any): void {
+		const progress = this._progress(threadId)
+		progress.stepsSinceLastProgress = 0 // reset stuck counter on any progress
 
 		// Track file touches
 		if (isFileAccessTool(toolName)) {
 			const uri = getFileToolUri(toolName, toolParams)
 			if (uri) {
-				this._progressFilesTouched.add(uri.fsPath)
+				progress.filesTouched.add(uri.fsPath)
 			}
 		}
 		// Track terminal commands
 		if (toolName === 'run_command' || toolName === 'run_persistent_command' || toolName === 'send_command_to_terminal') {
 			const cmd = (toolParams as any).command || (toolParams as any).persistent_terminal_id
-			if (cmd) this._progressTerminalCommands.add(String(cmd))
+			if (cmd) progress.terminalCommands.add(String(cmd))
 		}
 		// Track test results
 		if (toolName.startsWith('test_') && toolResult) {
 			const results = (toolResult as any)?.results
 			if (results) {
-				this._progressTestResults.set(String(Date.now()), {
+				progress.testResults.set(String(Date.now()), {
 					passed: results.passed || 0,
 					failed: results.failed || 0,
 				})
@@ -1152,15 +1403,37 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		const turnId = generateUuid()
 
 		let nMessagesSent = 0
+		let nudgedForUnfulfilledAction = false
+		let requestedCompletionCheck = false
+		// messages from here on belong to this turn; an approved tool's request message (updated in place) is the turn's first
+		const nMessagesBeforeTurn = this.state.allThreads[threadId]?.messages.length ?? 0
+		const turnStartIdx = callThisToolFirst ? Math.max(0, nMessagesBeforeTurn - 1) : nMessagesBeforeTurn
+		let overflowRecoveries = 0
 		let shouldSendAnotherMessage = true
 		let isRunningWhenEnd: IsRunningType = undefined
 
 		// Stuck detection: track progress across steps. If no file/terminal/test
 		// progress for MAX_STUCK_STEPS steps, pause and alert the user.
-		this._progressFilesTouched = new Set()
-		this._progressTerminalCommands = new Set()
-		this._progressTestResults = new Map()
-		this._progressStepsSinceLastProgress = 0
+		this._progressOfThread.delete(threadId)
+		const progress = this._progress(threadId)
+		// what a subagent started now inherits by default
+		this._modelOfRunningThread.set(threadId, { modelSelection, modelSelectionOptions })
+		// a subagent thread is offered only its type's tools (the policy is also enforced when a tool is called)
+		const toolPolicy = this._toolPolicyOfThread.get(threadId)
+		const policyTools: InternalToolInfo[] | undefined = toolPolicy ? this._toolInfosOf(toolPolicy.allowed) : undefined
+		// a small-context model gets a prioritized subset of the tools when all of them would take over half its window
+		const budgeted = modelSelection ? toolsWithinBudget(
+			policyTools ?? availableTools(chatMode, this._mcpService.getMCPTools()) ?? [],
+			getModelCapabilities(modelSelection.providerName, modelSelection.modelName, overridesOfModel).contextWindow,
+			estimateTokens,
+		) : undefined
+		const explicitTools: InternalToolInfo[] | undefined = budgeted?.tools ?? policyTools
+		const subagentOf = this.state.allThreads[threadId]?.subagentOf
+		const promptNotes = [
+			toolPolicy && subagentOf ? subagentRoleText(subagentOf.agent, subagentOf.description) : '',
+			budgeted ? describeOmittedTools(budgeted.omitted) : '',
+		].filter(Boolean).join('\n\n')
+		const subagentPrompt = explicitTools ? { tools: explicitTools, role: promptNotes } : undefined
 
 		// before enter loop, call tool
 		if (callThisToolFirst) {
@@ -1192,10 +1465,10 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 			// Stuck detection: if no file/terminal/test progress for too many steps,
 			// pause and report so the user can intervene or break the task down.
-			if (this._progressStepsSinceLastProgress >= MAX_STUCK_STEPS) {
+			if (progress.stepsSinceLastProgress >= MAX_STUCK_STEPS) {
 				this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' })
-				const filesList = Array.from(this._progressFilesTouched).slice(0, 10).join(', ')
-				const cmdsList = Array.from(this._progressTerminalCommands).slice(0, 5).join(', ')
+				const filesList = Array.from(progress.filesTouched).slice(0, 10).join(', ')
+				const cmdsList = Array.from(progress.terminalCommands).slice(0, 5).join(', ')
 				const msg = `Agent appears stuck: no file changes, terminal commands, or test results for ${MAX_STUCK_STEPS} consecutive steps. ` +
 					`Progress so far: files touched [${filesList || 'none'}], commands run [${cmdsList || 'none'}]. ` +
 					`Send another message to resume, or break the request into smaller steps.`
@@ -1221,6 +1494,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				modelSelection,
 				chatMode,
 				turnId, // the same system prompt for every request of this turn, so the prompt cache holds
+				subagent: subagentPrompt,
 			})
 			let prepared = await prepare()
 			// too long for the model: clear old tool results once, rather than truncating messages on every request
@@ -1248,11 +1522,24 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				let resMessageIsDonePromise: (res: ResTypes) => void // resolves when user approves this tool use (or if tool doesn't require approval)
 				const messageIsDonePromise = new Promise<ResTypes>((res, rej) => { resMessageIsDonePromise = res })
 
-				const llmCancelToken = this._llmMessageService.sendLLMMessage({
+				// Inactivity timeout: a long but healthy stream (e.g. a large write_file) must not be cut off, so the
+				// clock restarts on every chunk. When it fires, the request is really aborted (not left running).
+				let inactivityTimer: ReturnType<typeof setTimeout> | undefined
+				let llmCancelToken: string | null = null
+				const armInactivityTimer = () => {
+					if (inactivityTimer) clearTimeout(inactivityTimer)
+					inactivityTimer = setTimeout(() => {
+						resMessageIsDonePromise({ type: 'llmError', error: { message: `The model sent no output for ${LLM_INACTIVITY_TIMEOUT_MS / 1000} seconds. It may be overloaded. Try again or break your request into smaller steps.`, fullError: null } })
+						if (llmCancelToken) this._llmMessageService.abort(llmCancelToken)
+					}, LLM_INACTIVITY_TIMEOUT_MS)
+				}
+
+				llmCancelToken = this._llmMessageService.sendLLMMessage({
 					messagesType: 'chatMessages',
 					chatMode,
 					messages: messages,
 					promptCacheKey: threadId, // every request of the agent loop resends the thread's prefix
+					tools: explicitTools,
 					promptCacheTTL: this._settingsService.state.globalSettings.oneHourPromptCache ? '1h' : undefined,
 					modelSelection,
 					modelSelectionOptions,
@@ -1260,11 +1547,13 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 					logging: { loggingName: `Chat - ${chatMode}`, loggingExtras: { threadId, nMessagesSent, chatMode } },
 					separateSystemMessage: separateSystemMessage,
 					onText: ({ fullText, fullReasoning, toolCall }) => {
+						armInactivityTimer() // the stream is alive
 						this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: fullText, reasoningSoFar: fullReasoning, toolCallSoFar: toolCall ?? null }, interrupt: Promise.resolve(() => { if (llmCancelToken) this._llmMessageService.abort(llmCancelToken) }) })
 					},
-					onFinalMessage: async ({ fullText, fullReasoning, toolCalls, anthropicReasoning, usage }) => {
+					onFinalMessage: async ({ fullText, fullReasoning, toolCalls, anthropicReasoning, usage, finishReason }) => {
 						if (usage && modelSelection) this._convertToLLMMessagesService.recordInputTokens(modelSelection, estimatedInputTokens, usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))
-						resMessageIsDonePromise({ type: 'llmDone', toolCalls, info: { fullText, fullReasoning, anthropicReasoning, usage } }) // resolve with tool calls
+						// finishReason must be passed on: the output-limit continuation below depends on it
+						resMessageIsDonePromise({ type: 'llmDone', toolCalls, info: { fullText, fullReasoning, anthropicReasoning, usage, finishReason } }) // resolve with tool calls
 					},
 					onError: async (error) => {
 						resMessageIsDonePromise({ type: 'llmError', error: error })
@@ -1282,14 +1571,11 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 					break
 				}
 
-				this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: '', reasoningSoFar: '', toolCallSoFar: null }, interrupt: Promise.resolve(() => this._llmMessageService.abort(llmCancelToken)) })
-				// Add a timeout so the agent doesn't hang forever if the model doesn't respond
-				const llmTimeout = new Promise((resolve, reject) => {
-					setTimeout(() => {
-						resolve({ type: 'llmError', error: { message: 'LLM request timed out after 120 seconds. The model may be overloaded. Try again or break your request into smaller steps.', fullError: null } })
-					}, 120000)
-				})
-				const llmRes = await Promise.race([messageIsDonePromise, llmTimeout]) as ResTypes
+				const cancelToken = llmCancelToken
+				this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: '', reasoningSoFar: '', toolCallSoFar: null }, interrupt: Promise.resolve(() => this._llmMessageService.abort(cancelToken)) })
+				armInactivityTimer() // so the agent doesn't hang forever if the model never responds
+				const llmRes = await messageIsDonePromise
+				if (inactivityTimer) clearTimeout(inactivityTimer)
 
 				// if something else started running in the meantime
 				if (this.streamState[threadId]?.isRunning !== 'LLM') {
@@ -1312,6 +1598,18 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 						this._addUserCheckpoint({ threadId })
 						return
 					}
+					// The request was longer than the model's real context window (common when the window was only
+					// guessed for an unrecognized model): learn the limit, rebuild the request under it, and retry.
+					const errorText = `${error.message ?? ''} ${error.fullError?.message ?? ''}`
+					const isOverflow = !!modelSelection && isContextOverflowError(errorText)
+					if (modelSelection && isOverflow && overflowRecoveries < MAX_CONTEXT_OVERFLOW_RECOVERIES_PER_TURN) {
+						overflowRecoveries += 1
+						this._convertToLLMMessagesService.recordContextOverflow(modelSelection, contextLimitFromError(errorText))
+						this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
+						shouldRetryLLM = false
+						shouldSendAnotherMessage = true // the outer loop prepares the messages again, now under the learned budget
+						continue
+					}
 					const fullError = error.fullError
 					const errInfo = createRetryErrorInfo({
 						name: fullError?.name,
@@ -1320,7 +1618,8 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 						status: (fullError as any)?.status ?? null,
 						headers: (fullError as any)?.headers ?? null,
 					})
-					const decision = this._retryPolicy.decide(errInfo, true)
+					// resending a request the provider already rejected as too long cannot succeed: never back off and retry it
+					const decision = isOverflow ? { retry: false, delayMs: 0 } : this._retryPolicy(threadId).decide(errInfo, true)
 					if (decision.retry) {
 						this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
 						await timeout(decision.delayMs)
@@ -1335,13 +1634,16 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 					this._addMessageToThread(threadId, { role: 'assistant', displayContent: displayContentSoFar, reasoning: reasoningSoFar, anthropicReasoning: null })
 					if (toolCallSoFar) this._addMessageToThread(threadId, { role: 'interrupted_streaming_tool', name: toolCallSoFar.name, mcpServerName: this._computeMCPServerOfToolName(toolCallSoFar.name) })
 
-					this._setStreamState(threadId, { isRunning: undefined, error })
+					const shownError = isOverflow
+						? { ...error, message: `${error.message}\n\nThe conversation is longer than this model's context window, and Kodia already reduced the request ${overflowRecoveries} time(s). Set this model's context window in Settings → Models, or start a new chat.` }
+						: error
+					this._setStreamState(threadId, { isRunning: undefined, error: shownError })
 					this._addUserCheckpoint({ threadId })
 					return
 				}
 
 				// llm res success - reset retry policy for the next turn
-				this._retryPolicy.reset()
+				this._retryPolicy(threadId).reset()
 				shouldRetryLLM = false
 				const { toolCalls, info } = llmRes
 
@@ -1365,6 +1667,40 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 				this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' }) // just decorative for clarity
 
+				// Weak-model guard: the reply announces actions but calls no tool, so nothing ran. Say so to the
+				// model once per turn (visibly, as a message in the thread) instead of ending as if work was done.
+				if ((!toolCalls || toolCalls.length === 0) && chatMode === 'agent' && !nudgedForUnfulfilledAction && looksLikeUnfulfilledAction(info.fullText)) {
+					nudgedForUnfulfilledAction = true
+					this._addMessageToThread(threadId, {
+						role: 'user',
+						displayContent: UNFULFILLED_ACTION_NUDGE,
+						content: UNFULFILLED_ACTION_NUDGE,
+						selections: null,
+						state: { stagingSelections: [], isBeingEdited: false },
+					})
+					shouldSendAnotherMessage = true
+					continue
+				}
+
+				// Evidence-based completion: the model is about to finish a turn in which it changed files. Ask it once
+				// (visibly) to verify against the request — read the files, run the tests/build — and fix what fails.
+				if ((!toolCalls || toolCalls.length === 0) && this._settingsService.state.globalSettings.verifyBeforeFinishing !== false && shouldRequestCompletionCheck({
+					chatMode,
+					alreadyRequested: requestedCompletionCheck,
+					messagesThisTurn: (this.state.allThreads[threadId]?.messages ?? []).slice(turnStartIdx),
+				})) {
+					requestedCompletionCheck = true
+					this._addMessageToThread(threadId, {
+						role: 'user',
+						displayContent: COMPLETION_CHECK_REQUEST,
+						content: COMPLETION_CHECK_REQUEST,
+						selections: null,
+						state: { stagingSelections: [], isBeingEdited: false },
+					})
+					shouldSendAnotherMessage = true
+					continue
+				}
+
 				// call the tools if there are any
 				if (toolCalls && toolCalls.length > 0) {
 					const { awaitingUserApproval, interrupted } = await this._runToolCallsOfTurn(threadId, toolCalls)
@@ -1376,7 +1712,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 					else { 
 						shouldSendAnotherMessage = true 
 						// Increment stuck counter - _updateProgressTracking resets to 0 when progress is made
-						this._progressStepsSinceLastProgress++
+						progress.stepsSinceLastProgress++
 					}
 
 					this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' }) // just decorative, for clarity
@@ -1398,6 +1734,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 	private _addCheckpoint(threadId: string, checkpoint: CheckpointEntry) {
 		this._addMessageToThread(threadId, checkpoint)
+		this._pruneOldSnapshots(threadId) // every kind of checkpoint holds file contents
 		// // update latest checkpoint idx to the one we just added
 		// const newThread = this.state.allThreads[threadId]
 		// if (!newThread) return // should never happen
@@ -1478,19 +1815,123 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			userModifications: { voidFileSnapshotOfURI: {}, },
 		})
 	}
-	// call this right after LLM edits a file
-	private _addToolEditCheckpoint({ threadId, uri, }: { threadId: string, uri: URI }) {
+	// ---------- recovery: file-change checkpoints (roadmap 8) ----------
+	// Was: only edit_file/rewrite_file were checkpointed, and only when the file happened to be open in an editor
+	// (no model → no checkpoint), so rewinding an agent's turn restored nothing it wrote, created or deleted.
+
+	/** every path a file-changing tool call may change: its target, and for a deleted folder everything inside it */
+	private async _pathsChangedBy(toolName: ToolName, toolParams: ToolCallParams<ToolName>): Promise<URI[]> {
+		if (!FILE_CHANGING_TOOLS.has(toolName)) return []
+		const uri = (toolParams as { uri?: URI }).uri
+		if (!uri) return []
+		if (toolName !== 'delete_file_or_folder') return [uri]
+		const out: URI[] = []
+		const visit = async (u: URI) => {
+			if (out.length >= MAX_SNAPSHOT_FILES_PER_CHANGE) return
+			out.push(u)
+			let children: { resource: URI }[] | undefined
+			try { children = (await this._fileService.resolve(u)).children } catch { return }
+			for (const c of children ?? []) { await visit(c.resource) }
+		}
+		await visit(uri)
+		return out
+	}
+
+	/** a path as it is now: its content (and Kodia's diff areas when it is open), a folder, or nothing */
+	private async _snapshotOfPath(uri: URI): Promise<VoidFileSnapshot | undefined> {
+		let stat
+		try { stat = await this._fileService.stat(uri) }
+		catch { return { snapshottedDiffAreaOfId: {}, entireFileCode: '', absent: true } }
+		if (stat.isDirectory) return { snapshottedDiffAreaOfId: {}, entireFileCode: '', isFolder: true }
+		if (stat.size > MAX_SNAPSHOT_FILE_BYTES) return undefined // not kept in the thread; this file cannot be rewound
+		if (this._voidModelService.getModel(uri).model) return this._editCodeService.getVoidFileSnapshot(uri)
+		try { return { snapshottedDiffAreaOfId: {}, entireFileCode: (await this._fileService.readFile(uri)).value.toString() } }
+		catch { return undefined }
+	}
+
+	private async _addFileChangeCheckpoint(threadId: string, uris: URI[]) {
+		if (uris.length === 0) return
+		const voidFileSnapshotOfURI: { [fsPath: string]: VoidFileSnapshot | undefined } = {}
+		for (const uri of uris) {
+			const s = await this._snapshotOfPath(uri)
+			if (s) voidFileSnapshotOfURI[uri.fsPath] = s
+		}
+		this._addCheckpoint(threadId, { role: 'checkpoint', type: 'tool_edit', voidFileSnapshotOfURI, userModifications: { voidFileSnapshotOfURI: {} } })
+	}
+
+	// Every snapshot is kept in the saved conversation, and every save serializes all conversations: without a bound,
+	// a long session over big files grows without limit. Newest first, snapshot contents are kept up to this many
+	// characters per conversation; older ones are dropped (marked pruned) and rewinding that far says so.
+	private _maxSnapshotCharsPerThread = MAX_SNAPSHOT_CHARS_PER_THREAD
+	private _pruneOldSnapshots(threadId: string) {
 		const thread = this.state.allThreads[threadId]
 		if (!thread) return
-		const { model } = this._voidModelService.getModel(uri)
-		if (!model) return // should never happen
-		const diffAreasSnapshot = this._editCodeService.getVoidFileSnapshot(uri)
-		this._addCheckpoint(threadId, {
-			role: 'checkpoint',
-			type: 'tool_edit',
-			voidFileSnapshotOfURI: { [uri.fsPath]: diffAreasSnapshot },
-			userModifications: { voidFileSnapshotOfURI: {} },
-		})
+		let kept = 0
+		let changed = false
+		const messages = [...thread.messages]
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i]
+			if (m.role !== 'checkpoint') continue
+			const prune = (snaps: { [fsPath: string]: VoidFileSnapshot | undefined }) => {
+				let out: typeof snaps | undefined
+				for (const [fsPath, s] of Object.entries(snaps)) {
+					if (!s || s.pruned || s.absent || s.isFolder) continue
+					kept += s.entireFileCode.length
+					if (kept > this._maxSnapshotCharsPerThread) {
+						out ??= { ...snaps }
+						out[fsPath] = { snapshottedDiffAreaOfId: {}, entireFileCode: '', pruned: true }
+					}
+				}
+				return out
+			}
+			const own = prune(m.voidFileSnapshotOfURI)
+			const user = prune(m.userModifications.voidFileSnapshotOfURI)
+			if (own || user) {
+				messages[i] = { ...m, voidFileSnapshotOfURI: own ?? m.voidFileSnapshotOfURI, userModifications: { voidFileSnapshotOfURI: user ?? m.userModifications.voidFileSnapshotOfURI } }
+				changed = true
+			}
+		}
+		if (!changed) return
+		const newThreads: ChatThreads = { ...this.state.allThreads, [threadId]: { ...thread, messages } }
+		this._storeAllThreads(newThreads)
+		this._setState({ allThreads: newThreads })
+	}
+
+	/**
+	 * Put paths back as snapshotted: folders first (outermost first), then file contents, then remove what did not
+	 * exist (innermost first; a folder only when it is empty, so nothing the snapshot did not know about is lost).
+	 * Returns the paths that could not be restored, with the reason.
+	 */
+	private async _restoreSnapshots(entries: [string, VoidFileSnapshot][]): Promise<string[]> {
+		const failures: string[] = []
+		const depth = (p: string) => p.split(/[\\/]/).length
+		const attempt = async (fsPath: string, f: () => Promise<unknown>) => { try { await f() } catch (e) { failures.push(`${fsPath}: ${getErrorMessage(e)}`) } }
+		for (const [fsPath] of entries.filter(([, s]) => s.pruned)) {
+			failures.push(`${fsPath}: this point is too old to restore — its saved copy was dropped to keep the conversation's history small`)
+		}
+		entries = entries.filter(([, s]) => !s.pruned)
+		for (const [fsPath] of entries.filter(([, s]) => s.isFolder).sort((a, b) => depth(a[0]) - depth(b[0]))) {
+			await attempt(fsPath, async () => { if (!await this._fileService.exists(URI.file(fsPath))) await this._fileService.createFolder(URI.file(fsPath)) })
+		}
+		for (const [fsPath, s] of entries.filter(([, s]) => !s.isFolder && !s.absent)) {
+			await attempt(fsPath, async () => {
+				const uri = URI.file(fsPath)
+				if (!await this._fileService.exists(uri) || !this._voidModelService.getModel(uri).model) {
+					await this._fileService.writeFile(uri, VSBuffer.fromString(s.entireFileCode))
+				}
+				if (this._voidModelService.getModel(uri).model) await this._editCodeService.restoreVoidFileSnapshot(uri, s) // the open model and diff areas too
+			})
+		}
+		for (const [fsPath] of entries.filter(([, s]) => s.absent).sort((a, b) => depth(b[0]) - depth(a[0]))) {
+			await attempt(fsPath, async () => {
+				const uri = URI.file(fsPath)
+				let stat
+				try { stat = await this._fileService.resolve(uri) } catch { return } // already gone
+				if (stat.isDirectory && (stat.children?.length ?? 0) > 0) throw new Error('the folder is not empty, so it was kept')
+				await this._fileService.del(uri, { recursive: false })
+			})
+		}
+		return failures
 	}
 
 
@@ -1555,7 +1996,8 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		}
 	}
 
-	jumpToCheckpointBeforeMessageIdx({ threadId, messageIdx, jumpToUserModified }: { threadId: string, messageIdx: number, jumpToUserModified: boolean }) {
+	async jumpToCheckpointBeforeMessageIdx({ threadId, messageIdx, jumpToUserModified }: { threadId: string, messageIdx: number, jumpToUserModified: boolean }): Promise<void> {
+		const toRestore: [string, VoidFileSnapshot][] = []
 
 		// if null, add a new temp checkpoint so user can jump forward again
 		this._makeUsStandOnCheckpoint({ threadId })
@@ -1611,7 +2053,11 @@ We only need to do it for files that were edited since `to`, ie files between to
 			}
 
 			for (const fsPath in lastIdxOfURI) {
-				// find the first instance of this file starting at toIdx (go up to latest file; if there is none, go down)
+				// find the first instance of this file starting at toIdx (go up to latest file; if there is none, go down);
+				// a pruned snapshot is skipped for the next one (the "before" snapshot of the following change holds the same
+				// content), and reported only when no usable one is left
+				let pruned: VoidFileSnapshot | undefined
+				let found = false
 				for (const k of idxes()) {
 					const message = thread.messages[k]
 					if (message.role !== 'checkpoint') continue
@@ -1619,9 +2065,12 @@ We only need to do it for files that were edited since `to`, ie files between to
 					if (!res) continue
 					const { voidFileSnapshot } = res
 					if (!voidFileSnapshot) continue
-					this._editCodeService.restoreVoidFileSnapshot(URI.file(fsPath), voidFileSnapshot)
+					if (voidFileSnapshot.pruned) { pruned ??= voidFileSnapshot; continue }
+					toRestore.push([fsPath, voidFileSnapshot])
+					found = true
 					break
 				}
+				if (!found && pruned) toRestore.push([fsPath, pruned])
 			}
 		}
 
@@ -1645,7 +2094,9 @@ We only need to do it for files that were edited since `from`, ie files between 
 		if (toIdx > fromIdx) {
 			const { lastIdxOfURI } = this._getCheckpointsBetween({ threadId, loIdx: fromIdx + 1, hiIdx: toIdx })
 			for (const fsPath in lastIdxOfURI) {
-				// apply lowest down content for each uri
+				// apply lowest down content for each uri (newest snapshots are never pruned first, but stay safe)
+				let pruned: VoidFileSnapshot | undefined
+				let found = false
 				for (let k = toIdx; k >= fromIdx + 1; k -= 1) {
 					const message = thread.messages[k]
 					if (message.role !== 'checkpoint') continue
@@ -1653,13 +2104,21 @@ We only need to do it for files that were edited since `from`, ie files between 
 					if (!res) continue
 					const { voidFileSnapshot } = res
 					if (!voidFileSnapshot) continue
-					this._editCodeService.restoreVoidFileSnapshot(URI.file(fsPath), voidFileSnapshot)
+					if (voidFileSnapshot.pruned) { pruned ??= voidFileSnapshot; continue }
+					toRestore.push([fsPath, voidFileSnapshot])
+					found = true
 					break
 				}
+				if (!found && pruned) toRestore.push([fsPath, pruned])
 			}
 		}
 
 		this._setThreadState(threadId, { currCheckpointIdx: toIdx })
+		// was fire-and-forget: the jump "finished" before any file was written, and failures were lost
+		const failures = await this._restoreSnapshots(toRestore)
+		if (failures.length > 0) {
+			this._notificationService.notify({ severity: Severity.Warning, message: `Kodia could not restore ${failures.length} file(s) to that checkpoint:\n${failures.join('\n')}` })
+		}
 	}
 
 

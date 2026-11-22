@@ -7,7 +7,7 @@ import { IWorkspaceContextService } from '../../../../platform/workspace/common/
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ChatMessage, StagingSelectionItem } from '../common/chatThreadServiceTypes.js';
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities, anthropicModelFeatures } from '../common/modelCapabilities.js';
-import { chat_systemMessage, chat_filesOverview, chat_skills, chat_workspaceContext, joinProjectRules, PROJECT_RULES_FILE_NAMES, summarizedThreadMessage } from '../common/prompt/prompts.js';
+import { chat_systemMessage, chat_filesOverview, chat_skills, chat_workspaceContext, InternalToolInfo, joinProjectRules, PROJECT_RULES_FILE_NAMES, summarizedThreadMessage } from '../common/prompt/prompts.js';
 import { LLMChatMessage, LLMFIMMessage } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, modelSelectionsEqual } from '../common/voidSettingsTypes.js';
@@ -17,7 +17,10 @@ import { IVoidModelService } from '../common/voidModelService.js';
 import { URI } from '../../../../base/common/uri.js';
 import { EndOfLinePreference } from '../../../../editor/common/model.js';
 import { IMCPService } from '../common/mcpService.js';
-import { IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
+import { fitMemoryToBudget, IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
+
+// the share of the model's context window the project memory may take in the system prompt
+const MEMORY_SHARE_OF_CONTEXT = 0.15
 import { joinUserInstructions } from '../common/instructionsFrameworks.js';
 import { skillsOfPrompt } from '../common/agentSkills.js';
 import { IPromptsService } from '../../chat/common/promptSyntax/service/promptsService.js';
@@ -33,9 +36,13 @@ export interface IConvertToLLMMessageService {
 	// wasInitiallyOverBudget: the history exceeded the estimated budget before trimming
 	// wasStillOverBudgetAfterTrimming: the history still exceeds the estimated budget after trimming
 	// wasTrimmed: whether any message content was modified by the trimming loop
-	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean }>
+	// subagent: the thread is a subagent's — it is offered exactly `tools`, and told its role
+	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string, subagent?: { tools: InternalToolInfo[], role: string } }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean }>
 	// calibrates token estimates for this model with the input tokens the provider reported for that request
 	recordInputTokens(modelSelection: ModelSelection, estimatedInputTokens: number, actualInputTokens: number): void
+	// the provider rejected a request as longer than the model's context window: from now on (this session), budget
+	// this model with the limit the provider reported, or half the window used so far. Returns the new window.
+	recordContextOverflow(modelSelection: ModelSelection, reportedContextWindow: number | undefined): number
 	// the editor state to append to a chat message when the user sends it ('' if the system message is disabled)
 	getWorkspaceContext(chatMode: ChatMode): string
 	prepareFIMMessage(opts: { messages: LLMFIMMessage, }): { prefix: string, suffix: string, stopTokens: string[] }
@@ -44,7 +51,7 @@ export interface IConvertToLLMMessageService {
 export const IConvertToLLMMessageService = createDecorator<IConvertToLLMMessageService>('ConvertToLLMMessageService');
 
 
-class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMessageService {
+export class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMessageService {
 	_serviceBrand: undefined;
 
 	constructor(
@@ -123,15 +130,17 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 	// The chat system prompt, from the most stable part to the most changing one, so that a provider's
 	// prompt cache keeps the longest possible prefix:
 	//   static instructions -> the user's guidelines -> skills (change when one is installed) -> project memory (the agent writes it) -> file tree (changes when files are created)
-	private _generateChatSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean) => {
+	private _generateChatSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean, subagent: { tools: InternalToolInfo[], role: string } | undefined, memoryBudgetTokens: number) => {
 		const sections: string[] = []
 
 		if (!disableSystemMessage) {
 			const workspaceFolders = this.workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
 			const includeXMLToolDefinitions = !specialToolFormat
 			const mcpTools = this.mcpService.getMCPTools()
-			sections.push(chat_systemMessage({ workspaceFolders, chatMode, mcpTools, includeXMLToolDefinitions }))
+			sections.push(chat_systemMessage({ workspaceFolders, chatMode, mcpTools, includeXMLToolDefinitions, explicitTools: subagent?.tools }))
 		}
+		// a subagent's role is always stated, even with the system message disabled: it changes what the reply is for
+		if (subagent?.role) sections.push(subagent.role)
 
 		const guidelines = this._getGuidelines()
 		if (guidelines) sections.push(`GUIDELINES (from the user's settings and the project's rules files):\n${guidelines}`)
@@ -143,7 +152,9 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		}
 
 		await this.projectMemoryService.whenReady
-		const projectMemory = this._getProjectMemory()
+		// the memory has no size limit, the prompt does: it gets a share of the model's context window (was: all of it,
+		// so a large memory could crowd the conversation out of a small model's window)
+		const projectMemory = fitMemoryToBudget(this._getProjectMemory(), memoryBudgetTokens)
 		if (projectMemory) sections.push(`PROJECT MEMORY (${PROJECT_MEMORY_FILE_PATH}: notes kept across sessions; rewrite a section with write_project_memory when something here is outdated or worth adding):\n${projectMemory}`)
 
 		if (!disableSystemMessage) {
@@ -162,11 +173,11 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 	// memory while it works; rebuilding the system prompt for each request of the turn would then miss the
 	// cache for the whole thread. The model already knows what it just changed, and tools read the rest.
 	private _systemMessageOfTurn: { key: string, systemMessage: string } | undefined = undefined
-	private async _chatSystemMessage(turnId: string | undefined, chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean) {
-		const key = `${turnId}|${chatMode}|${specialToolFormat}|${disableSystemMessage}`
+	private async _chatSystemMessage(turnId: string | undefined, chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean, subagent: { tools: InternalToolInfo[], role: string } | undefined, memoryBudgetTokens: number) {
+		const key = `${turnId}|${chatMode}|${specialToolFormat}|${disableSystemMessage}|${subagent ? subagent.tools.map(t => t.name).join(',') : ''}|${memoryBudgetTokens}`
 		if (turnId && this._systemMessageOfTurn?.key === key) return this._systemMessageOfTurn.systemMessage
 
-		const systemMessage = await this._generateChatSystemMessage(chatMode, specialToolFormat, disableSystemMessage)
+		const systemMessage = await this._generateChatSystemMessage(chatMode, specialToolFormat, disableSystemMessage, subagent, memoryBudgetTokens)
 		if (turnId) this._systemMessageOfTurn = { key, systemMessage }
 		return systemMessage
 	}
@@ -281,7 +292,23 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		this._tokenRatioOf.set(key, previous === undefined ? ratio : previous * 0.7 + ratio * 0.3)
 	}
 
-	prepareLLMChatMessages: IConvertToLLMMessageService['prepareLLMChatMessages'] = async ({ chatMessages, chatMode, modelSelection, turnId }) => {
+	// Context windows learned from providers' context-length errors (session-only). Matters most for models whose
+	// window Kodia only guessed (contextWindowSource 'fallback'), but a stated limit wins over any catalog value.
+	private readonly _learnedContextWindowOf = new Map<string, number>()
+	private _effectiveContextWindow(modelSelection: ModelSelection, catalogContextWindow: number) {
+		const learned = this._learnedContextWindowOf.get(`${modelSelection.providerName}:${modelSelection.modelName}`)
+		return learned === undefined ? catalogContextWindow : Math.min(learned, catalogContextWindow)
+	}
+	recordContextOverflow: IConvertToLLMMessageService['recordContextOverflow'] = (modelSelection, reportedContextWindow) => {
+		const { contextWindow } = getModelCapabilities(modelSelection.providerName, modelSelection.modelName, this.voidSettingsService.state.overridesOfModel)
+		const current = this._effectiveContextWindow(modelSelection, contextWindow)
+		// a stated limit is trusted (minus a margin for our token estimate); otherwise halve what we assumed
+		const next = Math.max(2_048, Math.floor(reportedContextWindow !== undefined ? Math.min(reportedContextWindow * 0.9, current) : current / 2))
+		this._learnedContextWindowOf.set(`${modelSelection.providerName}:${modelSelection.modelName}`, next)
+		return next
+	}
+
+	prepareLLMChatMessages: IConvertToLLMMessageService['prepareLLMChatMessages'] = async ({ chatMessages, chatMode, modelSelection, turnId, subagent }) => {
 		if (modelSelection === null) return { messages: [], separateSystemMessage: undefined, estimatedInputTokens: 0, wasInitiallyOverBudget: false, wasStillOverBudgetAfterTrimming: false, wasTrimmed: false }
 
 		const { overridesOfModel } = this.voidSettingsService.state
@@ -289,16 +316,17 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		const { providerName, modelName } = modelSelection
 		const {
 			specialToolFormat,
-			contextWindow,
+			contextWindow: catalogContextWindow,
 			supportsSystemMessage,
 			supportsVision,
 			supportsPDF,
 			recognizedModelName,
 		} = getModelCapabilities(providerName, modelName, overridesOfModel)
+		const contextWindow = this._effectiveContextWindow(modelSelection, catalogContextWindow)
 
 		const { disableSystemMessage } = this.voidSettingsService.state.globalSettings;
 		// includes the guidelines and project memory, in cache-friendly order
-		const systemMessage = await this._chatSystemMessage(turnId, chatMode, specialToolFormat, !!disableSystemMessage)
+		const systemMessage = await this._chatSystemMessage(turnId, chatMode, specialToolFormat, !!disableSystemMessage, subagent, Math.floor(contextWindow * MEMORY_SHARE_OF_CONTEXT))
 
 		const modelSelectionOptions = this.voidSettingsService.state.optionsOfModelSelection['Chat'][modelSelection.providerName]?.[modelSelection.modelName]
 

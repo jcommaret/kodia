@@ -48,18 +48,31 @@ export type BrowserElement = {
 	readonly: boolean;
 	checked?: boolean;
 	options?: string[]; // for <select>
+	// rendered (not display:none / visibility:hidden / opacity:0, and has a size)
+	visible: boolean;
+	// visible and at least partly inside the current viewport
+	inViewport: boolean;
 	// bounding box in CSS pixels of the viewport, when available
 	bbox?: { x: number; y: number; width: number; height: number };
 };
 
+// A layout defect a user would see, found by measuring the rendered page (not by looking at a screenshot).
+export type BrowserLayoutIssue = {
+	kind: 'horizontal-overflow' | 'covered' | 'offscreen' | 'clipped-text';
+	selector: string;
+	detail: string;
+};
+
+// What the in-page inspection script returns.
 export type BrowserPageInfo = {
 	url: string;
 	title: string;
 	text: string; // visible text, collapsed whitespace
 	elements: BrowserElement[];
+	totalElements: number; // interactive elements on the page (elements may be capped)
 	forms: { selector: string; action?: string; method?: string }[];
-	consoleErrors: number; // count of uncaught console errors captured since last inspect
-	networkFailures: number;
+	viewport: BrowserViewport;
+	layoutIssues: BrowserLayoutIssue[];
 };
 
 export type ConsoleMessage = {
@@ -84,8 +97,9 @@ export type DownloadInfo = {
 	url: string;
 	suggestedFilename: string;
 	status: 'in_progress' | 'completed' | 'failed' | 'cancelled';
-	// absolute file path on disk when completed (may be empty while in progress)
+	// absolute file path on disk, only once completed
 	path?: string;
+	sizeBytes?: number;
 	failureText?: string;
 };
 
@@ -105,6 +119,12 @@ export type BrowserTabResult = {
 	tabId: string;
 	url: string;
 	title: string;
+	// HTTP status of the main document, when one was loaded over HTTP(S)
+	status?: number;
+	// set when the page failed to load or answered with HTTP >= 400
+	loadError?: string;
+	// click / submit only: whether the action navigated to a new document
+	navigated?: boolean;
 };
 
 export type BrowserScreenshotResult = {
@@ -113,16 +133,25 @@ export type BrowserScreenshotResult = {
 	width: number;
 	height: number;
 	type: ScreenshotType;
+	// the PNG on disk
+	path: string;
 };
 
 export type BrowserInspectResult = {
 	url: string;
 	title: string;
+	status?: number;
+	loadError?: string;
 	text: string;
 	elements: BrowserElement[];
+	totalElements: number;
 	forms: { selector: string; action?: string; method?: string }[];
-	consoleErrors: number;
+	viewport: BrowserViewport;
+	layoutIssues: BrowserLayoutIssue[];
+	consoleErrors: number; // errors captured since the current document started loading
+	recentConsoleErrors: string[];
 	networkFailures: number;
+	recentNetworkFailures: string[];
 };
 
 export interface IBrowserService {
@@ -149,7 +178,7 @@ export interface IBrowserService {
 	inspectPage(sessionId: string, tabId: string): Promise<BrowserInspectResult>;
 
 	// --- element interaction ---
-	clickElement(sessionId: string, tabId: string, selector: string): Promise<void>;
+	clickElement(sessionId: string, tabId: string, selector: string): Promise<BrowserTabResult>;
 	fillElement(sessionId: string, tabId: string, selector: string, text: string): Promise<void>;
 	selectOption(sessionId: string, tabId: string, selector: string, value: string): Promise<void>;
 	checkElement(sessionId: string, tabId: string, selector: string, checked: boolean): Promise<void>;

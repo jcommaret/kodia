@@ -74,5 +74,6 @@ export interface IEditCodeService {
 
 	// testDiffs(): void;
 	getVoidFileSnapshot(uri: URI): VoidFileSnapshot;
-	restoreVoidFileSnapshot(uri: URI, snapshot: VoidFileSnapshot): void;
+	/** resolves once the model is restored and saved to disk */
+	restoreVoidFileSnapshot(uri: URI, snapshot: VoidFileSnapshot): Promise<void>;
 }

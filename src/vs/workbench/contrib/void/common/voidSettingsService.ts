@@ -443,6 +443,9 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			// add autoAcceptLLMChanges feature
 			if (readS.globalSettings.autoAcceptLLMChanges === undefined) readS.globalSettings.autoAcceptLLMChanges = false;
 
+			// add verifyBeforeFinishing (evidence-based completion), on by default
+			if (readS.globalSettings.verifyBeforeFinishing === undefined) readS.globalSettings.verifyBeforeFinishing = defaultGlobalSettings.verifyBeforeFinishing;
+
 			if (readS.globalSettings.autoSetupMlx === undefined) {
 				readS.globalSettings.autoSetupMlx = isMacintosh;
 			}

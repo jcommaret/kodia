@@ -12,6 +12,9 @@ import { IFileService } from '../../../../platform/files/common/files.js'
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js'
 import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js'
 import { IBrowserService } from '../common/browserServiceTypes.js'
+import { formatBrowserInspection, formatBrowserPage } from '../common/browserFormatting.js'
+import { formatSubagentReport } from '../common/subagents.js'
+import { formatCodeSearch, formatIndexStats, formatLiteralSearch } from '../common/codeIndexFormatting.js'
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js'
 import { QueryBuilder } from '../../../services/search/common/queryBuilder.js'
 import { ISearchService } from '../../../services/search/common/search.js'
@@ -19,6 +22,8 @@ import { IEditCodeService } from './editCodeServiceInterface.js'
 import { ITerminalToolService } from './terminalToolService.js'
 import { IGitToolService } from './gitToolService.js'
 import { ITestToolService } from './testToolService.js'
+import { TestRunResultData } from '../common/testServiceTypes.js'
+import { DebugStopInfo } from '../common/debugServiceTypes.js'
 import { IDebugToolService } from '../common/debugServiceTypes.js'
 import { IDebuggerActivityService, DebuggerActivityType } from '../common/debuggerActivityServiceTypes.js'
 import { LintErrorItem, BuiltinToolCallParams, BuiltinToolResultType, BuiltinToolName, CodeLocation, NotebookCellOutput } from '../common/toolsServiceTypes.js'
@@ -34,7 +39,7 @@ import { IVoidSettingsService } from '../common/voidSettingsService.js'
 import { generateUuid } from '../../../../base/common/uuid.js'
 import { IProjectMemoryService } from '../common/projectMemoryService.js'
 import { resolveCwdUri } from '../common/pathSecurity.js';
-import { wrapCommandForShell, wrapCommandForInteractiveShell } from '../common/terminalUtils.js';
+import { wrapCommandForShell, wrapCommandForInteractiveShell, terminalCommandOutcome } from '../common/terminalUtils.js';
 import { TaskStatus, getPlanProgress, formatTaskPlanForLLM } from '../common/autonomousTask.js';
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
@@ -46,6 +51,7 @@ import { INotebookService } from '../../notebook/common/notebookService.js'
 import { INotebookKernelService } from '../../notebook/common/notebookKernelService.js'
 import { INotebookExecutionService } from '../../notebook/common/notebookExecutionService.js'
 import { VSBuffer } from '../../../../base/common/buffer.js'
+import type { GitStepResult } from '../common/gitOperations.js'
 
 
 // tool use for AI
@@ -216,6 +222,47 @@ const withLanguageServerTimeout = async <T>(run: (token: CancellationToken) => P
 const noLanguageServerMessage = (what: string) => `No language server provides ${what} here, so this tool can't answer. Use search_for_files or search_in_file instead.`
 
 
+/** Where the program is now, as reported by the debug session (stopped where/why, ended, or still running). */
+const formatDebugStop = (s: DebugStopInfo): string => {
+	if (s.state === 'terminated') return 'The program has ended (debug session terminated).'
+	if (s.state === 'running') return `The program is running and has not stopped${s.waitedMs ? ` within ${Math.round(s.waitedMs / 1000)}s` : ''} (no breakpoint hit yet). Use debug_pause to stop it, or set a breakpoint.`
+	const where = s.location ? ` in ${s.location.name} at ${s.location.sourcePath ?? '<no source>'}:${s.location.line}:${s.location.column} (frame ${s.location.frameId})` : ''
+	return `Stopped (reason: ${s.reason ?? 'unknown'})${where}, thread ${s.threadId}.${s.description ? ` ${s.description}.` : ''}${s.text ? `\nException: ${s.text}` : ''}`
+}
+
+// Debug thread ids are adapter-specific (debugpy, js-debug, ... do not use 1). Omitted → the service picks the
+// stopped (or only) thread; never a guessed id.
+const validateOptionalThreadId = (v: unknown): number | undefined => {
+	if (v === undefined || v === null || v === '') return undefined
+	const n = Number(v)
+	if (!Number.isInteger(n) || n < 0) throw new Error(`Invalid LLM output: thread_id must be an integer thread id from debug_list_threads, got ${JSON.stringify(v)}.`)
+	return n
+}
+
+// git_stage / git_unstage: models send an array, a JSON-encoded array, or a single path. Silently turning anything
+// else into [] made "Staged 0 file(s)" look like success.
+const validateGitPaths = (pathsUnknown: unknown): string[] => {
+	let value = pathsUnknown
+	if (typeof value === 'string' && value.trim().startsWith('[')) {
+		try { value = JSON.parse(value) } catch { /* treat as a single path */ }
+	}
+	const paths = (Array.isArray(value) ? value : typeof value === 'string' ? [value] : []).map(p => String(p).trim()).filter(p => p.length > 0)
+	if (paths.length === 0) throw new Error(`Invalid LLM output: "paths" must list at least one file path. Got: ${JSON.stringify(pathsUnknown)}`)
+	return paths
+}
+
+// revert / cherry-pick / rebase / continue: a stop on conflicts is a result the model must act on, not a success
+const stringifyGitStep = (what: string, r: GitStepResult): string => {
+	const lines = [r.result]
+	if (r.inProgress) {
+		lines.push(`${what} stopped: the ${r.inProgress} is in progress with ${r.conflicted.length} conflicted file(s)${r.conflicted.length ? ':' : '.'}`, ...r.conflicted.map(f => `  !! ${f}`))
+		lines.push('Resolve the conflicts, git_stage the files, then git_continue — or git_abort to undo it.')
+	} else {
+		lines.push(`${what} done. HEAD is ${r.head ?? '(none)'}.`)
+	}
+	return lines.join('\n')
+}
+
 const checkIfIsFolder = (uriStr: string) => {
 	uriStr = uriStr.trim()
 	if (uriStr.endsWith('/') || uriStr.endsWith('\\')) return true
@@ -270,6 +317,8 @@ export class ToolsService implements IToolsService {
 		const webFetchService = ProxyChannel.toService<IKodiaWebFetchService>(mainProcessService.getChannel('void-channel-webFetch'))
 		const webSearchService = ProxyChannel.toService<IWebSearchService>(mainProcessService.getChannel('void-channel-webSearch'))
 		const browserService = ProxyChannel.toService<IBrowserService>(mainProcessService.getChannel('void-channel-browser'))
+		const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+		const workspaceFolderPaths = () => workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
 
 		const recentPages = new Map<string, WebFetchResult>()
 		const fetchPage = async (url: string) => {
@@ -761,18 +810,18 @@ export class ToolsService implements IToolsService {
 			},
 			code_semantic_search: (params: RawToolParamsObj) => {
 				const query = validateStr('query', params.query)
-				const limit = params.limit === undefined || params.limit === null ? 10 : Number(params.limit)
-				return { query, limit }
+				if (!query.trim()) throw new Error('Invalid LLM output: query must not be empty.')
+				return { query, limit: validateNumber(params.limit, { default: 10 }) ?? 10 }
 			},
 			code_keyword_search: (params: RawToolParamsObj) => {
 				const query = validateStr('query', params.query)
-				const limit = params.limit === undefined || params.limit === null ? 10 : Number(params.limit)
-				return { query, limit }
+				if (!query.trim()) throw new Error('Invalid LLM output: query must not be empty.')
+				return { query, limit: validateNumber(params.limit, { default: 30 }) ?? 30 }
 			},
 			code_hybrid_search: (params: RawToolParamsObj) => {
 				const query = validateStr('query', params.query)
-				const limit = params.limit === undefined || params.limit === null ? 10 : Number(params.limit)
-				return { query, limit }
+				if (!query.trim()) throw new Error('Invalid LLM output: query must not be empty.')
+				return { query, limit: validateNumber(params.limit, { default: 10 }) ?? 10 }
 			},
 			code_index_stats: () => ({}),
 			code_index_clear: () => ({}),
@@ -789,10 +838,21 @@ export class ToolsService implements IToolsService {
 				return { sessionId }
 			},
 			debug_start_session: (params: RawToolParamsObj) => {
-				const configurationName = validateStr('configurationName', params.configuration_name)
+				const configurationName = validateOptionalStr('configurationName', params.configuration_name) ?? undefined
 				const folder = validateOptionalStr('folder', params.folder) ?? undefined
 				const noDebug = validateBoolean(params.no_debug, { default: false })
-				return { configurationName, folder, noDebug }
+				let configuration: Record<string, unknown> | undefined
+				const raw: unknown = params.configuration
+				if (raw !== undefined && raw !== null && raw !== '') {
+					let value = raw
+					if (typeof value === 'string') {
+						try { value = JSON.parse(value) } catch { throw new Error(`Invalid LLM output: "configuration" must be a JSON object, e.g. {"type":"node","request":"launch","program":"\${workspaceFolder}/app.js"}.`) }
+					}
+					if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid LLM output: "configuration" must be an object.`)
+					configuration = value as Record<string, unknown>
+				}
+				if (!configurationName && !configuration) throw new Error(`Invalid LLM output: give "configuration_name" (from debug_list_configurations) or an inline "configuration".`)
+				return { configurationName, folder, noDebug, configuration }
 			},
 			debug_attach_session: (params: RawToolParamsObj) => {
 				const configurationName = validateStr('configurationName', params.configuration_name)
@@ -831,32 +891,32 @@ export class ToolsService implements IToolsService {
 			debug_list_breakpoints: () => ({}),
 			debug_continue: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
-				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				const threadId = validateOptionalThreadId(params.thread_id)
 				return { sessionId, threadId }
 			},
 			debug_pause: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
-				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				const threadId = validateOptionalThreadId(params.thread_id)
 				return { sessionId, threadId }
 			},
 			debug_step_over: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
-				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				const threadId = validateOptionalThreadId(params.thread_id)
 				return { sessionId, threadId }
 			},
 			debug_step_into: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
-				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				const threadId = validateOptionalThreadId(params.thread_id)
 				return { sessionId, threadId }
 			},
 			debug_step_out: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
-				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				const threadId = validateOptionalThreadId(params.thread_id)
 				return { sessionId, threadId }
 			},
 			debug_get_stack_trace: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
-				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				const threadId = validateOptionalThreadId(params.thread_id)
 				const startFrame = params.start_frame === undefined || params.start_frame === null ? 0 : Number(params.start_frame)
 				const levels = params.levels === undefined || params.levels === null ? 50 : Number(params.levels)
 				return { sessionId, threadId, startFrame, levels }
@@ -876,7 +936,7 @@ export class ToolsService implements IToolsService {
 			},
 			debug_get_exception_info: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
-				const threadId = params.thread_id === undefined || params.thread_id === null ? 1 : Number(params.thread_id)
+				const threadId = validateOptionalThreadId(params.thread_id)
 				return { sessionId, threadId }
 			},
 			debug_evaluate_expression: (params: RawToolParamsObj) => {
@@ -1055,14 +1115,10 @@ export class ToolsService implements IToolsService {
 				return { branch_name: branchName }
 			},
 			git_stage: (params: RawToolParamsObj) => {
-				const { paths: pathsUnknown } = params
-				const paths = Array.isArray(pathsUnknown) ? pathsUnknown.map(String) : []
-				return { paths }
+				return { paths: validateGitPaths(params.paths) }
 			},
 			git_unstage: (params: RawToolParamsObj) => {
-				const { paths: pathsUnknown } = params
-				const paths = Array.isArray(pathsUnknown) ? pathsUnknown.map(String) : []
-				return { paths }
+				return { paths: validateGitPaths(params.paths) }
 			},
 			git_commit: (params: RawToolParamsObj) => {
 				const { message: messageUnknown, amend: amendUnknown } = params
@@ -1107,6 +1163,31 @@ export class ToolsService implements IToolsService {
 				const path = validateOptionalStr('path', pathUnknown)
 				return { commit, path }
 			},
+			git_revert: (params: RawToolParamsObj) => ({ commit: validateStr('commit', params.commit) }),
+			git_cherry_pick: (params: RawToolParamsObj) => ({ commit: validateStr('commit', params.commit) }),
+			git_rebase: (params: RawToolParamsObj) => ({ onto: validateStr('onto', params.onto) }),
+			git_continue: () => ({}),
+			git_abort: () => ({}),
+			git_reset: (params: RawToolParamsObj) => {
+				const ref = validateStr('ref', params.ref)
+				const mode = (validateOptionalStr('mode', params.mode) ?? 'mixed').trim().toLowerCase()
+				if (mode !== 'soft' && mode !== 'mixed' && mode !== 'hard') { throw new Error(`Invalid LLM output: mode must be "soft", "mixed" or "hard", got "${mode}".`) }
+				return { ref, mode }
+			},
+			git_tag_list: () => ({}),
+			git_tag_create: (params: RawToolParamsObj) => ({
+				name: validateStr('name', params.name),
+				ref: validateOptionalStr('ref', params.ref),
+				message: validateOptionalStr('message', params.message),
+			}),
+			git_remote_list: () => ({}),
+			git_worktree_list: () => ({}),
+			git_worktree_add: (params: RawToolParamsObj) => ({
+				path: validateStr('path', params.path),
+				branch: validateStr('branch', params.branch),
+				new_branch: validateBoolean(params.new_branch, { default: false }),
+				start_point: validateOptionalStr('start_point', params.start_point),
+			}),
 
 			// Test discovery and execution (Stage 3)
 			test_discover: () => {
@@ -1436,8 +1517,7 @@ export class ToolsService implements IToolsService {
 				return { result: { sessions } }
 			},
 			browser_new_tab: async ({ sessionId, url }) => {
-				const result = await browserService.newTab(sessionId, { url })
-				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+				return { result: await browserService.newTab(sessionId, { url }) }
 			},
 			browser_list_tabs: async ({ sessionId }) => {
 				const tabs = await browserService.listTabs(sessionId)
@@ -1452,28 +1532,22 @@ export class ToolsService implements IToolsService {
 				return { result: {} }
 			},
 			browser_navigate: async ({ sessionId, tabId, url }) => {
-				const result = await browserService.navigate(sessionId, tabId, url)
-				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+				return { result: await browserService.navigate(sessionId, tabId, url) }
 			},
 			browser_back: async ({ sessionId, tabId }) => {
-				const result = await browserService.goBack(sessionId, tabId)
-				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+				return { result: await browserService.goBack(sessionId, tabId) }
 			},
 			browser_forward: async ({ sessionId, tabId }) => {
-				const result = await browserService.goForward(sessionId, tabId)
-				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+				return { result: await browserService.goForward(sessionId, tabId) }
 			},
 			browser_reload: async ({ sessionId, tabId }) => {
-				const result = await browserService.reload(sessionId, tabId)
-				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+				return { result: await browserService.reload(sessionId, tabId) }
 			},
 			browser_inspect_page: async ({ sessionId, tabId }) => {
-				const result = await browserService.inspectPage(sessionId, tabId)
-				return { result: { url: result.url, title: result.title, text: result.text, elements: result.elements, forms: result.forms, consoleErrors: result.consoleErrors, networkFailures: result.networkFailures } }
+				return { result: await browserService.inspectPage(sessionId, tabId) }
 			},
 			browser_click_element: async ({ sessionId, tabId, selector }) => {
-				await browserService.clickElement(sessionId, tabId, selector)
-				return { result: {} }
+				return { result: await browserService.clickElement(sessionId, tabId, selector) }
 			},
 			browser_fill_element: async ({ sessionId, tabId, selector, text }) => {
 				await browserService.fillElement(sessionId, tabId, selector, text)
@@ -1488,8 +1562,7 @@ export class ToolsService implements IToolsService {
 				return { result: {} }
 			},
 			browser_submit_form: async ({ sessionId, tabId, selector }) => {
-				const result = await browserService.submitForm(sessionId, tabId, selector)
-				return { result: { tabId: result.tabId, url: result.url, title: result.title } }
+				return { result: await browserService.submitForm(sessionId, tabId, selector) }
 			},
 			browser_wait_for_element: async ({ sessionId, tabId, selector, timeoutMs }) => {
 				const result = await browserService.waitForElement(sessionId, tabId, selector, { timeoutMs })
@@ -1501,7 +1574,7 @@ export class ToolsService implements IToolsService {
 			},
 			browser_screenshot: async ({ sessionId, tabId, type, selector }) => {
 				const result = await browserService.takeScreenshot(sessionId, tabId, { type, selector })
-				return { result: { dataUrl: result.dataUrl, width: result.width, height: result.height, type: result.type } }
+				return { result: { dataUrl: result.dataUrl, width: result.width, height: result.height, type: result.type, path: result.path } }
 			},
 			browser_console: async ({ sessionId, tabId, level, limit }) => {
 				const messages = await browserService.getConsoleMessages(sessionId, tabId, { level, limit })
@@ -1535,17 +1608,8 @@ export class ToolsService implements IToolsService {
 					terminalId: `dep-install-${Date.now()}`,
 				})
 				void interrupt
-				const result = await resPromise
-				const output = result.result
-				return {
-					result: {
-						command,
-						cwd: cwdPath ?? '',
-						success: true,
-						output,
-						exit_code: 0,
-					},
-				}
+				const { success, exit_code, output } = terminalCommandOutcome(await resPromise)
+				return { result: { command, cwd: cwdPath ?? '', success, output, exit_code } }
 			},
 			db_migrate: async ({ command, cwd }) => {
 				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
@@ -1557,17 +1621,8 @@ export class ToolsService implements IToolsService {
 					terminalId: `db-migrate-${Date.now()}`,
 				})
 				void interrupt
-				const result = await resPromise
-				const output = result.result
-				return {
-					result: {
-						command,
-						cwd: cwdPath ?? '',
-						success: true,
-						output,
-						exit_code: 0,
-					},
-				}
+				const { success, exit_code, output } = terminalCommandOutcome(await resPromise)
+				return { result: { command, cwd: cwdPath ?? '', success, output, exit_code } }
 			},
 			lint_run: async ({ command, cwd }) => {
 				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
@@ -1579,19 +1634,11 @@ export class ToolsService implements IToolsService {
 					terminalId: `lint-run-${Date.now()}`,
 				})
 				void interrupt
-				const result = await resPromise
-				const output = result.result
-				const errorsFound = (output.match(/error/gi) || []).length
-				return {
-					result: {
-						command,
-						cwd: cwdPath ?? '',
-						success: errorsFound === 0,
-						output,
-						exit_code: errorsFound > 0 ? 1 : 0,
-						errors_found: errorsFound,
-					},
-				}
+				// success is the linter's real exit code; counting the word "error" in its output is only a hint
+				// (it matched e.g. "0 errors" and missed failures worded otherwise)
+				const { success, exit_code, output } = terminalCommandOutcome(await resPromise)
+				const errorsFound = output.split('\n').filter(line => /\berror\b/i.test(line) && !/\b0 errors?\b/i.test(line)).length
+				return { result: { command, cwd: cwdPath ?? '', success, output, exit_code, errors_found: errorsFound } }
 			},
 			log_read: async ({ path, lines }) => {
 				try {
@@ -1855,41 +1902,28 @@ export class ToolsService implements IToolsService {
 			},
 
 			// --- Code Index & Semantic Search ---
+			// the index lives in the main process and follows the workspace folders (was: indexed the main process's cwd)
 			code_index: async () => {
-				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
-				const stats = await codeIndexService.indexWorkspace()
-				return { result: { totalFiles: stats.totalFiles, totalChunks: stats.totalChunks, lastIndexed: stats.lastIndexed } }
+				return { result: await codeIndexService.indexWorkspace(workspaceFolderPaths()) }
 			},
-			code_index_file: async (params: any) => {
-				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
-				const uri = URI.file(params.uri)
-				const contents = await this.fileService.readFile(uri)
-				const content = contents.value.toString()
-				await codeIndexService.indexFile(uri, content)
-				return { result: { indexed: true, filePath: uri.fsPath } }
+			code_index_file: async ({ uri }) => {
+				return { result: { indexed: await codeIndexService.indexFile(uri.fsPath), filePath: uri.fsPath } }
 			},
-			code_semantic_search: async ({ query, limit }: any) => {
-				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
-				const results = await codeIndexService.semanticSearch(query, limit)
-				return { result: { results } }
+			code_semantic_search: async ({ query, limit }) => {
+				// re-rank by meaning with NVIDIA's reranker only when the chat model is NVIDIA's: the code already goes there
+				const rerank = this.voidSettingsService.state.modelSelectionOfFeature['Chat']?.providerName === 'nvidia'
+				return { result: { query, ...await codeIndexService.search(workspaceFolderPaths(), query, limit, { rerank }) } }
 			},
-			code_keyword_search: async ({ query, limit }: any) => {
-				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
-				const results = await codeIndexService.keywordSearch(query, limit)
-				return { result: { results } }
+			code_keyword_search: async ({ query, limit }) => {
+				return { result: { query, ...await codeIndexService.findLiteral(workspaceFolderPaths(), query, limit) } }
 			},
-			code_hybrid_search: async ({ query, limit }: any) => {
-				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
-				const results = await codeIndexService.hybridSearch(query, limit)
-				return { result: { results } }
+			code_hybrid_search: async ({ query, limit }) => { // kept for older threads: the same ranked search
+				return { result: { query, ...await codeIndexService.search(workspaceFolderPaths(), query, limit) } }
 			},
 			code_index_stats: async () => {
-				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
-				const stats = await codeIndexService.getStats()
-				return { result: stats }
+				return { result: await codeIndexService.getStats() }
 			},
 			code_index_clear: async () => {
-				const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 				await codeIndexService.clearIndex()
 				return { result: { cleared: true } }
 			},
@@ -1931,16 +1965,13 @@ export class ToolsService implements IToolsService {
 					}
 				)
 			},
-			debug_start_session: async ({ configurationName, folder, noDebug }) => {
+			debug_start_session: async ({ configurationName, folder, noDebug, configuration }) => {
 				return withDebugActivity(
 					'start_session',
 					'Start debug session',
-					`Starting debug session "${configurationName}"`,
+					`Starting debug session "${configurationName ?? `${configuration?.type} ${configuration?.request}`}"`,
 					undefined,
-					async () => {
-						const result = await this.debugToolService.startSession(configurationName, folder, noDebug)
-						return { result }
-					}
+					async () => ({ result: await this.debugToolService.startSession(configurationName, folder, noDebug, configuration) })
 				)
 			},
 			debug_attach_session: async ({ configurationName, folder }) => {
@@ -2033,10 +2064,7 @@ export class ToolsService implements IToolsService {
 					'Continue execution',
 					'Continuing debug execution',
 					sessionId,
-					async () => {
-						await this.debugToolService.continue(sessionId, threadId)
-						return { result: {} }
-					}
+					async () => ({ result: await this.debugToolService.continue(sessionId, threadId) })
 				)
 			},
 			debug_pause: async ({ sessionId, threadId }) => {
@@ -2045,10 +2073,7 @@ export class ToolsService implements IToolsService {
 					'Pause execution',
 					'Pausing debug execution',
 					sessionId,
-					async () => {
-						await this.debugToolService.pause(sessionId, threadId)
-						return { result: {} }
-					}
+					async () => ({ result: await this.debugToolService.pause(sessionId, threadId) })
 				)
 			},
 			debug_step_over: async ({ sessionId, threadId }) => {
@@ -2057,10 +2082,7 @@ export class ToolsService implements IToolsService {
 					'Step over',
 					'Stepping over execution',
 					sessionId,
-					async () => {
-						await this.debugToolService.stepOver(sessionId, threadId)
-						return { result: {} }
-					}
+					async () => ({ result: await this.debugToolService.stepOver(sessionId, threadId) })
 				)
 			},
 			debug_step_into: async ({ sessionId, threadId }) => {
@@ -2069,10 +2091,7 @@ export class ToolsService implements IToolsService {
 					'Step into',
 					'Stepping into execution',
 					sessionId,
-					async () => {
-						await this.debugToolService.stepInto(sessionId, threadId)
-						return { result: {} }
-					}
+					async () => ({ result: await this.debugToolService.stepInto(sessionId, threadId) })
 				)
 			},
 			debug_step_out: async ({ sessionId, threadId }) => {
@@ -2081,10 +2100,7 @@ export class ToolsService implements IToolsService {
 					'Step out',
 					'Stepping out of execution',
 					sessionId,
-					async () => {
-						await this.debugToolService.stepOut(sessionId, threadId)
-						return { result: {} }
-					}
+					async () => ({ result: await this.debugToolService.stepOut(sessionId, threadId) })
 				)
 			},
 			debug_list_threads: async ({ sessionId }) => {
@@ -2302,197 +2318,117 @@ export class ToolsService implements IToolsService {
 			get_task_plan: async () => { throw new Error('get_task_plan handled in chatThreadService') },
 
 			// Git operations (Stage 2)
+			// Every git_* tool runs real git in the main process (no shell) and throws git's own error on failure.
 			git_status: async () => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					return { result: { status: { rootUri: '', branch: null, upstream: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [], conflicted: [], mergeInProgress: false } } }
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					return { result: { status: { rootUri: workspace.folders[0].uri.fsPath, branch: null, upstream: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [], conflicted: [], mergeInProgress: false } } }
-				}
-				const status = await this.gitToolService.getRepositoryStatus(repo)
-				return { result: { status } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: { status: await git.ops.status(root) } }
 			},
 			git_diff: async ({ ref, path, staged }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const diff = await this.gitToolService.getRepositoryDiff(repo, ref ?? undefined, path ?? undefined, staged ?? false)
-				return { result: { diff } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: { diff: await git.ops.diff(root, { ref, path, staged: staged ?? false }) } }
 			},
 			git_log: async ({ max_count: maxCount, path }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const log = await this.gitToolService.getRepositoryLog(repo, maxCount ?? undefined, path ?? null)
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				const log = await git.ops.log(root, { maxCount, path })
 				return { result: { commits: log.commits, total: log.total } }
 			},
 			git_branch_list: async () => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					return { result: { branches: [], current: null } }
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					return { result: { branches: [], current: null } }
-				}
-				const branches = await this.gitToolService.getRepositoryBranches(repo)
-				return { result: branches }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.branches(root) }
 			},
 			git_branch_create: async ({ branch_name: branchName, start_point: startPoint }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitBranchCreate(branchName, startPoint ?? undefined)
-				return { result: { branch_name: result.branchName } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: { branch_name: (await git.ops.createBranch(root, branchName, startPoint)).branchName } }
 			},
 			git_branch_switch: async ({ branch_name: branchName }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitBranchSwitch(branchName)
-				return { result: { branch_name: result.branchName } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: { branch_name: (await git.ops.switchBranch(root, branchName)).branchName } }
 			},
 			git_stage: async ({ paths }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitStage(repo.rootUri, paths)
-				return { result: { staged: result.staged } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: { staged: (await git.ops.stage(root, paths)).staged } }
 			},
 			git_unstage: async ({ paths }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitUnstage(repo.rootUri, paths)
-				return { result: { unstaged: result.unstaged } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: { unstaged: (await git.ops.unstage(root, paths)).unstaged } }
 			},
 			git_commit: async ({ message, amend }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitCommit(repo.rootUri, message, amend ?? undefined)
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				const result = await git.ops.commit(root, message, amend ?? false)
 				return { result: { commit_hash: result.commitHash, message: result.message } }
 			},
 			git_fetch: async ({ remote }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitFetch(repo.rootUri, remote ?? undefined)
-				return { result: { result: result.result } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.fetch(root, remote) }
 			},
 			git_pull: async ({ remote, branch }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitPull(repo.rootUri, remote ?? undefined, branch ?? undefined)
-				return { result: { result: result.result } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.pull(root, remote, branch) }
 			},
 			git_push: async ({ remote, branch, force }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitPush(repo.rootUri, remote ?? undefined, branch ?? undefined, force ?? undefined)
-				return { result: { result: result.result } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.push(root, remote, branch, force ?? false) }
 			},
 			git_merge: async ({ branch }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitMerge(repo.rootUri, branch)
-				return { result: { result: result.result, merge_in_progress: result.mergeInProgress } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				const result = await git.ops.merge(root, branch)
+				return { result: { result: result.result, merge_in_progress: result.mergeInProgress, conflicted: result.conflicted } }
 			},
 			git_stash: async ({ message }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitStash(repo.rootUri, message ?? undefined)
-				return { result: { result: result.result } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.stash(root, message) }
 			},
 			git_stash_pop: async () => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitStashPop(repo.rootUri)
-				return { result: { result: result.result } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.stashPop(root) }
 			},
 			git_show: async ({ commit, path }) => {
-				const workspace = workspaceContextService.getWorkspace()
-				if (workspace.folders.length === 0) {
-					throw new Error('No workspace folder is open.')
-				}
-				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
-				if (!repo) {
-					throw new Error('No Git repository found in the workspace.')
-				}
-				const result = await this.gitToolService.gitShow(repo.rootUri, commit, path ?? undefined)
-				return { result: { commit: result.commit, message: result.message, diff: result.diff } }
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.show(root, commit, path) }
+			},
+			git_revert: async ({ commit }) => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.revert(root, commit) }
+			},
+			git_cherry_pick: async ({ commit }) => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.cherryPick(root, commit) }
+			},
+			git_rebase: async ({ onto }) => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.rebase(root, onto) }
+			},
+			git_continue: async () => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.continueOperation(root) }
+			},
+			git_abort: async () => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.abortOperation(root) }
+			},
+			git_reset: async ({ ref, mode }) => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.reset(root, ref, mode) }
+			},
+			git_tag_list: async () => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.tags(root) }
+			},
+			git_tag_create: async ({ name, ref, message }) => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.createTag(root, name, ref, message) }
+			},
+			git_remote_list: async () => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.remotes(root) }
+			},
+			git_worktree_list: async () => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.worktrees(root) }
+			},
+			git_worktree_add: async ({ path, branch, new_branch: newBranch, start_point: startPoint }) => {
+				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
+				return { result: await git.ops.addWorktree(root, path, branch, newBranch, startPoint) }
 			},
 
 			// Test discovery and execution (Stage 3)
@@ -2806,21 +2742,27 @@ export class ToolsService implements IToolsService {
 			return lines.join('\n')
 		}
 
-		const _formatTestResults = (results: { passed: number; failed: number; skipped: number; errored: number; total: number; duration?: number; completed: boolean; testResults: Array<{ state: string; label: string; message?: string; stackTrace?: string; uri?: string; line?: number; duration?: number }> }): string => {
+		const _formatTestResults = (results: TestRunResultData): string => {
 			const { passed, failed, skipped, errored, total, duration, completed, testResults } = results
 			const lines: string[] = []
-			lines.push(`Test run ${completed ? 'completed' : 'running'}`)
-			lines.push(`Results: ${passed} passed, ${failed} failed, ${skipped} skipped, ${errored} errored (${total} total)`)
-			if (duration !== undefined) lines.push(`Duration: ${duration}ms`)
-			if (testResults.length > 0) {
-				lines.push('\nTest details:')
-				for (const r of testResults.slice(0, 20)) {
-					lines.push(formatTestResult(r))
-				}
-				if (testResults.length > 20) {
-					lines.push(`\n... and ${testResults.length - 20} more tests`)
-				}
+			if (total === 0) {
+				// never let "nothing ran" read like a pass
+				lines.push(`NO TESTS WERE RUN. ${results.note ?? ''}`.trim())
+			} else {
+				lines.push(`Test run ${completed ? 'completed' : 'DID NOT COMPLETE'}${results.source === 'command' ? ` (${results.framework}, exit code ${results.exitCode ?? 'none'})` : results.source === 'vscode' ? ' (VS Code test controller)' : ''}`)
+				lines.push(`Results: ${passed} passed, ${failed} failed${errored ? ` (${errored} errored)` : ''}, ${skipped} skipped (${total} total)`)
+				if (results.note) lines.push(`Note: ${results.note}`)
 			}
+			if (results.command) lines.push(`Command: ${results.command}`)
+			if (duration !== undefined) lines.push(`Duration: ${duration}ms`)
+			// failures first, with their messages: that is what the agent acts on
+			const ordered = [...testResults].sort((a, b) => Number(a.state === 'passed' || a.state === 'skipped') - Number(b.state === 'passed' || b.state === 'skipped'))
+			if (ordered.length > 0) {
+				lines.push('\nTest details:')
+				for (const r of ordered.slice(0, 30)) lines.push(formatTestResult(r))
+				if (ordered.length > 30) lines.push(`\n... and ${ordered.length - 30} more tests`)
+			}
+			if (total === 0 && results.outputTail) lines.push(`\nRunner output (tail):\n${results.outputTail}`)
 			return lines.join('\n')
 		}
 
@@ -2923,7 +2865,7 @@ export class ToolsService implements IToolsService {
 				if (result.sessions.length === 0) return 'No active browser sessions.'
 				return result.sessions.map(s => `Session ${s.sessionId}: ${s.engine} headless=${s.headless}, tabs=${s.tabCount}`).join('\n')
 			},
-			browser_new_tab: (_params, result) => `Opened tab ${result.tabId} (${result.url}).`,
+			browser_new_tab: (_params, result) => `Opened tab ${result.tabId}: ${formatBrowserPage(result)}`,
 			browser_list_tabs: (_params, result) => {
 				if (result.tabs.length === 0) return 'No open tabs.'
 				return result.tabs.map(t => {
@@ -2935,40 +2877,20 @@ export class ToolsService implements IToolsService {
 			},
 			browser_switch_tab: (_params, result) => `Switched to tab ${result.tabId} (${result.url}).`,
 			browser_close_tab: () => 'Tab closed.',
-			browser_navigate: (_params, result) => `Navigated to ${result.url} — ${result.title || '(no title)'}`,
-			browser_back: (_params, result) => `Went back to ${result.url} — ${result.title || '(no title)'}`,
-			browser_forward: (_params, result) => `Went forward to ${result.url} — ${result.title || '(no title)'}`,
-			browser_reload: (_params, result) => `Reloaded ${result.url} — ${result.title || '(no title)'}`,
-			browser_inspect_page: (_params, result) => {
-				const lines: string[] = []
-				lines.push(`Page: ${result.title || '(no title)'}`)
-				lines.push(`URL: ${result.url}`)
-				lines.push(`Visible text:\n${result.text.slice(0, 3000)}${result.text.length > 3000 ? '...' : ''}`)
-				if (result.elements.length > 0) {
-					lines.push('\nInteractive elements:')
-					for (const e of result.elements.slice(0, 40)) {
-						const state = e.disabled ? ' disabled' : ''
-						const checked = e.checked !== undefined ? ` [${e.checked ? 'checked' : 'unchecked'}]` : ''
-						const opts = e.options && e.options.length > 0 ? ` options=[${e.options.join(', ')}]` : ''
-						lines.push(`  [${e.type}] ${e.selector} — ${e.label || '(no label)'}${state}${checked}${opts}${e.value !== undefined ? ` value="${e.value}"` : ''}`)
-					}
-					if (result.elements.length > 40) lines.push(`  ... and ${result.elements.length - 40} more elements`)
-				}
-				if (result.forms.length > 0) {
-					lines.push('\nForms:')
-					for (const f of result.forms) lines.push(`  form ${f.selector} action="${f.action ?? ''}" method="${f.method ?? ''}"`)
-				}
-				lines.push(`\nConsole errors captured: ${result.consoleErrors}, Network failures: ${result.networkFailures}`)
-				return lines.join('\n')
-			},
-			browser_click_element: () => 'Element clicked.',
+			browser_navigate: (_params, result) => `Navigated to ${formatBrowserPage(result)}`,
+			browser_back: (_params, result) => `Went back to ${formatBrowserPage(result)}`,
+			browser_forward: (_params, result) => `Went forward to ${formatBrowserPage(result)}`,
+			browser_reload: (_params, result) => `Reloaded ${formatBrowserPage(result)}`,
+			browser_inspect_page: (_params, result) => formatBrowserInspection(result),
+			browser_click_element: (_params, result) => result.navigated ? `Element clicked; the page navigated to ${formatBrowserPage(result)}` : `Element clicked (no navigation; still on ${result.url}).`,
 			browser_fill_element: () => 'Element filled.',
 			browser_select_option: () => 'Option selected.',
 			browser_check_element: () => 'Element check state changed.',
-			browser_submit_form: (_params, result) => `Form submitted (${result.url}).`,
+			browser_submit_form: (_params, result) => result.navigated ? `Form submitted; the page navigated to ${formatBrowserPage(result)}` : `Form submitted (no navigation; still on ${result.url}).`,
 			browser_wait_for_element: (_params, result) => result.found ? 'Element found.' : 'Element not found within the timeout.',
 			browser_set_viewport: (_params, result) => `Viewport resized to ${result.width}x${result.height}.`,
-			browser_screenshot: (_params, result) => `Screenshot captured (${result.type}, ${result.width}x${result.height}).`,
+			// the model only receives this text, not the image: say so, and point at what it can read instead
+			browser_screenshot: (_params, result) => `Screenshot captured (${result.type}, ${result.width}x${result.height}) and saved to ${result.path}. The image itself is not part of this result; use browser_inspect_page for the page's text, controls and measured layout problems.`,
 			browser_console: (_params, result) => {
 				if (!result.messages || result.messages.length === 0) return 'No console messages.'
 				return result.messages.map(m => `[${m.level}] ${m.text}`).join('\n')
@@ -2978,7 +2900,7 @@ export class ToolsService implements IToolsService {
 				return result.failures.map(f => `[${f.type}] ${f.url} — ${f.errorText}`).join('\n')
 			},
 			browser_download: (_params, result) => {
-				const status = result.path ? `saved to ${result.path}` : result.failureText || 'failed'
+				const status = result.status === 'completed' && result.path ? `saved to ${result.path}` : result.failureText || result.status
 				return `Download ${result.downloadId} (${result.suggestedFilename}): ${result.status} — ${status}`
 			},
 			browser_list_downloads: (_params, result) => {
@@ -3017,32 +2939,12 @@ export class ToolsService implements IToolsService {
 			},
 
 			// --- Code Index & Semantic Search ---
-			code_index: (_params, result) => {
-				const { totalFiles, totalChunks, lastIndexed } = result
-				return `Code index: ${totalFiles} files, ${totalChunks} chunks indexed${lastIndexed ? ` (indexed at ${new Date(lastIndexed).toLocaleTimeString()})` : ''}`
-			},
-			code_index_file: (_params, result) => {
-				return `Indexed file: ${result.filePath}`
-			},
-			code_semantic_search: (_params, result) => {
-				const { results } = result
-				if (!results || results.length === 0) return 'No semantic search results.'
-				return results.map(r => `${r.filePath}:${r.startLine} [${r.kind}] ${r.name} — score: ${(r.score * 100).toFixed(1)}%\n  ${r.content.slice(0, 150).replace(/\n/g, ' ')}...`).join('\n\n')
-			},
-			code_keyword_search: (_params, result) => {
-				const { results } = result
-				if (!results || results.length === 0) return 'No keyword search results.'
-				return results.map(r => `${r.filePath}:${r.startLine} [${r.kind}] ${r.name} — score: ${r.score}\n  ${r.content.slice(0, 150).replace(/\n/g, ' ')}...`).join('\n\n')
-			},
-			code_hybrid_search: (_params, result) => {
-				const { results } = result
-				if (!results || results.length === 0) return 'No hybrid search results.'
-				return results.map(r => `${r.filePath}:${r.startLine} [${r.kind}] ${r.name}\n  ${r.content.slice(0, 150).replace(/\n/g, ' ')}...`).join('\n\n')
-			},
-			code_index_stats: (_params, result) => {
-				const { totalFiles, totalChunks, lastIndexed } = result
-				return `Index stats: ${totalFiles} files, ${totalChunks} chunks${lastIndexed ? `, last indexed ${new Date(lastIndexed).toLocaleString()}` : ''}`
-			},
+			code_index: (_params, result) => formatIndexStats(result),
+			code_index_file: (_params, result) => result.indexed ? `Indexed ${result.filePath}.` : `${result.filePath} was not indexed (missing, binary, too large, or over the index limits).`,
+			code_semantic_search: (_params, result) => formatCodeSearch(result),
+			code_hybrid_search: (_params, result) => formatCodeSearch(result),
+			code_keyword_search: (_params, result) => formatLiteralSearch(result),
+			code_index_stats: (_params, result) => formatIndexStats(result),
 			code_index_clear: (_params, result) => {
 				return `Code index cleared.`
 			},
@@ -3122,8 +3024,8 @@ export class ToolsService implements IToolsService {
 			debug_get_session_status: (_params, result) => {
 				return `Session ${result.sessionId}: ${result.name}\nType: ${result.type} (${result.request})\nState: ${result.state}${result.folder ? `\nFolder: ${result.folder}` : ''}`
 			},
-			debug_start_session: (_params, result) => `Started debug session ${result.sessionId}: ${result.name} [${result.type}, ${result.request}] state=${result.state}`,
-			debug_attach_session: (_params, result) => `Attached debug session ${result.sessionId}: ${result.name} [${result.type}, ${result.request}] state=${result.state}`,
+			debug_start_session: (_params, result) => `Started debug session ${result.sessionId}: ${result.name} [${result.type}, ${result.request}]\n${formatDebugStop(result.stop)}`,
+			debug_attach_session: (_params, result) => `Attached debug session ${result.sessionId}: ${result.name} [${result.type}, ${result.request}]\n${formatDebugStop(result.stop)}`,
 			debug_stop_session: () => 'Debug session stopped.',
 			debug_restart_session: () => 'Debug session restarted.',
 			debug_set_breakpoint: (_params, result) => {
@@ -3136,11 +3038,11 @@ export class ToolsService implements IToolsService {
 				if (result.breakpoints.length === 0) return 'No breakpoints.'
 				return result.breakpoints.map(b => `  ${b.id}: ${b.uri}:${b.lineNumber} (${b.enabled ? 'enabled' : 'disabled'}, ${b.verified ? 'verified' : 'unverified'})`).join('\n')
 			},
-			debug_continue: () => 'Execution continued.',
-			debug_pause: () => 'Execution paused.',
-			debug_step_over: () => 'Stepped over.',
-			debug_step_into: () => 'Stepped into.',
-			debug_step_out: () => 'Stepped out.',
+			debug_continue: (_params, result) => formatDebugStop(result),
+			debug_pause: (_params, result) => formatDebugStop(result),
+			debug_step_over: (_params, result) => formatDebugStop(result),
+			debug_step_into: (_params, result) => formatDebugStop(result),
+			debug_step_out: (_params, result) => formatDebugStop(result),
 			debug_list_threads: (_params, result) => {
 				if (result.threads.length === 0) return 'No threads.'
 				return result.threads.map(t => `Thread ${t.threadId}: ${t.name} (${t.stateLabel}, ${t.stopped ? 'stopped' : 'running'})`).join('\n')
@@ -3305,7 +3207,7 @@ export class ToolsService implements IToolsService {
 				if (status.upstream) lines.push(`Upstream: ${status.upstream} (ahead ${status.ahead ?? 0}, behind ${status.behind ?? 0})`)
 				lines.push(`Staged: ${status.staged.length}, Unstaged: ${status.unstaged.length}, Untracked: ${status.untracked.length}`)
 				if (status.conflicted.length > 0) lines.push(`Conflicted: ${status.conflicted.length}`)
-				if (status.mergeInProgress) lines.push('Merge in progress')
+				if (status.operationInProgress) lines.push(`${status.operationInProgress[0].toUpperCase()}${status.operationInProgress.slice(1)} in progress (finish with git_continue after resolving, or git_abort)`)
 				if (status.staged.length > 0) {
 					lines.push('\nStaged:')
 					for (const f of status.staged) lines.push(`  [${f.status}] ${f.uri}`)
@@ -3386,7 +3288,9 @@ export class ToolsService implements IToolsService {
 			},
 			git_merge: (_params, result) => {
 				let msg = result.result
-				if (result.merge_in_progress) msg += '\nMerge in progress - resolve conflicts and commit.'
+				if (result.merge_in_progress) {
+					msg += `\nMerge in progress: ${result.conflicted?.length ?? 0} conflicted file(s)${result.conflicted?.length ? `:\n${result.conflicted.map(f => `  !! ${f}`).join('\n')}` : ''}\nResolve the conflicts, stage the files, then commit.`
+				}
 				return msg
 			},
 			git_stash: (_params, result) => {
@@ -3398,6 +3302,25 @@ export class ToolsService implements IToolsService {
 			git_show: (_params, result) => {
 				return `Commit ${result.commit}\n${result.message}\n\n${result.diff}`
 			},
+			git_revert: (_params, result) => stringifyGitStep('Revert', result),
+			git_cherry_pick: (_params, result) => stringifyGitStep('Cherry-pick', result),
+			git_rebase: (_params, result) => stringifyGitStep('Rebase', result),
+			git_continue: (_params, result) => stringifyGitStep(`Continued ${result.operation}`, result),
+			git_abort: (_params, result) => `Aborted the ${result.operation}. HEAD is ${result.head ?? '(none)'}.`,
+			git_reset: (_params, result) => {
+				const lines = [`Reset (${result.mode}) from ${result.previousHead} to ${result.newHead}.`]
+				if (result.detachedCommits.length) {
+					lines.push(`The branch no longer contains ${result.detachedCommits.length} commit(s):`, ...result.detachedCommits.slice(0, 20).map(c => `  ${c}`))
+					lines.push(`To undo: git_reset with ref ${result.previousHead}.`)
+				}
+				if (result.mode === 'soft') { lines.push('Their changes are staged.') } else if (result.mode === 'mixed') { lines.push('Their changes are in the working tree, unstaged.') }
+				return lines.join('\n')
+			},
+			git_tag_list: (_params, result) => result.tags.length === 0 ? 'No tags.' : result.tags.map(t => `${t.name} -> ${t.commit.slice(0, 10)}${t.annotated ? ` (annotated: ${t.subject})` : ''}`).join('\n'),
+			git_tag_create: (_params, result) => `Created tag ${result.name} at ${result.commit}.`,
+			git_remote_list: (_params, result) => result.remotes.length === 0 ? 'No remotes.' : result.remotes.map(r => `${r.name}\tfetch: ${r.fetchUrl ?? '-'}\tpush: ${r.pushUrl ?? '-'}`).join('\n'),
+			git_worktree_list: (_params, result) => result.worktrees.map(w => `${w.path}  ${w.branch ? `[${w.branch}]` : '(detached)'}  ${w.head?.slice(0, 10) ?? ''}${w.isMain ? '  (main)' : ''}${w.locked ? '  locked' : ''}${w.prunable ? '  prunable' : ''}`).join('\n'),
+			git_worktree_add: (_params, result) => `Created worktree ${result.path} on branch ${result.branch} at ${result.head}.`,
 
 			// Test discovery and execution (Stage 3)
 			test_discover: (_params, result) => {
@@ -3441,11 +3364,8 @@ export class ToolsService implements IToolsService {
 				return `Todo list: ${done}/${todos.length} done${inProgress ? `, ${inProgress} in progress` : ''}${pending ? `, ${pending} pending` : ''}.\n${lines.join('\n')}`
 			},
 
-			// Subagent delegation (OpenCode parity - roadmap Stage 6)
-			subagent: (_params, result) => {
-				const { sessionID, status, output } = result
-				return `Subagent started in session ${sessionID} (${status}). ${output}`
-			},
+			// Subagent delegation (roadmap 6); chatThreadService runs it and formats the same report
+			subagent: (_params, result) => formatSubagentReport(result),
 
 			// Notebook operations
 			read_notebook: (params, result) => {

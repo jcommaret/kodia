@@ -18,6 +18,9 @@ import type { PostHog } from 'posthog-node'
 import { OPT_OUT_KEY } from '../common/storageKeys.js';
 
 
+// Metrics are off in Kodia (the project's decision: "Force opt-out"). Turning them on would also need a key of Kodia's own.
+const METRICS_ENABLED = false
+
 const os = isWindows ? 'windows' : isMacintosh ? 'mac' : isLinux ? 'linux' : null
 const _getOSInfo = () => {
 	try {
@@ -37,7 +40,10 @@ const osInfo = _getOSInfo()
 export class MetricsMainService extends Disposable implements IMetricsService {
 	_serviceBrand: undefined;
 
-	private readonly client: Promise<PostHog>
+	// Kodia sends no metrics. Was: a PostHog client with the upstream project's key was created at startup and only
+	// told to opt out after storage was ready, so an early capture() could be queued for that third-party project with
+	// this machine's ids. Now no client exists while metrics are off, so nothing can be sent.
+	private readonly client: Promise<PostHog> | undefined
 
 	private _initProperties: object = {}
 
@@ -90,9 +96,9 @@ export class MetricsMainService extends Disposable implements IMetricsService {
 		@IApplicationStorageMainService private readonly _appStorage: IApplicationStorageMainService,
 	) {
 		super()
-		this.client = import('posthog-node').then(({ PostHog }) => new PostHog('phc_UanIdujHiLp55BkUTjB1AuBXcasVkdqRwgnwRlWESH2', {
-			host: 'https://us.i.posthog.com',
-		}))
+		this.client = METRICS_ENABLED
+			? import('posthog-node').then(({ PostHog }) => new PostHog('phc_UanIdujHiLp55BkUTjB1AuBXcasVkdqRwgnwRlWESH2', { host: 'https://us.i.posthog.com' }))
+			: undefined
 
 		this.initialize() // async
 	}
@@ -125,19 +131,14 @@ export class MetricsMainService extends Disposable implements IMetricsService {
 			properties: this._initProperties,
 		}
 
-	const didOptOut = true // Force opt-out for AI Stats
-
-	console.log('User is opted out of basic Kodia metrics?', didOptOut)
-	this.client.then(client => client.optOut())
-
-
-		console.log('Kodia posthog metrics info:', JSON.stringify(identifyMessage, null, 2))
+		void identifyMessage // (was logged on every start, machine ids included)
+		this.client?.then(client => client.optOut())
 	}
 
 
 	capture: IMetricsService['capture'] = (event, params) => {
+		if (!this.client) return
 		const capture = { distinctId: this.distinctId, event, properties: params } as const
-		// console.log('full capture:', this.distinctId)
 		this.client.then(client => client.capture(capture))
 	}
 

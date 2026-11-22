@@ -22,11 +22,19 @@ export interface TokenizerSelection {
 
 const FALLBACK_CHARS_PER_TOKEN = 4;
 
-// Map from encoding name to the AMD module path inside the `gpt-tokenizer` package.
+// Map from encoding name to the AMD module path inside the `gpt-tokenizer` package (relative to the package: was
+// 'gpt-tokenizer/dist/…', which importAMDNodeModule resolved to node_modules/gpt-tokenizer/gpt-tokenizer/dist/… —
+// a file that does not exist, so every count silently fell back to the chars/4 estimate in the app).
 const encodingModulePath: Record<TokenizerEncoding, string> = {
-	o200k_base: 'gpt-tokenizer/dist/o200k_base.js',
-	cl100k_base: 'gpt-tokenizer/dist/cl100k_base.js',
+	o200k_base: 'dist/o200k_base.js',
+	cl100k_base: 'dist/cl100k_base.js',
 };
+
+/** whether the real BPE tokenizer for an encoding has loaded (false: counts are the chars/4 estimate) */
+export const isTokenizerLoaded = (encoding: TokenizerEncoding = 'o200k_base'): boolean => !!loadedEncodings.get(encoding)?.countTokens;
+/** resolves once the encoding has loaded, or rejects with why it could not */
+export const whenTokenizerLoaded = (encoding: TokenizerEncoding = 'o200k_base'): Promise<void> => { loadEncoding(encoding); return loadPromises.get(encoding)!; };
+const loadPromises = new Map<TokenizerEncoding, Promise<void>>();
 
 // In-flight / loaded tokenizer modules keyed by encoding.
 // `importAMDNodeModule` already caches by module path, but we keep our own cache
@@ -36,15 +44,16 @@ const loadedEncodings = new Map<TokenizerEncoding, { countTokens: (text: string)
 function loadEncoding(encoding: TokenizerEncoding): void {
 	if (loadedEncodings.has(encoding)) return;
 	loadedEncodings.set(encoding, undefined);
-	void importAMDNodeModule<{ countTokens: (text: string) => number }>(
+	const p = importAMDNodeModule<{ countTokens: (text: string) => number }>(
 		'gpt-tokenizer',
 		encodingModulePath[encoding]
 	).then(mod => {
-		if (mod && typeof mod.countTokens === 'function') {
-			loadedEncodings.set(encoding, { countTokens: mod.countTokens });
-		}
-	}).catch(() => {
-		// keep using the fallback estimate
+		if (!mod || typeof mod.countTokens !== 'function') { throw new Error(`gpt-tokenizer ${encoding} has no countTokens`); }
+		loadedEncodings.set(encoding, { countTokens: mod.countTokens });
+	});
+	loadPromises.set(encoding, p);
+	p.catch(() => {
+		// keep using the fallback estimate (whenTokenizerLoaded reports why)
 		loadedEncodings.set(encoding, undefined);
 	});
 }

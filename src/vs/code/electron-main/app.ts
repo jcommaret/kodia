@@ -220,6 +220,8 @@ import { VoidSCMService } from '../../workbench/contrib/void/electron-main/voidS
 import { MlxMainService } from '../../workbench/contrib/void/electron-main/mlxMainService.js';
 import { IMlxMainService } from '../../workbench/contrib/void/common/mlxTypes.js';
 import { IVoidSCMService } from '../../workbench/contrib/void/common/voidSCMTypes.js';
+import { KodiaGitMainService } from '../../workbench/contrib/void/electron-main/kodiaGitMainService.js';
+import { IKodiaGitMainService, KODIA_GIT_CHANNEL } from '../../workbench/contrib/void/common/gitService.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
 import { IKodiaWebFetchService } from '../../workbench/contrib/void/common/webFetchTypes.js';
 import { KodiaWebFetchMainService } from '../../workbench/contrib/void/electron-main/webFetchMainService.js';
@@ -1371,6 +1373,7 @@ export class CodeApplication extends Disposable {
 		services.set(IMetricsService, new SyncDescriptor(MetricsMainService, undefined, false));
 		services.set(IVoidUpdateService, new SyncDescriptor(VoidMainUpdateService, undefined, false));
 		services.set(IVoidSCMService, new SyncDescriptor(VoidSCMService, undefined, false));
+		services.set(IKodiaGitMainService, new SyncDescriptor(KodiaGitMainService, undefined, false));
 		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
 		services.set(IKodiaWebFetchService, new SyncDescriptor(KodiaWebFetchMainService, undefined, false));
 		services.set(IWebSearchService, new SyncDescriptor(WebSearchMainService, undefined, false));
@@ -1566,6 +1569,10 @@ export class CodeApplication extends Disposable {
 		// Kodia added this
 		const voidSCMChannel = ProxyChannel.fromService(accessor.get(IVoidSCMService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-scm', voidSCMChannel);
+
+		// Kodia: git for the agent (argv-based, no shell)
+		const kodiaGitChannel = ProxyChannel.fromService(accessor.get(IKodiaGitMainService), disposables);
+		mainProcessElectronServer.registerChannel(KODIA_GIT_CHANNEL, kodiaGitChannel);
 
 		const mlxChannel = ProxyChannel.fromService(accessor.get(IMlxMainService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-mlx', mlxChannel);

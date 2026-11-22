@@ -322,6 +322,11 @@ export const AgentSection = () => {
 				settingName='includeToolLintErrors'
 				label='Show the agent the lint errors after each edit, so it can fix them'
 			/>
+			<GlobalSettingSwitch
+				settingName='verifyBeforeFinishing'
+				label='Have the agent verify its work before finishing'
+				description='After the agent changes files, Kodia asks it once to check the result against your request: read the files, run the tests or build, and fix what fails. Costs one extra model request per such turn.'
+			/>
 		</SettingGroup>
 
 		<SettingGroup title='MCP servers' description='Model Context Protocol servers give the agent more tools.'>

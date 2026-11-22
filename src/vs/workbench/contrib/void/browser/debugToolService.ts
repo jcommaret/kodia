@@ -3,14 +3,35 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
+/**
+ * The agent's debugger (roadmap 4), on VS Code's debug platform (IDebugService / IDebugSession / DAP adapters).
+ *
+ * Fixed in this version (all verified against the platform's code and a real DAP adapter):
+ * - Debug-console capture listened to `onDidCustomEvent` for 'output' events, but the platform routes output to the
+ *   REPL (raw.onDidOutput → appendToRepl); only unknown events are "custom". It captured nothing. Now: REPL elements.
+ * - `URI.parse('C:\\proj\\app.js')` reads "C:" as a scheme: breakpoints on plain file paths went to a bogus URI
+ *   (verified: scheme "C"). Breakpoint ids now use the public getId() (the old code read a TS-private field, which
+ *   happened to work at runtime).
+ * - continue/step returned immediately: the agent could not know when or where execution stopped. They now wait
+ *   (bounded) for the next stop or the end of the session and report it.
+ * - thread ids defaulted to 1 (a Node-ism); other adapters (debugpy, ...) use other ids. Omitted ids now resolve to the
+ *   stopped/only thread.
+ * - Sessions could only start from launch.json; an inline configuration is now accepted.
+ */
+
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
-import { IDebugService, State, IDebugSession, IConfig, ILaunch } from '../../debug/common/debug.js';
-import { IDebugToolService, DebugSessionInfo, DebugSessionState, DebugThread, DebugStackFrame, DebugScope, DebugVariable, DebugBreakpoint, DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, DebugConfiguration, DebugRequestType, ConsoleOutputEntry } from '../common/debugServiceTypes.js';
+import { IDebugService, State, IDebugSession, IConfig, ILaunch, IBreakpoint, IThread } from '../../debug/common/debug.js';
+import {
+	IDebugToolService, DebugSessionInfo, DebugSessionState, DebugThread, DebugStackFrame, DebugScope, DebugVariable, DebugBreakpoint,
+	DebugStackTrace, DebugEvaluateResult, DebugExceptionInfo, DebugConfiguration, DebugRequestType, ConsoleOutputEntry, DebugStopInfo,
+} from '../common/debugServiceTypes.js';
 
 const MAX_CONSOLE_OUTPUT_PER_SESSION = 500;
+const START_WAIT_MS = 15_000;
+const RUN_WAIT_MS = 30_000;
 
 function stateToSessionState(state: State): DebugSessionState {
 	switch (state) {
@@ -22,378 +43,327 @@ function stateToSessionState(state: State): DebugSessionState {
 }
 
 function requestOf(config: IConfig): DebugRequestType {
-	switch (config.request) {
-		case 'launch': return 'launch';
-		case 'attach': return 'attach';
-		case 'test': return 'test';
-		default: return 'launch';
-	}
+	return config.request === 'attach' ? 'attach' : config.request === 'test' ? 'test' : 'launch';
+}
+
+/** Breakpoint locations from the model: a plain file path (Windows or POSIX) or a URI string. */
+export function toBreakpointUri(value: string): URI {
+	if (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('/') || value.startsWith('\\\\')) { return URI.file(value); }
+	if (/^[a-zA-Z][\w+.-]+:/.test(value)) { return URI.parse(value); }
+	return URI.file(value);
 }
 
 export class KodiaDebugToolService extends Disposable implements IDebugToolService {
 	readonly _serviceBrand: undefined;
 
-	private readonly debugService: IDebugService;
 	private readonly consoleOutput = new Map<string, ConsoleOutputEntry[]>();
+	private readonly sessionListeners = new Map<string, DisposableStore>();
 
 	constructor(
-		@IDebugService debugService: IDebugService,
+		@IDebugService private readonly debugService: IDebugService,
 	) {
 		super();
-		this.debugService = debugService;
-
-		// Buffer console ('output') events from every debug session so the agent
-		// can inspect debug console output retroactively.
 		this._register(debugService.onDidNewSession(session => this.trackSession(session)));
-		for (const session of debugService.getModel().getSessions()) {
-			this.trackSession(session);
-		}
+		this._register(debugService.onDidEndSession(({ session }) => { this.sessionListeners.get(session.getId())?.dispose(); this.sessionListeners.delete(session.getId()); }));
+		for (const session of debugService.getModel().getSessions()) { this.trackSession(session); }
+		this._register({ dispose: () => { for (const d of this.sessionListeners.values()) { d.dispose(); } this.sessionListeners.clear(); } });
 	}
 
+	/** Debug-console output: the platform puts DAP 'output' events into the session's REPL. */
 	private trackSession(session: IDebugSession): void {
 		const id = session.getId();
-		if (!this.consoleOutput.has(id)) {
-			this.consoleOutput.set(id, []);
-		}
-		const onOutput = (e: DebugProtocol.Event) => {
-			if (e.event !== 'output') return;
-			const body = e.body as { output?: string; source?: DebugProtocol.Source; line?: number; column?: number };
-			const text = body.output ?? '';
-			if (!text) return;
+		if (this.sessionListeners.has(id)) { return; }
+		const store = new DisposableStore();
+		this.sessionListeners.set(id, store);
+		this.consoleOutput.set(id, this.consoleOutput.get(id) ?? []);
+		let seen = new Set<string>();
+		const collect = () => {
 			const entries = this.consoleOutput.get(id)!;
-			entries.push({
-				sessionId: id,
-				text,
-				source: body.source?.path,
-				line: body.line,
-				column: body.column,
-			});
-			if (entries.length > MAX_CONSOLE_OUTPUT_PER_SESSION) {
-				entries.shift();
+			const next = new Set<string>();
+			for (const el of session.getReplElements()) {
+				next.add(el.getId());
+				if (seen.has(el.getId())) { continue; }
+				const text = el.toString();
+				if (!text) { continue; }
+				entries.push({ sessionId: id, text, source: el.sourceData?.source.uri.fsPath, line: el.sourceData?.lineNumber, column: el.sourceData?.column });
+				if (entries.length > MAX_CONSOLE_OUTPUT_PER_SESSION) { entries.shift(); }
 			}
+			seen = next;
 		};
-		const disposable = session.onDidCustomEvent(onOutput);
-		this._register(disposable);
+		store.add(session.onDidChangeReplElements(() => collect()));
+		collect();
 	}
 
-	private getModel() {
-		return this.debugService.getModel();
-	}
-
-	private findSession(sessionId: string): IDebugSession {
-		const session = this.getModel().getSession(sessionId);
-		if (!session) {
-			throw new Error(`Debug session "${sessionId}" not found.`);
-		}
+	/** Active sessions only, unless `includeEnded` (status queries about a session that has finished). */
+	private findSession(sessionId: string, includeEnded = false): IDebugSession {
+		const session = this.debugService.getModel().getSession(sessionId, includeEnded);
+		if (!session) { throw new Error(`Debug session "${sessionId}" not found. Use debug_list_sessions to see the active sessions.`); }
 		return session;
 	}
 
-	// ------------------------------------------------------------------
-	// Configurations
-	// ------------------------------------------------------------------
+	/** The thread to act on: the given one, else the stopped one, else the only one. */
+	private resolveThread(session: IDebugSession, threadId: number | undefined): IThread {
+		const threads = session.getAllThreads();
+		if (threadId !== undefined) {
+			const t = threads.find(x => x.threadId === threadId);
+			if (!t) { throw new Error(`Thread ${threadId} not found in session "${session.getId()}". Threads: ${threads.map(x => `${x.threadId} (${x.name})`).join(', ') || 'none'}.`); }
+			return t;
+		}
+		const stopped = threads.filter(t => t.stopped);
+		if (stopped.length > 0) { return stopped[0]; }
+		if (threads.length === 1) { return threads[0]; }
+		throw new Error(`Session "${session.getId()}" has ${threads.length} threads and none is stopped; pass a threadId (${threads.map(x => `${x.threadId} (${x.name})`).join(', ') || 'none'}).`);
+	}
+
+	// ------------------------------------------------------------------ stop/end detection
+
+	/** Snapshot identifying the current stop of every thread (the platform creates new stoppedDetails per stop). */
+	private stopMarks(session: IDebugSession): Map<number, unknown> {
+		return new Map(session.getAllThreads().map(t => [t.threadId, t.stoppedDetails]));
+	}
+
+	/**
+	 * Wait until a thread stops anew (relative to `before`) or the session ends, up to `timeoutMs`.
+	 * `action` (continue/step/...) runs after the listeners are attached, so its stop cannot be missed.
+	 */
+	private async runAndWaitForStop(session: IDebugSession, timeoutMs: number, action?: () => Promise<unknown>): Promise<DebugStopInfo> {
+		const before = this.stopMarks(session);
+		const started = Date.now();
+		const store = new DisposableStore();
+		try {
+			const outcome = new Promise<'stopped' | 'ended' | 'timeout'>(resolve => {
+				const check = () => {
+					if (session.state === State.Inactive) { resolve('ended'); return; }
+					if (session.state === State.Stopped && session.getAllThreads().some(t => t.stopped && t.stoppedDetails && t.stoppedDetails !== before.get(t.threadId))) { resolve('stopped'); }
+				};
+				store.add(session.onDidChangeState(check));
+				store.add(this.debugService.onDidEndSession(e => { if (e.session === session) { resolve('ended'); } }));
+				const timer = setTimeout(() => resolve('timeout'), timeoutMs);
+				store.add({ dispose: () => clearTimeout(timer) });
+				setTimeout(check, 0);
+			});
+			if (action) { await action(); }
+			const result = await outcome;
+			if (result === 'ended') { return { state: 'terminated' }; }
+			if (result === 'timeout') { return { state: 'running', waitedMs: Date.now() - started }; }
+			return this.describeStop(session, before);
+		} finally {
+			store.dispose();
+		}
+	}
+
+	private async describeStop(session: IDebugSession, before?: Map<number, unknown>): Promise<DebugStopInfo> {
+		const thread = session.getAllThreads().find(t => t.stopped && t.stoppedDetails && (!before || t.stoppedDetails !== before.get(t.threadId)))
+			?? session.getAllThreads().find(t => t.stopped);
+		if (!thread) { return { state: session.state === State.Inactive ? 'terminated' : 'running' }; }
+		const d = thread.stoppedDetails;
+		const info: DebugStopInfo = { state: 'stopped', threadId: thread.threadId, reason: d?.reason, description: d?.description, text: d?.text };
+		try {
+			const top = (await session.stackTrace(thread.threadId, 0, 1, CancellationToken.None))?.body?.stackFrames[0];
+			if (top) { info.location = { name: top.name, sourcePath: top.source?.path, line: top.line, column: top.column, frameId: top.id }; }
+		} catch { /* the location is a convenience; the stop itself is real */ }
+		return info;
+	}
+
+	// ------------------------------------------------------------------ configurations & sessions
 
 	listConfigurations(): Promise<{ configurations: DebugConfiguration[] }> {
-		const configManager = this.debugService.getConfigurationManager();
 		const configurations: DebugConfiguration[] = [];
-		for (const launch of configManager.getLaunches()) {
-			const folder = launch.workspace ? launch.workspace.uri.fsPath : undefined;
+		for (const launch of this.debugService.getConfigurationManager().getLaunches()) {
 			for (const name of launch.getConfigurationNames()) {
 				const config = launch.getConfiguration(name);
-				if (!config) continue;
-				configurations.push({
-					name: config.name,
-					type: config.type,
-					request: requestOf(config),
-					folder,
-				});
+				if (config) { configurations.push({ name: config.name, type: config.type, request: requestOf(config), folder: launch.workspace?.uri.fsPath }); }
 			}
 		}
 		return Promise.resolve({ configurations });
 	}
 
-	// ------------------------------------------------------------------
-	// Sessions
-	// ------------------------------------------------------------------
-
 	listSessions(): Promise<{ sessions: DebugSessionInfo[] }> {
-		const sessions: DebugSessionInfo[] = [];
-		for (const session of this.getModel().getSessions()) {
-			sessions.push(this.sessionInfo(session));
-		}
-		return Promise.resolve({ sessions });
+		return Promise.resolve({ sessions: this.debugService.getModel().getSessions().map(s => this.sessionInfo(s)) });
 	}
 
 	private sessionInfo(session: IDebugSession): DebugSessionInfo {
 		const config = session.configuration;
-		return {
-			sessionId: session.getId(),
-			name: session.name,
-			type: config.type,
-			state: stateToSessionState(session.state),
-			request: requestOf(config),
-			configurationName: config.name,
-			folder: session.root ? session.root.uri.fsPath : undefined,
-		};
+		return { sessionId: session.getId(), name: session.name, type: config.type, state: stateToSessionState(session.state), request: requestOf(config), configurationName: config.name, folder: session.root?.uri.fsPath };
 	}
 
 	async getSessionStatus(sessionId: string): Promise<DebugSessionInfo> {
-		return this.sessionInfo(this.findSession(sessionId));
-	}
-
-	private async sessionStartedMatching(configurationName: string, type: string, request: DebugRequestType): Promise<IDebugSession | undefined> {
-		const start = Date.now();
-		while (Date.now() - start < 5000) {
-			for (const session of this.getModel().getSessions()) {
-				const config = session.configuration;
-				if (config.name === configurationName && config.type === type && requestOf(config) === request && session.state !== State.Inactive) {
-					return session;
-				}
-			}
-			await new Promise(resolve => setTimeout(resolve, 100));
-		}
-		return undefined;
+		return this.sessionInfo(this.findSession(sessionId, true)); // an ended session reports 'inactive', not "not found"
 	}
 
 	private resolveLaunch(folder: string | undefined): ILaunch | undefined {
 		const configManager = this.debugService.getConfigurationManager();
 		const launches = configManager.getLaunches();
-		if (folder) {
-			return launches.find(l => l.workspace && l.workspace.uri.fsPath === folder) || launches[0];
-		}
-		return launches[0] || configManager.selectedConfiguration.launch;
+		if (folder) { return launches.find(l => l.workspace?.uri.fsPath === folder) ?? launches[0]; }
+		return launches[0] ?? configManager.selectedConfiguration.launch;
 	}
 
-	async startSession(configurationName: string, folder?: string, noDebug?: boolean): Promise<DebugSessionInfo> {
-		const launch = this.resolveLaunch(folder);
-		if (!launch) {
-			throw new Error('No debug configurations are available. Open a launch.json or add a debug configuration first.');
+	async startSession(configurationName: string | undefined, folder?: string, noDebug?: boolean, inline?: Record<string, unknown>): Promise<DebugSessionInfo & { stop: DebugStopInfo }> {
+		let launch: ILaunch | undefined = this.resolveLaunch(folder);
+		let config: IConfig | undefined;
+		if (inline) {
+			if (typeof inline.type !== 'string' || typeof inline.request !== 'string') { throw new Error('An inline debug configuration needs at least "type" (e.g. "node", "debugpy", "php") and "request" ("launch" or "attach").'); }
+			config = { name: configurationName ?? `Kodia: ${inline.type} ${inline.request}`, ...inline } as IConfig;
+		} else {
+			if (!configurationName) { throw new Error('Give a configuration name from launch.json (see debug_list_configurations) or an inline "configuration".'); }
+			if (!launch) { throw new Error('No launch.json configurations are available; pass an inline "configuration" instead.'); }
+			config = launch.getConfiguration(configurationName);
+			if (!config) { throw new Error(`Debug configuration "${configurationName}" not found. Available: ${launch.getConfigurationNames().join(', ') || '(none)'}`); }
 		}
-		const config = launch.getConfiguration(configurationName);
-		if (!config) {
-			const names = launch.getConfigurationNames().join(', ') || '(none)';
-			throw new Error(`Debug configuration "${configurationName}" not found. Available: ${names}`);
+		const known = new Set(this.debugService.getModel().getSessions().map(s => s.getId()));
+		let newSession: IDebugSession | undefined;
+		const listener = this.debugService.onDidNewSession(s => { if (!known.has(s.getId()) && !newSession) { newSession = s; } });
+		try {
+			const ok = await this.debugService.startDebugging(inline ? undefined : launch, config, { noDebug: !!noDebug });
+			if (!ok) { throw new Error(`The debugger did not start "${config.name}". Check that a debug adapter for type "${config.type}" is installed and that the configuration is valid.`); }
+			newSession ??= this.debugService.getModel().getSessions().find(s => !known.has(s.getId()));
+		} finally {
+			listener.dispose();
 		}
-		const ok = await this.debugService.startDebugging(launch, config, { noDebug: !!noDebug });
-		if (!ok) {
-			throw new Error(`Failed to start debug session for configuration "${configurationName}".`);
-		}
-		const session = await this.sessionStartedMatching(configurationName, config.type, requestOf(config));
-		if (!session) {
-			throw new Error(`Debug session for "${configurationName}" did not become available.`);
-		}
-		return this.sessionInfo(session);
+		if (!newSession) { throw new Error(`No debug session appeared for "${config.name}".`); }
+		this.trackSession(newSession);
+		// the program may already have stopped (stopOnEntry, an early breakpoint) or even ended
+		const stop = newSession.state === State.Stopped ? await this.describeStop(newSession) : await this.runAndWaitForStop(newSession, START_WAIT_MS);
+		return { ...this.sessionInfo(newSession), stop };
 	}
 
-	async attachSession(configurationName: string, folder?: string): Promise<DebugSessionInfo> {
-		// Attach is a start against an 'attach' request configuration.
+	async attachSession(configurationName: string, folder?: string): Promise<DebugSessionInfo & { stop: DebugStopInfo }> {
 		return this.startSession(configurationName, folder, false);
 	}
 
+	/** Returns once the session has really ended (bounded), so the next debug action never hits a half-closed adapter. */
 	async stopSession(sessionId: string, restart?: boolean, suspend?: boolean): Promise<void> {
-		await this.debugService.stopSession(this.findSession(sessionId), restart, suspend);
+		const session = this.findSession(sessionId, true);
+		if (session.state === State.Inactive && !restart) { return; } // already ended
+		if (restart || suspend || session.state === State.Inactive) { await this.debugService.stopSession(session, restart, suspend); return; }
+		const ended = this.runAndWaitForStop(session, START_WAIT_MS, () => this.debugService.stopSession(session, restart, suspend));
+		const outcome = await ended;
+		const stateNow = (): State => session.state; // read again: the state changed while we waited
+		if (outcome.state !== 'terminated' && stateNow() !== State.Inactive) { throw new Error(`The debug session "${sessionId}" did not end within ${START_WAIT_MS / 1000}s.`); }
 	}
 
 	async restartSession(sessionId: string): Promise<void> {
 		await this.debugService.restartSession(this.findSession(sessionId));
 	}
 
-	// ------------------------------------------------------------------
-	// Execution control
-	// ------------------------------------------------------------------
+	// ------------------------------------------------------------------ execution control
 
-	async continue(sessionId: string, threadId: number): Promise<void> {
-		await this.findSession(sessionId).continue(threadId);
+	async continue(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
+		const session = this.findSession(sessionId);
+		const thread = this.resolveThread(session, threadId);
+		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.continue(thread.threadId));
 	}
 
-	async pause(sessionId: string, threadId: number): Promise<void> {
-		await this.findSession(sessionId).pause(threadId);
+	async pause(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
+		const session = this.findSession(sessionId);
+		const id = threadId ?? session.getAllThreads()[0]?.threadId;
+		if (id === undefined) { throw new Error(`Session "${sessionId}" has no threads to pause.`); }
+		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.pause(id));
 	}
 
-	async stepOver(sessionId: string, threadId: number): Promise<void> {
-		await this.findSession(sessionId).next(threadId);
+	async stepOver(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
+		const session = this.findSession(sessionId);
+		const thread = this.resolveThread(session, threadId);
+		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.next(thread.threadId));
 	}
 
-	async stepInto(sessionId: string, threadId: number): Promise<void> {
-		await this.findSession(sessionId).stepIn(threadId);
+	async stepInto(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
+		const session = this.findSession(sessionId);
+		const thread = this.resolveThread(session, threadId);
+		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.stepIn(thread.threadId));
 	}
 
-	async stepOut(sessionId: string, threadId: number): Promise<void> {
-		await this.findSession(sessionId).stepOut(threadId);
+	async stepOut(sessionId: string, threadId?: number): Promise<DebugStopInfo> {
+		const session = this.findSession(sessionId);
+		const thread = this.resolveThread(session, threadId);
+		return this.runAndWaitForStop(session, RUN_WAIT_MS, () => session.stepOut(thread.threadId));
 	}
 
-	// ------------------------------------------------------------------
-	// Breakpoints
-	// ------------------------------------------------------------------
+	// ------------------------------------------------------------------ breakpoints
 
-	async setBreakpoint(sessionId: string | undefined, uriString: string, lineNumber: number, column?: number, condition?: string, hitCondition?: string, logMessage?: string): Promise<DebugBreakpoint> {
-		const uri = URI.parse(uriString);
-		const raw: { lineNumber: number; column?: number; condition?: string; hitCondition?: string; logMessage?: string; enabled: boolean }[] = [{
-			lineNumber,
-			column,
-			condition,
-			hitCondition,
-			logMessage,
-			enabled: true,
-		}];
-		const bps = await this.debugService.addBreakpoints(uri, raw);
-		const bp = bps[0];
-		if (!bp) {
-			throw new Error(`Failed to set breakpoint at ${uriString}:${lineNumber}.`);
-		}
+	async setBreakpoint(_sessionId: string | undefined, uriString: string, lineNumber: number, column?: number, condition?: string, hitCondition?: string, logMessage?: string): Promise<DebugBreakpoint> {
+		const uri = toBreakpointUri(uriString);
+		const [bp] = await this.debugService.addBreakpoints(uri, [{ lineNumber, column, condition, hitCondition, logMessage, enabled: true }]);
+		if (!bp) { throw new Error(`Failed to set a breakpoint at ${uri.fsPath}:${lineNumber}.`); }
 		return this.mapBreakpoint(bp);
 	}
 
 	async removeBreakpoint(breakpointId: string): Promise<void> {
+		if (!this.debugService.getModel().getBreakpoints().some(b => b.getId() === breakpointId)) { throw new Error(`Breakpoint "${breakpointId}" not found (see debug_list_breakpoints).`); }
 		await this.debugService.removeBreakpoints(breakpointId);
 	}
 
 	async setBreakpointEnabled(breakpointId: string, enabled: boolean): Promise<void> {
-		const bp = this.getModel().getBreakpoints().find(b => b.getId() === breakpointId);
-		if (!bp) {
-			throw new Error(`Breakpoint "${breakpointId}" not found.`);
-		}
+		const bp = this.debugService.getModel().getBreakpoints().find(b => b.getId() === breakpointId);
+		if (!bp) { throw new Error(`Breakpoint "${breakpointId}" not found (see debug_list_breakpoints).`); }
 		await this.debugService.enableOrDisableBreakpoints(enabled, bp);
 	}
 
 	async listBreakpoints(): Promise<{ breakpoints: DebugBreakpoint[] }> {
-		const bps = this.getModel().getBreakpoints();
-		return Promise.resolve({ breakpoints: bps.map(bp => this.mapBreakpoint(bp)) });
+		return { breakpoints: this.debugService.getModel().getBreakpoints().map(bp => this.mapBreakpoint(bp)) };
 	}
 
-	private mapBreakpoint(bp: { id?: string; uri: URI; lineNumber: number; column?: number; enabled: boolean; verified: boolean; message?: string; condition?: string; hitCondition?: string; logMessage?: string }): DebugBreakpoint {
+	private mapBreakpoint(bp: IBreakpoint): DebugBreakpoint {
 		return {
-			id: bp.id ?? '',
-			uri: bp.uri.toString(),
-			lineNumber: bp.lineNumber,
-			column: bp.column ?? undefined,
-			enabled: bp.enabled,
-			verified: bp.verified,
-			message: bp.message,
-			condition: bp.condition,
-			hitCondition: bp.hitCondition,
-			logMessage: bp.logMessage,
+			id: bp.getId(), uri: bp.uri.toString(), lineNumber: bp.lineNumber, column: bp.column ?? undefined, enabled: bp.enabled, verified: bp.verified,
+			message: bp.message, condition: bp.condition, hitCondition: bp.hitCondition, logMessage: bp.logMessage,
 		};
 	}
 
-	// ------------------------------------------------------------------
-	// Inspection
-	// ------------------------------------------------------------------
+	// ------------------------------------------------------------------ inspection
 
 	async listThreads(sessionId: string): Promise<{ threads: DebugThread[] }> {
-		const session = this.findSession(sessionId);
-		const threads: DebugThread[] = [];
-		for (const thread of session.getAllThreads()) {
-			threads.push({ threadId: thread.threadId, name: thread.name, stateLabel: thread.stateLabel, stopped: thread.stopped });
-		}
-		return Promise.resolve({ threads });
+		return { threads: this.findSession(sessionId).getAllThreads().map(t => ({ threadId: t.threadId, name: t.name, stateLabel: t.stateLabel, stopped: t.stopped })) };
 	}
 
-	async getStackTrace(sessionId: string, threadId: number, startFrame = 0, levels = 50): Promise<DebugStackTrace> {
+	async getStackTrace(sessionId: string, threadId?: number, startFrame = 0, levels = 50): Promise<DebugStackTrace> {
 		const session = this.findSession(sessionId);
-		const response = await session.stackTrace(threadId, startFrame, levels, CancellationToken.None);
-		if (!response || !response.body) {
-			throw new Error(`Failed to retrieve stack trace for thread ${threadId} in session "${sessionId}".`);
-		}
-		const frames: DebugStackFrame[] = [];
-		for (const f of response.body.stackFrames) {
-			const source = f.source;
-			frames.push({
-				frameId: f.id,
-				name: f.name,
-				line: f.line ?? 0,
-				column: f.column ?? 0,
-				sourcePath: source?.path,
-				sourceName: source?.name ?? source?.path,
-				threadId,
-				canRestart: f.canRestart ?? false,
-			});
-		}
-		return Promise.resolve({ frames, totalFrames: response.body.totalFrames ?? frames.length });
+		const thread = this.resolveThread(session, threadId);
+		const response = await session.stackTrace(thread.threadId, startFrame, levels, CancellationToken.None);
+		if (!response?.body) { throw new Error(`Failed to retrieve the stack trace of thread ${thread.threadId}.`); }
+		const frames: DebugStackFrame[] = response.body.stackFrames.map(f => ({
+			frameId: f.id, name: f.name, line: f.line ?? 0, column: f.column ?? 0, sourcePath: f.source?.path, sourceName: f.source?.name ?? f.source?.path, threadId: thread.threadId, canRestart: f.canRestart ?? false,
+		}));
+		return { frames, totalFrames: response.body.totalFrames ?? frames.length };
 	}
 
 	async getScopes(sessionId: string, frameId: number, threadId?: number): Promise<{ scopes: DebugScope[] }> {
 		const session = this.findSession(sessionId);
-		let resolvedThreadId = threadId;
-		if (resolvedThreadId === undefined) {
-			const stoppedThreads = session.getAllThreads().filter(t => t.stopped);
-			if (stoppedThreads.length === 0) {
-				throw new Error(`No stopped thread in session "${sessionId}"; provide a threadId.`);
-			}
-			resolvedThreadId = stoppedThreads[0].threadId;
-		}
-		const response = await session.scopes(frameId, resolvedThreadId);
-		if (!response || !response.body) {
-			throw new Error(`Failed to retrieve scopes for frame ${frameId} in session "${sessionId}".`);
-		}
-		const scopes: DebugScope[] = [];
-		for (const s of response.body.scopes) {
-			scopes.push({ name: s.name, variablesReference: s.variablesReference, expensive: !!s.expensive, hasChildren: s.variablesReference > 0 });
-		}
-		return Promise.resolve({ scopes });
+		const thread = this.resolveThread(session, threadId);
+		const response = await session.scopes(frameId, thread.threadId);
+		if (!response?.body) { throw new Error(`Failed to retrieve scopes for frame ${frameId}.`); }
+		return { scopes: response.body.scopes.map(s => ({ name: s.name, variablesReference: s.variablesReference, expensive: !!s.expensive, hasChildren: s.variablesReference > 0 })) };
 	}
 
 	async getVariables(sessionId: string, variablesReference: number, start?: number, count?: number): Promise<{ variables: DebugVariable[] }> {
-		const session = this.findSession(sessionId);
-		const response = await session.variables(variablesReference, undefined, undefined, start, count);
-		if (!response || !response.body) {
-			throw new Error(`Failed to retrieve variables for reference ${variablesReference} in session "${sessionId}".`);
-		}
-		const variables: DebugVariable[] = [];
-		for (const v of response.body.variables) {
-			variables.push({
-				name: v.name,
-				value: v.value,
-				type: v.type ?? '',
-				variablesReference: v.variablesReference,
-				hasChildren: v.variablesReference > 0,
-			});
-		}
-		return Promise.resolve({ variables });
+		const response = await this.findSession(sessionId).variables(variablesReference, undefined, undefined, start, count);
+		if (!response?.body) { throw new Error(`Failed to retrieve variables for reference ${variablesReference}.`); }
+		return { variables: response.body.variables.map(v => ({ name: v.name, value: v.value, type: v.type ?? '', variablesReference: v.variablesReference, hasChildren: v.variablesReference > 0, presentationHint: v.presentationHint?.kind })) };
 	}
 
+	/** Without a frameId, a stopped program evaluates in the top frame of the stopped thread (where it stopped), not globally. */
 	async evaluateExpression(sessionId: string, expression: string, frameId?: number): Promise<DebugEvaluateResult> {
 		const session = this.findSession(sessionId);
+		if (frameId === undefined && session.state === State.Stopped) {
+			const thread = session.getAllThreads().find(t => t.stopped);
+			if (thread) { frameId = (await session.stackTrace(thread.threadId, 0, 1, CancellationToken.None))?.body?.stackFrames[0]?.id; }
+		}
 		const response = await session.evaluate(expression, frameId, 'repl');
-		if (!response || !response.body) {
-			throw new Error(`Failed to evaluate expression in session "${sessionId}".`);
-		}
-		return Promise.resolve({
-			result: response.body.result ?? '',
-			type: response.body.type ?? '',
-			variablesReference: response.body.variablesReference ?? 0,
-			hasChildren: (response.body.variablesReference ?? 0) > 0,
-		});
+		if (!response?.body) { throw new Error('The debugger returned no result for the expression.'); }
+		return { result: response.body.result ?? '', type: response.body.type ?? '', variablesReference: response.body.variablesReference ?? 0, hasChildren: (response.body.variablesReference ?? 0) > 0 };
 	}
 
-	async getExceptionInfo(sessionId: string, threadId: number): Promise<DebugExceptionInfo> {
+	async getExceptionInfo(sessionId: string, threadId?: number): Promise<DebugExceptionInfo> {
 		const session = this.findSession(sessionId);
-		const info = await session.exceptionInfo(threadId);
-		if (!info) {
-			return { breakMode: null };
-		}
-		return {
-			id: info.id,
-			description: info.description,
-			breakMode: info.breakMode ?? null,
-		};
+		const info = await session.exceptionInfo(this.resolveThread(session, threadId).threadId);
+		return info ? { id: info.id, description: info.description, breakMode: info.breakMode ?? null } : { breakMode: null };
 	}
 
-	// ------------------------------------------------------------------
-	// Console
-	// ------------------------------------------------------------------
+	// ------------------------------------------------------------------ console
 
 	async getConsoleOutput(sessionId?: string, limit = 200): Promise<{ output: ConsoleOutputEntry[] }> {
-		const output: ConsoleOutputEntry[] = [];
-		if (sessionId) {
-			const entries = this.consoleOutput.get(sessionId) ?? [];
-			output.push(...entries.slice(-limit));
-		} else {
-			for (const entries of this.consoleOutput.values()) {
-				output.push(...entries);
-			}
-			output.splice(limit);
-		}
-		return Promise.resolve({ output });
+		const all = sessionId ? (this.consoleOutput.get(sessionId) ?? []) : [...this.consoleOutput.values()].flat();
+		return { output: all.slice(-limit) }; // the latest entries
 	}
 }
 

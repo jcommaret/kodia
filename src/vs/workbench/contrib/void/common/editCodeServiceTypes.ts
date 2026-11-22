@@ -115,5 +115,11 @@ export type DiffAreaSnapshotEntry<DiffAreaType extends DiffArea = DiffArea> = Pi
 export type VoidFileSnapshot = {
 	snapshottedDiffAreaOfId: Record<string, DiffAreaSnapshotEntry>;
 	entireFileCode: string;
+	/** nothing existed at this path (restoring it deletes what is there) */
+	absent?: boolean;
+	/** a folder existed at this path (restoring it creates the folder) */
+	isFolder?: boolean;
+	/** the content was dropped to keep the conversation's saved history small: this point cannot be restored */
+	pruned?: boolean;
 }
 

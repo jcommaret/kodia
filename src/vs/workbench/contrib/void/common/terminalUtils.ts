@@ -63,6 +63,18 @@ export function computeIncrementalRead(
 export const isPowerShellPlatform = isWindows;
 
 /**
+ * The real outcome of a finished terminal command, for tools that report success to the model
+ * (dep_install, db_migrate, lint_run). Success means the command ran to completion with exit code 0;
+ * a command killed for inactivity is never a success. Never report success that did not happen.
+ */
+export function terminalCommandOutcome(res: { result: string; resolveReason: { type: 'done'; exitCode: number } | { type: 'timeout' } }): { success: boolean; exit_code: number | undefined; output: string } {
+	if (res.resolveReason.type === 'done') {
+		return { success: res.resolveReason.exitCode === 0, exit_code: res.resolveReason.exitCode, output: res.result };
+	}
+	return { success: false, exit_code: undefined, output: `${res.result}\n(The command was stopped after a period of inactivity and did not finish.)` };
+}
+
+/**
  * Wraps a command for safe execution in an interactive PowerShell session.
  * Uses the call operator (&) to invoke external commands, which prevents
  * PowerShell keyword conflicts (e.g., 'new' being interpreted as a keyword).

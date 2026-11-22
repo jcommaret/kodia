@@ -25,7 +25,7 @@ import * as dom from '../../../../base/browser/dom.js';
 import { Widget } from '../../../../base/browser/ui/widget.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IConsistentEditorItemService, IConsistentItemService } from './helperServices/consistentItemService.js';
-import { voidPrefixAndSuffix, ctrlKStream_userMessage, ctrlKStream_systemMessage, defaultQuickEditFimTags, rewriteCode_systemMessage, rewriteCode_userMessage, searchReplaceGivenDescription_systemMessage, searchReplaceGivenDescription_userMessage, tripleTick, } from '../common/prompt/prompts.js';
+import { voidPrefixAndSuffix, ctrlKStream_userMessage, ctrlKStream_systemMessage, defaultQuickEditFimTags, rewriteCode_systemMessage, rewriteCode_userMessage, searchReplaceGivenDescription_systemMessage, searchReplaceGivenDescription_userMessage, tripleTick, ORIGINAL, DIVIDER, FINAL } from '../common/prompt/prompts.js';
 import { IVoidCommandBarService } from './voidCommandBarServiceInterface.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { VOID_ACCEPT_DIFF_ACTION_ID, VOID_REJECT_DIFF_ACTION_ID } from './actionIDs.js';
@@ -156,7 +156,7 @@ type StreamLocationMutable = { line: number, col: number, addedSplitYet: boolean
 
 
 
-class EditCodeService extends Disposable implements IEditCodeService {
+export class EditCodeService extends Disposable implements IEditCodeService {
 	_serviceBrand: undefined;
 
 	// URI <--> model
@@ -611,6 +611,10 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	private async _writeURIText(uri: URI, text: string, range_: IRange | 'wholeFileRange', { shouldRealignDiffAreas, }: { shouldRealignDiffAreas: boolean, }): Promise<void> {
 		let { model } = this._voidModelService.getModel(uri)
 		if (!model) {
+			// A partial-range write needs the existing file contents; writing `text` alone would truncate the file.
+			if (range_ !== 'wholeFileRange') {
+				throw new Error(`Cannot apply a partial edit to ${uri.fsPath}: the file is not loaded.`)
+			}
 			// File has no text model yet (e.g. brand-new file created via write_file/rewrite_file).
 			// Create it on disk first, then initialize the model so diff tracking works.
 			await this._fileService.writeFile(uri, VSBuffer.fromString(text))
@@ -640,6 +644,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		const dontNeedToWrite = uriStr === text
 		if (dontNeedToWrite) {
 			this._refreshStylesAndDiffsInURI(uri) // at the end of a write, we still expect to refresh all styles. e.g. sometimes we expect to restore all the decorations even if no edits were made when _writeText is used
+			await this._persistModelToDisk(uri) // no-op unless the model is dirty
 			return
 		}
 
@@ -647,11 +652,35 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		model.applyEdits([{ range, text }])
 		this.weAreWriting = false
 
-		// CRITICAL: Persist to disk so files are actually saved.
-		// Await the write and propagate errors so callers know whether the file was really written.
-		await this._fileService.writeFile(uri, VSBuffer.fromString(text))
-
 		this._refreshStylesAndDiffsInURI(uri)
+
+		// Persist the FULL model (not `text`, which may only cover `range`) so files are actually saved.
+		// Await it and propagate errors so callers know whether the file was really written.
+		await this._persistModelToDisk(uri)
+	}
+
+	// Per-URI save queue. Streaming writes fire many unawaited _writeURIText calls; this makes sure
+	// saves never run concurrently / out of order, and coalesces bursts into as few saves as possible.
+	// Each returned promise resolves only once a save that started AFTER the call has completed.
+	private readonly _persistTail = new Map<string, Promise<void>>()
+	private readonly _persistDirty = new Set<string>()
+	private _persistModelToDisk(uri: URI): Promise<void> {
+		const key = uri.toString()
+		this._persistDirty.add(key)
+		const prev = this._persistTail.get(key) ?? Promise.resolve()
+		const next = prev.catch(() => { }).then(async () => {
+			if (!this._persistDirty.has(key)) return // an earlier queued save already covered this edit
+			this._persistDirty.delete(key)
+			try {
+				await this._voidModelService.saveModel(uri)
+			} catch (e) {
+				this._persistDirty.add(key) // let the next queued save retry
+				throw e
+			}
+		})
+		this._persistTail.set(key, next)
+		next.finally(() => { if (this._persistTail.get(key) === next) this._persistTail.delete(key) }).catch(() => { })
+		return next
 	}
 
 
@@ -756,8 +785,9 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	}
 
 
-	public restoreVoidFileSnapshot(uri: URI, snapshot: VoidFileSnapshot): void {
-		this._restoreVoidFileSnapshot(uri, snapshot)
+	public async restoreVoidFileSnapshot(uri: URI, snapshot: VoidFileSnapshot): Promise<void> {
+		await this._restoreVoidFileSnapshot(uri, snapshot)
+		await this._persistModelToDisk(uri)
 	}
 
 
@@ -1159,7 +1189,8 @@ class EditCodeService extends Disposable implements IEditCodeService {
 			linkedCtrlKZone: null,
 			onWillUndo: () => { },
 		})
-		if (!res) return
+		// Never report a successful edit when nothing was applied.
+		if (!res) throw new Error(`Could not edit ${uri.fsPath}: the file could not be opened (does it exist?).`)
 		const { diffZone, onFinishEdit } = res
 
 
@@ -1188,7 +1219,8 @@ class EditCodeService extends Disposable implements IEditCodeService {
 			await this._instantlyApplySRBlocks(uri, searchReplaceBlocks)
 		}
 		catch (e) {
-			onError({ message: e + '', fullError: null })
+			// the error itself (was: `e + ''`, so the model read "Error: Error: ...")
+			onError({ message: e instanceof Error ? e.message : String(e), fullError: e instanceof Error ? e : null })
 		}
 
 		onDone()
@@ -1600,7 +1632,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	 * Generates a human-readable error message for an invalid ORIGINAL search block.
 	 */
 	private _errContentOfInvalidStr = (
-		str: 'Not found' | 'Not unique' | 'Has overlap',
+		str: 'Not found' | 'Not unique' | 'Has overlap' | 'Partial line',
 		blockOrig: string,
 	): string => {
 		const problematicCode = `${tripleTick[0]}\n${JSON.stringify(blockOrig)}\n${tripleTick[1]}`
@@ -1617,6 +1649,9 @@ class EditCodeService extends Disposable implements IEditCodeService {
 			case 'Has overlap':
 				descStr = `The edit was not applied. The text in the ORIGINAL blocks must not overlap, but the following ORIGINAL code had overlap with another ORIGINAL string:\n${problematicCode}. Ensure you have the latest version of the file, and ensure the ORIGINAL code blocks do not overlap.`
 				break
+			case 'Partial line':
+				descStr = `The edit was not applied. The following ORIGINAL code only matched part of a line once whitespace was ignored, and applying it would replace the whole line:\n${problematicCode}. Copy the ORIGINAL code exactly as it is in the file, or include the complete lines.`
+				break
 			default:
 				descStr = ''
 		}
@@ -1626,7 +1661,13 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 	private async _instantlyApplySRBlocks(uri: URI, blocksStr: string): Promise<void> {
 		const blocks = extractSearchReplaceBlocks(blocksStr)
-		if (blocks.length === 0) throw new Error(`No Search/Replace blocks were received!`)
+		// a repair prompt, not just a refusal: the model learns the exact format (and when another tool fits better)
+		if (blocks.length === 0) {
+			const looksLikeDiff = /^(---|\+\+\+|@@) /m.test(blocksStr)
+			const hint = looksLikeDiff ? ' What you sent looks like a unified diff, which edit_file does not accept.'
+				: !blocksStr.includes(ORIGINAL) ? ' To replace the whole file instead, use write_file with the complete new content.' : ''
+			throw new Error(`The edit was not applied: no search/replace block was found in search_replace_blocks.${hint} Each block must be exactly:\n${ORIGINAL}\n(the exact current lines)\n${DIVIDER}\n(the new lines)\n${FINAL}`)
+		}
 
 		const { model } = this._voidModelService.getModel(uri)
 		if (!model) throw new Error(`Error applying Search/Replace blocks: File does not exist.`)
@@ -1638,12 +1679,26 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 		const replacements: { origStart: number; origEnd: number; block: ExtractedSearchReplaceBlock }[] = []
 		for (const b of blocks) {
+			// An exact match is replaced exactly: character range, not the lines around it (widening it to whole
+			// lines dropped the rest of a partially matched line), and it must be unique (the first of several
+			// occurrences was edited silently).
+			const exactIdx = b.orig ? modelStr.indexOf(b.orig) : -1
+			if (exactIdx !== -1) {
+				if (modelStr.indexOf(b.orig, exactIdx + 1) !== -1)
+					throw new Error(this._errContentOfInvalidStr('Not unique', b.orig))
+				replacements.push({ origStart: exactIdx, origEnd: exactIdx + b.orig.length - 1, block: b })
+				continue
+			}
+
 			const res = findTextInCode(b.orig, modelStr, true, { returnType: 'lines' })
 			if (typeof res === 'string')
 				throw new Error(this._errContentOfInvalidStr(res, b.orig))
 			let [startLine, endLine] = res
 			startLine -= 1 // 0-index
 			endLine -= 1
+			// whitespace-insensitive match: lines are replaced whole, so the match must cover them whole
+			if (removeWhitespaceExceptNewlines(modelStrLines.slice(startLine, endLine + 1).join('\n')) !== removeWhitespaceExceptNewlines(b.orig))
+				throw new Error(this._errContentOfInvalidStr('Partial line', b.orig))
 
 			// including newline before start
 			const origStart = (startLine !== 0 ?

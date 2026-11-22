@@ -155,11 +155,38 @@ suite('Kodia - model capabilities', () => {
 		assert.ok(!!nemotron.reasoningCapabilities && nemotron.reasoningCapabilities.supportsReasoning, 'verified: configurable reasoning');
 		assert.ok(!!nemotron.reasoningCapabilities && nemotron.reasoningCapabilities.canIOReasoning, 'verified: model outputs reasoning_content');
 
-		// an NVIDIA model not in the catalog: no vision inferred from its name, context falls back safely
-		const unknown = getModelCapabilities('nvidia', 'meta/llama-3.1-8b-instruct', undefined);
+		// an NVIDIA-hosted model outside NVIDIA's catalog is matched to its family by name (the NVIDIA provider uses the
+		// shared name fallback): Llama 3.1, never Llama 4's 10M window or its vision support
+		const llama31 = getModelCapabilities('nvidia', 'meta/llama-3.1-8b-instruct', undefined);
+		assert.strictEqual(llama31.supportsVision, false, 'vision is not inferred from the model name');
+		assert.strictEqual(llama31.contextWindow, 32_000, 'a modest family value, not a fake huge limit');
+
+		// a model with no recognizable family stays explicitly unknown, with the modest fallback
+		const unknown = getModelCapabilities('nvidia', 'acme/totally-new-model-7b', undefined);
 		assert.strictEqual(unknown.isUnrecognizedModel, true);
-		assert.strictEqual(unknown.supportsVision, false, 'vision is not inferred from the model name');
-		assert.strictEqual(unknown.contextWindow, 4_096, 'unknown context falls back to the safe default, not advertised as a real limit');
+		assert.strictEqual(unknown.supportsVision, false);
+		assert.strictEqual(unknown.contextWindowSource, 'fallback');
+		assert.strictEqual(unknown.contextWindow, 32_000);
+	});
+
+	test('Llama family names: hosted and Ollama spellings match the right version; unversioned Llamas never get Llama 4 values', () => {
+		// [model name, expected context window, expected vision]: Llama 3.x family = 32k text-only, Llama 4 = 10M multimodal
+		const cases: [string, number, boolean][] = [
+			['meta/llama-3.1-70b-instruct', 32_000, false],
+			['llama3.1:8b', 32_000, false],
+			['meta-llama/Llama-3.3-70B-Instruct', 32_000, false],
+			['meta/llama-3.2-3b-instruct', 32_000, false],
+			['llama3:8b', 32_000, false],
+			['meta/llama-4-maverick-17b-128e-instruct', 10_000_000, true],
+			['meta/llama-4-scout-17b-16e-instruct', 10_000_000, true],
+			['llama2:13b', 32_000, false],
+			['codellama:7b', 32_000, false],
+		];
+		for (const [name, contextWindow, vision] of cases) {
+			const caps = getModelCapabilities('openAICompatible', name, undefined);
+			assert.strictEqual(caps.contextWindow, contextWindow, `${name} context window`);
+			assert.strictEqual(caps.supportsVision, vision, `${name} vision`);
+		}
 	});
 
 	test('a per-model override wins over the detected capabilities', () => {
@@ -210,12 +237,12 @@ suite('Kodia - model capabilities: source tracking and fallback behavior', () =>
 		}
 	});
 
-	test('Unknown models on cloud providers get conservative fallback', () => {
+	test('Unknown models on cloud providers get a modest 32k fallback with 4k output', () => {
 		const cloudProviders: ProviderName[] = ['openAI', 'anthropic', 'gemini', 'groq', 'xAI', 'mistral', 'deepseek'];
 		for (const providerName of cloudProviders) {
 			const unknown = getModelCapabilities(providerName, 'some-unknown-model', undefined);
 			assert.strictEqual(unknown.isUnrecognizedModel, true);
-			assert.strictEqual(unknown.contextWindow, 4_096, `${providerName} should get 4k fallback`);
+			assert.strictEqual(unknown.contextWindow, 32_000, `${providerName} should get 32k fallback`);
 			assert.strictEqual(unknown.reservedOutputTokenSpace, 4_096, `${providerName} should get 4k output fallback`);
 			assert.strictEqual(unknown.contextWindowSource, 'fallback');
 			assert.strictEqual(unknown.reservedOutputTokenSpaceSource, 'fallback');
@@ -280,7 +307,7 @@ suite('Kodia - model capabilities: source tracking and fallback behavior', () =>
 		// Vision models on cloud providers
 		const unknownVision = getModelCapabilities('openAI', 'some-vision-model', undefined);
 		assert.strictEqual(unknownVision.supportsVision, true);
-		assert.strictEqual(unknownVision.contextWindow, 4_096);
+		assert.strictEqual(unknownVision.contextWindow, 32_000);
 		assert.strictEqual(unknownVision.contextWindowSource, 'fallback');
 	});
 });
@@ -392,9 +419,9 @@ suite('Kodia - model capabilities: context diagnostics', () => {
 		assert.strictEqual(d.isUnrecognizedModel, true);
 		assert.strictEqual(d.isFallback, true);
 		assert.strictEqual(d.isVerified, false);
-		assert.strictEqual(d.configuredContextWindow, 4_096);
+		assert.strictEqual(d.configuredContextWindow, 32_000);
 		assert.strictEqual(d.configuredContextWindowSource, 'fallback');
-		assert.strictEqual(d.usableInputTokens, 4_096 - 4_096);
+		assert.strictEqual(d.usableInputTokens, 32_000 - 4_096);
 	});
 
 	test('getModelContextDiagnostics reports local provider fallback generously', () => {
@@ -454,11 +481,12 @@ suite('Kodia - model capabilities: local model configuration', () => {
 	test('Unknown models remain explicitly unknown, not given misleading metadata', () => {
 		const unknown = getModelCapabilities('openAICompatible', 'totally-unknown-model-xyz', undefined);
 		assert.strictEqual(unknown.isUnrecognizedModel, true);
-		assert.strictEqual(unknown.contextWindow, 4_096);
+		assert.strictEqual(unknown.contextWindow, 32_000);
 		assert.strictEqual(unknown.contextWindowSource, 'fallback');
 		assert.strictEqual(unknown.reservedOutputTokenSpaceSource, 'fallback');
-		// Should not advertise a huge context
-		assert.ok(unknown.contextWindow < 32_000, 'unknown model should not get a large context window');
+		// a modest guess (marked 'fallback'), never a huge advertised context
+		assert.ok(unknown.contextWindow <= 32_000, 'unknown model should not get a large context window');
+		assert.ok(unknown.contextWindow - (unknown.reservedOutputTokenSpace ?? 0) > 16_000, 'the fallback must leave real room for input');
 	});
 });
 
@@ -513,7 +541,7 @@ suite('Kodia - model capabilities: model switching and backward compatibility', 
 		// A model with no catalog entry and no fallback info
 		const caps = getModelCapabilities('openAICompatible', 'brand-new-unknown-model', undefined);
 		assert.strictEqual(caps.isUnrecognizedModel, true);
-		assert.strictEqual(caps.contextWindow, 4_096);
+		assert.strictEqual(caps.contextWindow, 32_000);
 		assert.strictEqual(caps.reservedOutputTokenSpace, 4_096);
 		assert.strictEqual(caps.contextWindowSource, 'fallback');
 		assert.strictEqual(caps.reservedOutputTokenSpaceSource, 'fallback');

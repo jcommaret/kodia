@@ -114,6 +114,24 @@ export interface DebugConfiguration {
 	folder?: string;
 }
 
+/**
+ * What happened after start/continue/step/pause: the program stopped (where and why), ended, or is still running
+ * when the wait ended. Reported from the debug session's real state, never assumed.
+ */
+export interface DebugStopInfo {
+	state: 'stopped' | 'terminated' | 'running';
+	threadId?: number;
+	/** DAP stop reason: breakpoint, step, exception, pause, entry, ... */
+	reason?: string;
+	description?: string;
+	/** exception text when stopped on an exception */
+	text?: string;
+	/** top frame of the stopped thread */
+	location?: { name: string; sourcePath?: string; line: number; column: number; frameId: number };
+	/** set when the wait timed out while the program was still running */
+	waitedMs?: number;
+}
+
 export interface IDebugToolService {
 	readonly _serviceBrand: undefined;
 
@@ -123,17 +141,22 @@ export interface IDebugToolService {
 	// --- sessions ---
 	listSessions(): Promise<{ sessions: DebugSessionInfo[] }>;
 	getSessionStatus(sessionId: string): Promise<DebugSessionInfo>;
-	startSession(configurationName: string, folder?: string, noDebug?: boolean): Promise<DebugSessionInfo>;
-	attachSession(configurationName: string, folder?: string): Promise<DebugSessionInfo>;
+	/**
+	 * Start a configuration from launch.json by name, or an inline `configuration` object (no launch.json needed).
+	 * Waits (bounded) for the program's first stop or its end and reports it in `stop`.
+	 */
+	startSession(configurationName: string | undefined, folder?: string, noDebug?: boolean, configuration?: Record<string, unknown>): Promise<DebugSessionInfo & { stop: DebugStopInfo }>;
+	attachSession(configurationName: string, folder?: string): Promise<DebugSessionInfo & { stop: DebugStopInfo }>;
 	stopSession(sessionId: string, restart?: boolean, suspend?: boolean): Promise<void>;
 	restartSession(sessionId: string): Promise<void>;
 
-	// --- execution control ---
-	continue(sessionId: string, threadId: number): Promise<void>;
-	pause(sessionId: string, threadId: number): Promise<void>;
-	stepOver(sessionId: string, threadId: number): Promise<void>;
-	stepInto(sessionId: string, threadId: number): Promise<void>;
-	stepOut(sessionId: string, threadId: number): Promise<void>;
+	// --- execution control: each waits (bounded) for the next stop or the end, and reports it ---
+	// threadId may be omitted: the stopped thread (or the only thread) is used
+	continue(sessionId: string, threadId?: number): Promise<DebugStopInfo>;
+	pause(sessionId: string, threadId?: number): Promise<DebugStopInfo>;
+	stepOver(sessionId: string, threadId?: number): Promise<DebugStopInfo>;
+	stepInto(sessionId: string, threadId?: number): Promise<DebugStopInfo>;
+	stepOut(sessionId: string, threadId?: number): Promise<DebugStopInfo>;
 
 	// --- breakpoints ---
 	setBreakpoint(sessionId: string | undefined, uri: string, lineNumber: number, column?: number, condition?: string, hitCondition?: string, logMessage?: string): Promise<DebugBreakpoint>;
@@ -143,11 +166,11 @@ export interface IDebugToolService {
 
 	// --- inspection ---
 	listThreads(sessionId: string): Promise<{ threads: DebugThread[] }>;
-	getStackTrace(sessionId: string, threadId: number, startFrame?: number, levels?: number): Promise<DebugStackTrace>;
+	getStackTrace(sessionId: string, threadId?: number, startFrame?: number, levels?: number): Promise<DebugStackTrace>;
 	getScopes(sessionId: string, frameId: number, threadId?: number): Promise<{ scopes: DebugScope[] }>;
 	getVariables(sessionId: string, variablesReference: number, start?: number, count?: number): Promise<{ variables: DebugVariable[] }>;
 	evaluateExpression(sessionId: string, expression: string, frameId?: number): Promise<DebugEvaluateResult>;
-	getExceptionInfo(sessionId: string, threadId: number): Promise<DebugExceptionInfo>;
+	getExceptionInfo(sessionId: string, threadId?: number): Promise<DebugExceptionInfo>;
 
 	// --- console ---
 	getConsoleOutput(sessionId?: string, limit?: number): Promise<{ output: Array<{ sessionId: string; text: string; source?: string; line?: number; column?: number }> }>;

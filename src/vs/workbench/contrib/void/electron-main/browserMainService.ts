@@ -31,7 +31,9 @@ import { tmpdir } from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 
-const TEMP_DOWNLOAD_DIR = tmpdir();
+const TEMP_DOWNLOAD_DIR = path.join(tmpdir(), 'kodia-browser-downloads');
+const SCREENSHOT_DIR = path.join(tmpdir(), 'kodia-browser-screenshots');
+const NAVIGATION_START_GRACE_MS = 150;
 
 // Playwright is imported lazily so the main process can start even if the
 // optional Chromium bundle is not installed. The service reports a clear error
@@ -77,6 +79,7 @@ interface PageState {
 	title: string;
 	loading: boolean;
 	loadError?: string;
+	status?: number; // HTTP status of the main document
 	consoleMessages: ConsoleMessage[];
 	networkFailures: NetworkFailure[];
 }
@@ -93,41 +96,59 @@ interface SessionState {
 	closed: boolean;
 }
 
-// Serialize a Playwright element handle into a BrowserElement. Runs inside the
-// page context via page.evaluate, so it only sees safe, public DOM data.
-const EVAL_INSPECT_PAGE = () => {
-	const elements: Array<{ selector: string, type: string, label: string, value?: string, placeholder?: string, disabled: boolean, readonly: boolean, checked?: boolean, options?: string[], bbox?: { x: number, y: number, width: number, height: number } }> = [];
-	const seen = new Set<string>();
+// Inspect the page. Runs inside the page context via page.evaluate (the function is serialized, so it must be
+// self-contained), so it only sees public DOM data. Every element gets a selector that matches exactly that
+// element, and the page is checked for layout defects a user would see (content wider than the viewport,
+// controls covered by other elements or pushed off-screen, clipped text).
+const EVAL_INSPECT_PAGE = (maxElements: number) => {
+	const elements: Array<{ selector: string, type: string, label: string, value?: string, placeholder?: string, disabled: boolean, readonly: boolean, checked?: boolean, options?: string[], visible: boolean, inViewport: boolean, bbox?: { x: number, y: number, width: number, height: number } }> = [];
+	const vw = document.documentElement.clientWidth;
+	const vh = document.documentElement.clientHeight;
+
+	const isUnique = (sel: string, el: Element) => {
+		try { const m = document.querySelectorAll(sel); return m.length === 1 && m[0] === el; } catch { return false; }
+	};
+	// id > name > data-testid when unique, otherwise a tag:nth-of-type path from the nearest uniquely-identified
+	// ancestor. Never a bare tag that matches several elements (an agent clicking it would hit the first one).
+	const selectorOf = (el: Element): string => {
+		const tag = el.tagName.toLowerCase();
+		const id = el.getAttribute('id');
+		if (id && isUnique(`#${CSS.escape(id)}`, el)) return `#${CSS.escape(id)}`;
+		const name = el.getAttribute('name');
+		if (name && isUnique(`${tag}[name="${CSS.escape(name)}"]`, el)) return `${tag}[name="${CSS.escape(name)}"]`;
+		const dtid = el.getAttribute('data-testid');
+		if (dtid && isUnique(`[data-testid="${CSS.escape(dtid)}"]`, el)) return `[data-testid="${CSS.escape(dtid)}"]`;
+		const parts: string[] = [];
+		let cur: Element | null = el;
+		while (cur && cur !== document.documentElement) {
+			const ctag = cur.tagName.toLowerCase();
+			const cid = cur !== el ? cur.getAttribute('id') : null;
+			if (cid && isUnique(`#${CSS.escape(cid)}`, cur)) { parts.unshift(`#${CSS.escape(cid)}`); break; }
+			const parent: Element | null = cur.parentElement;
+			if (!parent) { parts.unshift(ctag); break; }
+			const sameTag = Array.from(parent.children).filter(c => c.tagName === cur!.tagName);
+			parts.unshift(sameTag.length > 1 ? `${ctag}:nth-of-type(${sameTag.indexOf(cur) + 1})` : ctag);
+			cur = parent;
+		}
+		return parts.join(' > ');
+	};
+	const isVisible = (el: Element) => {
+		const r = el.getBoundingClientRect();
+		if (r.width === 0 && r.height === 0) return false;
+		for (let cur: Element | null = el; cur; cur = cur.parentElement) {
+			const s = window.getComputedStyle(cur);
+			if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+		}
+		return true;
+	};
+
+	const INTERACTIVE = 'a[href], button, input:not([type="hidden"]), textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="menuitem"], [role="menu"], [role="menubar"], [contenteditable=""], [contenteditable="true"]';
+	const interactive = Array.from(document.querySelectorAll(INTERACTIVE));
+	const totalElements = interactive.length;
 
 	const add = (el: Element) => {
-		if (!el || !el.matches) return;
 		const tag = el.tagName.toLowerCase();
-		// Only interactive elements.
-		const isInteractive =
-			tag === 'a' || tag === 'button' || tag === 'input' || tag === 'textarea' ||
-			tag === 'select' || el.getAttribute('role') === 'button' ||
-			el.getAttribute('role') === 'link' || el.getAttribute('role') === 'checkbox' ||
-			el.getAttribute('role') === 'radio' || el.getAttribute('role') === 'menuitem' ||
-			el.getAttribute('role') === 'menu' || el.getAttribute('role') === 'menubar' ||
-			(el as HTMLElement).isContentEditable;
-		if (!isInteractive) return;
-
-		// Build a stable CSS selector: id > name > data-testid > fallback nth-child path.
-		let selector = '';
-		const id = el.getAttribute('id');
-		if (id) {
-			selector = `#${CSS.escape(id)}`;
-		} else {
-			const name = el.getAttribute('name');
-			if (name) selector = `${tag}[name="${CSS.escape(name)}"]`;
-			else {
-				const dtid = el.getAttribute('data-testid');
-				if (dtid) selector = `[data-testid="${CSS.escape(dtid)}"]`;
-				else selector = tag;
-			}
-		}
-		if (seen.has(selector)) return;
-		seen.add(selector);
+		const selector = selectorOf(el);
 
 		const type = (() => {
 			switch (tag) {
@@ -181,35 +202,74 @@ const EVAL_INSPECT_PAGE = () => {
 		}
 
 		let bbox: { x: number, y: number, width: number, height: number } | undefined;
-		try {
-			const r = el.getBoundingClientRect();
-			if (r.width > 0 || r.height > 0) {
-				bbox = { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
-			}
-		} catch { }
-
-		elements.push({ selector, type: type as any, label, value: value ? value : undefined, placeholder: placeholder ? placeholder : undefined, disabled, readonly, checked, options, bbox });
-	};
-
-	// Walk the document in tree order, but keep the count small.
-	const walk = (node: Node, depth: number) => {
-		if (depth > 12) return;
-		if (node.nodeType === 1) {
-			add(node as Element);
+		const r = el.getBoundingClientRect();
+		if (r.width > 0 || r.height > 0) {
+			bbox = { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
 		}
-		for (let i = 0; i < node.childNodes.length; i++) {
-			walk(node.childNodes[i] as Node, depth + 1);
-		}
+		const visible = isVisible(el);
+		const inViewport = visible && r.right > 0 && r.bottom > 0 && r.left < vw && r.top < vh;
+
+		elements.push({ selector, type: type as any, label, value: value ? value : undefined, placeholder: placeholder ? placeholder : undefined, disabled, readonly, checked, options, visible, inViewport, bbox });
 	};
-	walk(document, 0);
+	for (const el of interactive.slice(0, maxElements)) { add(el); }
 
 	const forms: Array<{ selector: string, action?: string, method?: string }> = [];
 	for (const form of Array.from(document.querySelectorAll('form'))) {
-		let fs = '';
-		const fid = form.getAttribute('id');
-		if (fid) fs = `#${CSS.escape(fid)}`;
-		else fs = 'form';
-		forms.push({ selector: fs, action: form.getAttribute('action') || undefined, method: form.getAttribute('method') || undefined });
+		forms.push({ selector: selectorOf(form), action: form.getAttribute('action') || undefined, method: form.getAttribute('method') || undefined });
+	}
+
+	// --- layout defects ---
+	const layoutIssues: Array<{ kind: string, selector: string, detail: string }> = [];
+	const MAX_ISSUES = 20;
+	const describe = (el: Element) => {
+		const t = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+		return `${selectorOf(el)}${t ? ` ("${t}")` : ''}`;
+	};
+	const all = Array.from(document.body ? document.body.querySelectorAll('*') : []).filter(el => !['script', 'style', 'noscript', 'template'].includes(el.tagName.toLowerCase()));
+
+	// 1. content wider than the viewport: report the outermost elements that stick out (their parent does not),
+	//    which is where the fixed width / negative margin / long word is.
+	const scrollWidth = document.documentElement.scrollWidth;
+	if (scrollWidth > vw + 1) {
+		for (const el of all) {
+			if (layoutIssues.length >= MAX_ISSUES) break;
+			const r = el.getBoundingClientRect();
+			if (r.width === 0 || r.right <= vw + 1 || !isVisible(el)) continue;
+			const p = el.parentElement;
+			const pr = p ? p.getBoundingClientRect() : null;
+			if (p && p !== document.body && pr && pr.right > vw + 1) continue;
+			layoutIssues.push({ kind: 'horizontal-overflow', selector: selectorOf(el), detail: `extends to x=${Math.round(r.right)}px but the viewport is ${vw}px wide (page scrolls sideways: document is ${scrollWidth}px wide)` });
+		}
+	}
+	// 2. interactive elements a user cannot reach: covered by another element, or placed outside the page.
+	for (const el of interactive.slice(0, maxElements)) {
+		if (layoutIssues.length >= MAX_ISSUES) break;
+		if (!isVisible(el)) continue;
+		const r = el.getBoundingClientRect();
+		if (r.right <= 0 || r.bottom <= 0 || r.left >= scrollWidth) {
+			layoutIssues.push({ kind: 'offscreen', selector: selectorOf(el), detail: `interactive element is outside the page (x=${Math.round(r.left)}, y=${Math.round(r.top)}) and cannot be reached` });
+			continue;
+		}
+		if (r.left < 0 || r.top < 0 || r.right > vw || r.bottom > vh) continue; // only check what is on screen now
+		const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+		const hit = document.elementFromPoint(cx, cy);
+		if (hit && hit !== el && !el.contains(hit) && !(hit as Element).contains(el)) {
+			layoutIssues.push({ kind: 'covered', selector: selectorOf(el), detail: `the center of this control is covered by ${describe(hit)}, so clicks go to that element` });
+		}
+	}
+	// 3. text cut off by an overflow-hidden box.
+	for (const el of all) {
+		if (layoutIssues.length >= MAX_ISSUES) break;
+		const s = window.getComputedStyle(el);
+		const clipsX = s.overflowX === 'hidden' || s.overflowX === 'clip';
+		const clipsY = s.overflowY === 'hidden' || s.overflowY === 'clip';
+		if (!clipsX && !clipsY) continue;
+		if (!Array.from(el.childNodes).some(n => n.nodeType === 3 && (n.textContent || '').trim().length > 0)) continue;
+		if (s.textOverflow === 'ellipsis' || !isVisible(el)) continue; // an ellipsis is a deliberate truncation
+		const h = el as HTMLElement;
+		if ((clipsX && h.scrollWidth > h.clientWidth + 1) || (clipsY && h.scrollHeight > h.clientHeight + 1)) {
+			layoutIssues.push({ kind: 'clipped-text', selector: selectorOf(el), detail: `text is cut off: content is ${h.scrollWidth}x${h.scrollHeight}px in a ${h.clientWidth}x${h.clientHeight}px box with overflow hidden` });
+		}
 	}
 
 	const visibleText = (() => {
@@ -234,9 +294,13 @@ const EVAL_INSPECT_PAGE = () => {
 		title: document.title,
 		text: visibleText,
 		elements,
+		totalElements,
 		forms,
+		viewport: { width: vw, height: vh },
+		layoutIssues,
 	};
 };
+const MAX_INSPECT_ELEMENTS = 300;
 
 // ---------------------------------------------------------------------------
 // The main service class
@@ -337,7 +401,7 @@ export class KodiaBrowserMainService implements IBrowserService {
 			await this.navigateLocked(session, tabId, state, opts.url);
 		}
 
-		return { tabId, url: state.url, title: state.title };
+		return this.tabResult(tabId, state);
 	}
 
 	async listTabs(sessionId: string): Promise<BrowserTabInfo[]> {
@@ -381,22 +445,42 @@ export class KodiaBrowserMainService implements IBrowserService {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
 		await this.navigateLocked(session, tabId, st, url);
-		return { tabId, url: st.url, title: st.title };
+		return this.tabResult(tabId, st);
+	}
+
+	// A fresh document: clear what was captured for the previous one, then load.
+	private resetCapturedState(st: PageState): void {
+		st.loading = true;
+		st.loadError = undefined;
+		st.status = undefined;
+		st.consoleMessages = [];
+		st.networkFailures = [];
+	}
+
+	// The HTTP status of the main document is part of the result: a 404/500 page still "loads".
+	private recordResponse(st: PageState, response: any, what: string): void {
+		st.loading = false;
+		st.status = response ? response.status() : undefined;
+		if (response && response.status() >= 400) {
+			st.loadError = `HTTP ${response.status()} for ${what}`;
+		}
+	}
+
+	private async refreshUrlAndTitle(st: PageState): Promise<void> {
+		st.url = st.page.url();
+		st.title = await st.page.title().catch(() => st.title);
+	}
+
+	private tabResult(tabId: string, st: PageState, navigated?: boolean): BrowserTabResult {
+		return { tabId, url: st.url, title: st.title, status: st.status, loadError: st.loadError, ...(navigated !== undefined ? { navigated } : {}) };
 	}
 
 	private async navigateLocked(session: SessionState, tabId: string, st: PageState, url: string): Promise<void> {
-		st.loading = true;
-		st.loadError = undefined;
-		st.consoleMessages = [];
-		st.networkFailures = [];
+		this.resetCapturedState(st);
 		try {
 			const response = await st.page.goto(url, { waitUntil: 'load', timeout: DEFAULT_TIMEOUT_MS });
-			st.url = st.page.url();
-			st.title = await st.page.title().catch(() => '');
-			st.loading = false;
-			if (!response || response.status() >= 400) {
-				st.loadError = `HTTP ${response ? response.status() : 'unknown'} for ${url}`;
-			}
+			await this.refreshUrlAndTitle(st);
+			this.recordResponse(st, response, url);
 		} catch (e: any) {
 			st.loading = false;
 			st.loadError = e?.message ?? String(e);
@@ -404,55 +488,95 @@ export class KodiaBrowserMainService implements IBrowserService {
 		}
 	}
 
-	async goBack(sessionId: string, tabId: string): Promise<BrowserTabResult> {
+	private async historyStep(sessionId: string, tabId: string, step: 'goBack' | 'goForward' | 'reload'): Promise<BrowserTabResult> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
-		await st.page.goBack({ waitUntil: 'load', timeout: DEFAULT_TIMEOUT_MS });
-		st.url = st.page.url();
-		st.title = await st.page.title().catch(() => '');
-		return { tabId, url: st.url, title: st.title };
+		this.resetCapturedState(st);
+		const response = await st.page[step]({ waitUntil: 'load', timeout: DEFAULT_TIMEOUT_MS });
+		if (!response && step !== 'reload') {
+			st.loading = false;
+			throw new Error(step === 'goBack' ? 'There is no previous page in this tab\'s history.' : 'There is no next page in this tab\'s history.');
+		}
+		await this.refreshUrlAndTitle(st);
+		this.recordResponse(st, response, st.url);
+		return this.tabResult(tabId, st);
 	}
 
-	async goForward(sessionId: string, tabId: string): Promise<BrowserTabResult> {
-		const session = this.getSession(sessionId);
-		const st = this.getPage(session, tabId);
-		await st.page.goForward({ waitUntil: 'load', timeout: DEFAULT_TIMEOUT_MS });
-		st.url = st.page.url();
-		st.title = await st.page.title().catch(() => '');
-		return { tabId, url: st.url, title: st.title };
-	}
-
-	async reload(sessionId: string, tabId: string): Promise<BrowserTabResult> {
-		const session = this.getSession(sessionId);
-		const st = this.getPage(session, tabId);
-		await st.page.reload({ waitUntil: 'load', timeout: DEFAULT_TIMEOUT_MS });
-		st.url = st.page.url();
-		st.title = await st.page.title().catch(() => '');
-		return { tabId, url: st.url, title: st.title };
-	}
+	goBack(sessionId: string, tabId: string): Promise<BrowserTabResult> { return this.historyStep(sessionId, tabId, 'goBack'); }
+	goForward(sessionId: string, tabId: string): Promise<BrowserTabResult> { return this.historyStep(sessionId, tabId, 'goForward'); }
+	reload(sessionId: string, tabId: string): Promise<BrowserTabResult> { return this.historyStep(sessionId, tabId, 'reload'); }
 
 	async inspectPage(sessionId: string, tabId: string): Promise<BrowserInspectResult> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
-		const info = await st.page.evaluate(EVAL_INSPECT_PAGE) as BrowserPageInfo;
+		const info = await st.page.evaluate(EVAL_INSPECT_PAGE, MAX_INSPECT_ELEMENTS) as BrowserPageInfo;
 		st.url = info.url ?? st.page.url();
 		st.title = info.title ?? st.title;
+		const errors = st.consoleMessages.filter(m => m.level === 'error');
 		return {
 			url: st.url,
 			title: st.title,
+			status: st.status,
+			loadError: st.loadError,
 			text: info.text ?? '',
 			elements: info.elements ?? [],
+			totalElements: info.totalElements ?? (info.elements ?? []).length,
 			forms: info.forms ?? [],
-			consoleErrors: st.consoleMessages.filter(m => m.level === 'error').length,
+			viewport: info.viewport,
+			layoutIssues: info.layoutIssues ?? [],
+			consoleErrors: errors.length,
+			recentConsoleErrors: errors.slice(-5).map(m => m.text),
 			networkFailures: st.networkFailures.length,
+			recentNetworkFailures: st.networkFailures.slice(-5).map(f => `${f.url} — ${f.errorText}`),
 		};
 	}
 
-	async clickElement(sessionId: string, tabId: string, selector: string): Promise<void> {
+	/**
+	 * Run a page action that may start a navigation (a link click, a form submit) and, if it does, wait for the
+	 * new document to load before returning — otherwise the agent inspects the old page (or a half-loaded one).
+	 * A navigation is detected by the main-frame navigation request it issues.
+	 */
+	private async runPossiblyNavigatingAction(st: PageState, action: () => Promise<void>): Promise<boolean> {
+		const page = st.page;
+		let navigation: Promise<unknown> | undefined;
+		const onRequest = (req: any) => {
+			try {
+				if (!navigation && req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+					this.resetCapturedState(st);
+					const loaded = page.waitForEvent('load', { timeout: DEFAULT_TIMEOUT_MS }).catch(() => { });
+					const responded = req.response().then((res: any) => {
+						this.recordResponse(st, res, req.url());
+						if (!res) { st.loadError = `Navigation to ${req.url()} failed: ${req.failure()?.errorText ?? 'no response'}`; }
+						return res;
+					}, () => null);
+					// a request that fails (no response) never loads: don't wait the full timeout for it
+					navigation = Promise.race([loaded, responded.then((res: any) => res ? loaded : undefined)]);
+				}
+			} catch { }
+		};
+		page.on('request', onRequest);
+		try {
+			await action();
+			await timeout(NAVIGATION_START_GRACE_MS); // a click handler may navigate on the next tick
+			if (navigation) { await navigation; }
+		} finally {
+			page.off('request', onRequest);
+		}
+		st.loading = false;
+		await this.refreshUrlAndTitle(st);
+		return !!navigation;
+	}
+
+	async clickElement(sessionId: string, tabId: string, selector: string): Promise<BrowserTabResult> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
 		await st.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
-		await st.page.click(selector, { timeout: DEFAULT_TIMEOUT_MS });
+		const matches = await st.page.$$eval(selector, (els: Element[]) => els.length).catch(() => 1);
+		if (matches > 1) {
+			throw new Error(`Selector "${selector}" matches ${matches} elements; use a selector that matches exactly one (browser_inspect_page lists one per element).`);
+		}
+		const navigated = await this.runPossiblyNavigatingAction(st, () => st.page.click(selector, { timeout: DEFAULT_TIMEOUT_MS }));
+		return this.tabResult(tabId, st, navigated);
 	}
 
 	async fillElement(sessionId: string, tabId: string, selector: string, text: string): Promise<void> {
@@ -479,16 +603,13 @@ export class KodiaBrowserMainService implements IBrowserService {
 	async submitForm(sessionId: string, tabId: string, selector: string): Promise<BrowserTabResult> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
-		await st.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
-		await st.page.evaluate((sel: string) => {
+		await st.page.waitForSelector(selector, { state: 'attached', timeout: DEFAULT_TIMEOUT_MS });
+		const navigated = await this.runPossiblyNavigatingAction(st, () => st.page.evaluate((sel: string) => {
 			const form = document.querySelector(sel);
-			if (!form || !(form instanceof HTMLFormElement)) throw new Error(`Form not found: ${sel}`);
+			if (!form || !(form instanceof HTMLFormElement)) { throw new Error(`No <form> matches ${sel}`); }
 			form.requestSubmit();
-		}, selector);
-		await timeout(500); // let navigation begin
-		st.url = st.page.url();
-		st.title = await st.page.title().catch(() => '');
-		return { tabId, url: st.url, title: st.title };
+		}, selector));
+		return this.tabResult(tabId, st, navigated);
 	}
 
 	async waitForElement(sessionId: string, tabId: string, selector: string, opts: { timeoutMs?: number }): Promise<{ found: boolean }> {
@@ -515,7 +636,8 @@ export class KodiaBrowserMainService implements IBrowserService {
 		let buffer: Buffer;
 		let width = 0;
 		let height = 0;
-		if (type === 'element' && opts.selector) {
+		if (type === 'element') {
+			if (!opts.selector) throw new Error('An element screenshot needs a selector.');
 			const el = await st.page.$(opts.selector);
 			if (!el) throw new Error(`Element not found for screenshot: ${opts.selector}`);
 			buffer = await el.screenshot();
@@ -524,17 +646,21 @@ export class KodiaBrowserMainService implements IBrowserService {
 			height = Math.round((box && box.height) || 0);
 		} else if (type === 'fullpage') {
 			buffer = await st.page.screenshot({ fullPage: true });
-			const size = st.page.viewportSize();
-			width = size?.width ?? 0;
-			height = size?.height ?? 0;
+			const size = await st.page.evaluate(() => ({ width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }));
+			width = size.width;
+			height = size.height;
 		} else {
 			buffer = await st.page.screenshot({ fullPage: false });
 			const size = st.page.viewportSize();
 			width = size?.width ?? 0;
 			height = size?.height ?? 0;
 		}
+		// Also on disk, so the user (or a vision tool) can open it: the text result the model gets only says where.
+		fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+		const filePath = path.join(SCREENSHOT_DIR, `${generateUuid()}.png`);
+		fs.writeFileSync(filePath, buffer);
 		const dataUrl = `data:image/png;base64,${buffer.toString('base64')}`;
-		return { dataUrl, width, height, type };
+		return { dataUrl, width, height, type, path: filePath };
 	}
 
 	async getConsoleMessages(sessionId: string, tabId: string, opts: { level?: 'debug' | 'info' | 'warning' | 'error'; limit?: number }): Promise<ConsoleMessage[]> {
@@ -542,7 +668,7 @@ export class KodiaBrowserMainService implements IBrowserService {
 		const st = this.getPage(session, tabId);
 		let msgs = st.consoleMessages.slice();
 		if (opts.level) msgs = msgs.filter(m => m.level === opts.level);
-		if (opts.limit) msgs = msgs.slice(0, opts.limit);
+		if (opts.limit && opts.limit > 0) msgs = msgs.slice(-opts.limit); // the most recent ones
 		return msgs;
 	}
 
@@ -556,15 +682,23 @@ export class KodiaBrowserMainService implements IBrowserService {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
 		const downloadId = generateUuid();
-		const filename = path.basename(new URL(url).pathname) || 'download';
-		const filePath = path.join(TEMP_DOWNLOAD_DIR, `${downloadId}_${filename}`);
-		const info: DownloadInfo = { downloadId, url, suggestedFilename: filename, status: 'in_progress', path: filePath };
+		// Relative URLs resolve against the tab's page, like a link would.
+		const absolute = new URL(url, st.page.url() && st.page.url() !== 'about:blank' ? st.page.url() : undefined).toString();
+		let filename = path.basename(new URL(absolute).pathname) || 'download';
+		const info: DownloadInfo = { downloadId, url: absolute, suggestedFilename: filename, status: 'in_progress' };
 		session.downloads.set(downloadId, info);
-		// Trigger an actual download so Playwright can save it.
+		// Fetched through the tab's browser context, so the session's cookies apply (was: waited for a download
+		// event nothing triggered, so every call failed after 30s).
 		try {
-			const download = await st.page.waitForEvent('download', { timeout: 30_000 });
-			await download.saveAs(filePath);
-			info.status = 'completed';
+			const response = await session.context.request.get(absolute, { timeout: DEFAULT_TIMEOUT_MS });
+			if (!response.ok()) { throw new Error(`HTTP ${response.status()} ${response.statusText()}`); }
+			const disposition = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(response.headers()['content-disposition'] ?? '');
+			if (disposition) { filename = path.basename(decodeURIComponent(disposition[1])); }
+			const body: Buffer = await response.body();
+			fs.mkdirSync(TEMP_DOWNLOAD_DIR, { recursive: true });
+			const filePath = path.join(TEMP_DOWNLOAD_DIR, `${downloadId}_${filename}`);
+			fs.writeFileSync(filePath, body);
+			Object.assign(info, { suggestedFilename: filename, status: 'completed', path: filePath, sizeBytes: body.length });
 		} catch (e: any) {
 			info.status = 'failed';
 			info.failureText = e?.message ?? String(e);
@@ -583,12 +717,19 @@ export class KodiaBrowserMainService implements IBrowserService {
 		await this.destroySession(session);
 	}
 
+	// Closes every session. New launches are refused only while that runs: the `browser_shutdown` tool calls this, and
+	// it used to leave the flag set for good, so one cleanup call by a model disabled the browser until Kodia restarted
+	// (seen in a live run).
 	async shutdown(): Promise<void> {
 		this.shuttingDown = true;
-		for (const session of Array.from(this.sessions.values())) {
-			try { await this.destroySession(session); } catch { }
+		try {
+			for (const session of Array.from(this.sessions.values())) {
+				try { await this.destroySession(session); } catch { }
+			}
+			this.sessions.clear();
+		} finally {
+			this.shuttingDown = false;
 		}
-		this.sessions.clear();
 	}
 
 	// ------------------------------------------------------------------
@@ -629,8 +770,19 @@ export class KodiaBrowserMainService implements IBrowserService {
 				id: generateUuid(),
 				timestampMs: now(),
 				level: 'error',
-				text: err?.message ?? String(err),
+				text: `Uncaught ${err?.name && !String(err?.message).startsWith(err.name) ? `${err.name}: ` : ''}${err?.message ?? String(err)}`,
 			});
+			if (st.consoleMessages.length > 500) st.consoleMessages.shift();
+		});
+
+		// requestfailed only fires for transport errors; a 404 script or a 500 API call is a "successful" request.
+		page.on('response', (res: any) => {
+			try {
+				if (res.status() >= 400) {
+					st.networkFailures.push({ id: generateUuid(), timestampMs: now(), url: res.url(), type: res.request().resourceType() || 'other', errorText: `HTTP ${res.status()} ${res.statusText()}`.trim() });
+					if (st.networkFailures.length > 200) st.networkFailures.shift();
+				}
+			} catch { }
 		});
 
 		page.on('requestfailed', (req: any) => {
@@ -663,7 +815,7 @@ export class KodiaBrowserMainService implements IBrowserService {
 		page.on('load', () => {
 			st.loading = false;
 			st.url = page.url();
-			st.title = page.title() ?? '';
+			page.title().then((t: string) => { st.title = t; }, () => { }); // was assigned the unawaited Promise
 		});
 
 		page.on('loaderror', () => {

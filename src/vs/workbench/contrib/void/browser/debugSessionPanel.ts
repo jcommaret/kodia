@@ -253,11 +253,12 @@ class DebugSessionViewPane extends ViewPane {
 			const threads = session.getAllThreads();
 			const firstThread = threads.length > 0 ? threads[0] : undefined;
 
-			const btnContinue = this.createSessionBtn('▶', 'Continue', () => firstThread ? this.debugToolService.continue(sessionId, firstThread.threadId) : Promise.resolve());
-			const btnPause = this.createSessionBtn('⏸', 'Pause', () => firstThread ? this.debugToolService.pause(sessionId, firstThread.threadId) : Promise.resolve());
-			const btnStepOver = this.createSessionBtn('⇥', 'Step Over', () => firstThread ? this.debugToolService.stepOver(sessionId, firstThread.threadId) : Promise.resolve());
-			const btnStepInto = this.createSessionBtn('⇣', 'Step Into', () => firstThread ? this.debugToolService.stepInto(sessionId, firstThread.threadId) : Promise.resolve());
-			const btnStepOut = this.createSessionBtn('⇪', 'Step Out', () => firstThread ? this.debugToolService.stepOut(sessionId, firstThread.threadId) : Promise.resolve());
+			// continue/step act on the stopped thread (resolved by the service); pause targets a running thread
+			const btnContinue = this.createSessionBtn('▶', 'Continue', async () => { await this.debugToolService.continue(sessionId); });
+			const btnPause = this.createSessionBtn('⏸', 'Pause', async () => { if (firstThread) { await this.debugToolService.pause(sessionId, firstThread.threadId); } });
+			const btnStepOver = this.createSessionBtn('⇥', 'Step Over', async () => { await this.debugToolService.stepOver(sessionId); });
+			const btnStepInto = this.createSessionBtn('⇣', 'Step Into', async () => { await this.debugToolService.stepInto(sessionId); });
+			const btnStepOut = this.createSessionBtn('⇪', 'Step Out', async () => { await this.debugToolService.stepOut(sessionId); });
 			const btnStop = this.createSessionBtn('⏹', 'Stop', () => this.debugService.stopSession(session));
 
 			controls.appendChild(btnContinue);

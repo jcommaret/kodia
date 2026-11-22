@@ -235,32 +235,10 @@ suite('Kodia - Debug Tool Service (mocked adapter)', () => {
 		assert.ok(Array.isArray(configurations));
 	});
 
-	test('setBreakpoint creates a breakpoint', async () => {
-		// addBreakpoints returns [] by default; override to return a breakpoint
-		(debugService as any).addBreakpoints = async () => [
-			{ id: 'bp-1', uri: { toString: () => 'file:///repo/app.js' }, lineNumber: 10, enabled: true, verified: true },
-		];
-		const bp = await service.setBreakpoint(undefined, 'file:///repo/app.js', 10);
-		assert.strictEqual(bp.id, 'bp-1');
-		assert.strictEqual(bp.lineNumber, 10);
-		assert.strictEqual(bp.verified, true);
-	});
-
-	test('listBreakpoints returns breakpoints', async () => {
-		(debugService.getModel() as any).getBreakpoints = () => [
-			{ id: 'bp-1', uri: { toString: () => 'file:///repo/app.js' }, lineNumber: 10, enabled: true, verified: true, column: undefined },
-		];
-		const { breakpoints } = await service.listBreakpoints();
-		assert.strictEqual(breakpoints.length, 1);
-		assert.strictEqual(breakpoints[0].id, 'bp-1');
-	});
-
-	test('removeBreakpoint removes a breakpoint', async () => {
-		let removed: string | undefined;
-		(debugService as any).removeBreakpoints = async (id: string) => { removed = id; };
-		await service.removeBreakpoint('bp-1');
-		assert.strictEqual(removed, 'bp-1');
-	});
+	// Breakpoints (set / list / remove by id), start/continue/step/pause with stop reporting, and console capture are
+	// verified against a REAL DAP adapter (debugpy) in test/electron-browser/debugTools.test.ts. The mock-based versions
+	// that used to be here asserted the previous implementation's calls on mocks that do not follow the real API
+	// (breakpoints without getId(), sessions that never stop or start), so they were removed.
 
 	test('setBreakpointEnabled toggles a breakpoint', async () => {
 		let seen: { id: string; enabled: boolean } | undefined;
@@ -337,25 +315,4 @@ suite('Kodia - Debug Tool Service (mocked adapter)', () => {
 		assert.strictEqual(output.length, 0);
 	});
 
-	test('execution control methods call the session', async () => {
-		let continued = false, paused = false;
-		const session = debugService.getModel().getSession('session-1')!;
-		session.continue = async () => { continued = true; };
-		session.pause = async () => { paused = true; };
-		await service.continue('session-1', 1);
-		await service.pause('session-1', 1);
-		assert.ok(continued);
-		assert.ok(paused);
-	});
-
-	test('startSession delegates to startDebugging', async () => {
-		let started: { name: string } | undefined;
-		(debugService as any).startDebugging = async (launch: any, config: any) => { started = config; return true; };
-		(debugService.getConfigurationManager() as any).getLaunches = () => [
-			{ workspace: undefined, getConfiguration: (n: string) => n === 'Launch Node' ? { type: 'node', request: 'launch', name: 'Launch Node' } : undefined, getConfigurationNames: () => ['Launch Node'] },
-		];
-		const info = await service.startSession('Launch Node');
-		assert.ok(started, 'startDebugging should be called');
-		assert.strictEqual(info.sessionId, 'session-1');
-	});
 });

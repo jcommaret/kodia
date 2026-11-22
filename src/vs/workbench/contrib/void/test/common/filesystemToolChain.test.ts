@@ -33,7 +33,8 @@ suite('Kodia - filesystemToolChain', () => {
 			written.push({ fsPath: _uri.fsPath, len: buffer.byteLength });
 			await new Promise<void>(resolve => { writeFileDeferredResolve = resolve });
 		},
-		stat: async () => ({ type: 1 }),
+		// like the real IFileService: paths the agent is about to create do not exist yet, so stat throws
+		stat: async (uri: URI) => { throw new Error(`EntryNotFound: ${uri.fsPath}`); },
 	};
 
 	const instantiationService = {
@@ -73,7 +74,8 @@ suite('Kodia - filesystemToolChain', () => {
 		DUMMY as any, instantiationService as any,
 		voidModelService as any,
 		editCodeService as any,
-		DUMMY as any, DUMMY as any, DUMMY as any, DUMMY as any, commandBarServiceMock as any, DUMMY as any, DUMMY as any,
+		DUMMY as any, DUMMY as any, DUMMY as any, DUMMY as any, commandBarServiceMock as any, DUMMY as any,
+		{ read: () => [] } as any, // IMarkerService (post-edit lint lookup)
 		voidSettingsService as any,
 		DUMMY as any, DUMMY as any, DUMMY as any,
 		mainProcessService as any,

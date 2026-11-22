@@ -500,6 +500,7 @@ export type GlobalSettings = {
 	isOnboardingComplete: boolean;
 	disableSystemMessage: boolean;
 	autoAcceptLLMChanges: boolean;
+	verifyBeforeFinishing: boolean; // agent mode: after a turn that changed files, ask the model once to verify its work (completionCheck.ts)
 	oneHourPromptCache: boolean; // Claude: keep the prompt cache 1 hour (2x write price) instead of 5 minutes
 	// Web Search settings (Phase 1)
 	webSearchProviders: Record<'brave' | 'tavily' | 'exa' | 'you' | 'nvidia' | 'duckduckgo', {
@@ -536,6 +537,7 @@ export const defaultGlobalSettings: GlobalSettings = {
 	isOnboardingComplete: false,
 	disableSystemMessage: false,
 	autoAcceptLLMChanges: true,
+	verifyBeforeFinishing: true,
 	oneHourPromptCache: false,
 	// Web Search settings (Phase 1)
 	webSearchProviders: {

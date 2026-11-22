@@ -54,8 +54,6 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 
 		this._updateService.checkForUpdates(false) // implicity check, then handle result ourselves
 
-		console.log('updateState', this._updateService.state)
-
 		if (this._updateService.state.type === StateType.Uninitialized) {
 			// The update service hasn't been initialized yet
 			return { message: explicit ? 'Checking for updates soon...' : null, action: explicit ? 'reinstall' : undefined } as const

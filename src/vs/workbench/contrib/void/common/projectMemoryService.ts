@@ -49,6 +49,26 @@ export const memoryWithSection = (memory: string, title: string, content: string
 }
 
 
+/**
+ * The memory as it goes into a prompt. The memory itself has no size limit (by design), but a prompt does: when the
+ * memory is bigger than the budget (a share of the model's context window), whole sections are kept in order while
+ * they fit, and a note names the ones left out so the agent can read them from the file.
+ */
+export const fitMemoryToBudget = (memory: string, maxTokens: number): string => {
+	if (!memory.trim() || estimateTokens(memory) <= maxTokens) return memory
+	const { preamble, sections } = parseMemorySections(memory)
+	const kept: MemorySection[] = []
+	let used = estimateTokens(preamble)
+	const left: string[] = []
+	for (const s of sections) {
+		const cost = estimateTokens(`## ${s.title}\n${s.body}\n\n`)
+		if (left.length === 0 && used + cost <= maxTokens) { kept.push(s); used += cost }
+		else left.push(s.title)
+	}
+	const note = `(${left.length} more section${left.length === 1 ? '' : 's'} not shown here, to fit this model's context window: ${left.map(t => `"${t}"`).join(', ')}. Read ${PROJECT_MEMORY_FILE_PATH} when you need them.)`
+	return renderMemorySections({ preamble, sections: kept }) + '\n' + note + '\n'
+}
+
 export interface IProjectMemoryService {
 	readonly _serviceBrand: undefined;
 	readonly onDidChange: Event<void>;
@@ -64,7 +84,7 @@ export interface IProjectMemoryService {
 
 export const IProjectMemoryService = createDecorator<IProjectMemoryService>('ProjectMemoryService');
 
-class ProjectMemoryService extends Disposable implements IProjectMemoryService {
+export class ProjectMemoryService extends Disposable implements IProjectMemoryService {
 	_serviceBrand: undefined;
 
 	private readonly _onDidChange = this._register(new Emitter<void>())
@@ -114,23 +134,47 @@ class ProjectMemoryService extends Disposable implements IProjectMemoryService {
 		return this._fileContents ?? this._legacyMemory()
 	}
 
-	async writeSection(title: string, content: string) {
-		await this.whenReady
-		const base = this._fileContents ?? (this._legacyMemory() ? `${FILE_HEADER}\n\n## Notes\n${this._legacyMemory()}` : FILE_HEADER)
-		const memory = memoryWithSection(base, title, content)
-		const tokenCount = estimateTokens(memory)
-		if (tokenCount > MAX_PROJECT_MEMORY_TOKENS) {
-			throw new Error(`The project memory would be ${tokenCount} tokens, over its ~${MAX_PROJECT_MEMORY_TOKENS}-token limit, so nothing was saved. Condense it first: rewrite the longest sections more briefly, merge overlapping ones, or delete outdated ones (empty content). Then save again.`)
-		}
-		await this._write(memory)
-		return { memory, tokenCount }
+	// Writes run one at a time, each starting from the file as it is on disk now. Was: every write started from the
+	// in-memory copy, so two writers at once (e.g. parallel subagents) lost one update, and an edit made in the file
+	// that the file watcher had not reported yet was overwritten.
+	private _writeTail: Promise<unknown> = Promise.resolve()
+	private _serialized<T>(f: () => Promise<T>): Promise<T> {
+		const run = this._writeTail.then(f, f)
+		this._writeTail = run.catch(() => { })
+		return run
 	}
 
-	async setMemory(memory: string) {
+	private async _readFileNow(): Promise<string | null> {
+		const uri = this.memoryFileURI()
+		if (!uri) return null
+		try { return (await this.fileService.readFile(uri)).value.toString() }
+		catch { return null }
+	}
+
+	writeSection(title: string, content: string) {
+		return this._serialized(async () => {
+			await this.whenReady
+			const current = await this._readFileNow()
+			const base = current ?? (this._legacyMemory() ? `${FILE_HEADER}\n\n## Notes\n${this._legacyMemory()}` : FILE_HEADER)
+			const memory = memoryWithSection(base, title, content)
+			const tokenCount = estimateTokens(memory)
+			if (tokenCount > MAX_PROJECT_MEMORY_TOKENS) {
+				throw new Error(`The project memory would be ${tokenCount} tokens, over its ~${MAX_PROJECT_MEMORY_TOKENS}-token limit, so nothing was saved. Condense it first: rewrite the longest sections more briefly, merge overlapping ones, or delete outdated ones (empty content). Then save again.`)
+			}
+			await this._write(memory)
+			return { memory, tokenCount }
+		})
+	}
+
+	setMemory(memory: string) {
+		return this._serialized(() => this._setMemory(memory))
+	}
+
+	private async _setMemory(memory: string) {
 		await this.whenReady
 		if (!memory.trim()) {
 			const uri = this.memoryFileURI()
-			if (uri && this._fileContents !== null) {
+			if (uri && await this._readFileNow() !== null) {
 				await assertPathInWorkspaceWithRealpath(uri, this.workspaceContextService, this.fileService)
 				await this.fileService.del(uri)
 			}

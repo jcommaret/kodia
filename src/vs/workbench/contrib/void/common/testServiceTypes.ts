@@ -141,6 +141,15 @@ export type TestRunResultData = {
 	duration?: number;
 	completed: boolean;
 	testResults: TestCaseResult[];
+	/** where the results came from: a VS Code test controller, or the framework's own command run in the terminal */
+	source?: 'vscode' | 'command';
+	/** command runs: the framework and the exact command, its exit code, and the tail of its output */
+	framework?: string;
+	command?: string;
+	exitCode?: number | null;
+	outputTail?: string;
+	/** why nothing (or not everything) was run or reported, in plain words — never omitted when total is 0 */
+	note?: string;
 };
 
 /**

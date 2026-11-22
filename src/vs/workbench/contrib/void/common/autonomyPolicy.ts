@@ -137,6 +137,17 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'git_stash',
 	'git_stash_pop',
 	'git_show',
+	'git_revert',
+	'git_cherry_pick',
+	'git_rebase',
+	'git_continue',
+	'git_abort',
+	'git_reset',
+	'git_tag_list',
+	'git_tag_create',
+	'git_remote_list',
+	'git_worktree_list',
+	'git_worktree_add',
 	// Test discovery and execution (Stage 3)
 	'test_discover',
 	'test_list',
@@ -252,7 +263,30 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'git_log':
 		case 'git_branch_list':
 		case 'git_show':
+		case 'git_tag_list':
+		case 'git_remote_list':
+		case 'git_worktree_list':
 			return 'low';
+
+		// New commits / refs / a separate checkout; nothing existing is lost, and conflicts stop for resolution.
+		case 'git_revert':
+		case 'git_cherry_pick':
+		case 'git_continue':
+		case 'git_abort':
+		case 'git_tag_create':
+		case 'git_worktree_add':
+			return 'medium';
+
+		// Rewrites the branch's history (commits get new hashes).
+		case 'git_rebase':
+			return 'high';
+
+		// Moves the branch; "hard" also rewrites the working tree (refused by the tool when it holds uncommitted
+		// changes, but the user should still see it).
+		case 'git_reset': {
+			const p = params as { mode?: string } | undefined;
+			return p?.mode === 'hard' ? 'critical' : 'high';
+		}
 
 		// Git operations that modify the local repository.
 		case 'git_branch_create':
@@ -332,8 +366,7 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		// Autonomous dev cycle tools - install/migrate/lint/test are medium risk (run commands)
 		case 'dep_install':
 		case 'db_migrate':
-		case 'lint_run':
-		case 'test_run':
+		case 'lint_run': // (test_run is classified with the test tools above; a second clause here was unreachable)
 			return 'medium';
 		case 'log_read':
 			return 'low';

@@ -9,7 +9,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { KodiaBrowserMainService } from '../../electron-main/browserMainService.js';
 
-suite('Kodia - Browser Automation (Playwright/Chromium)', () => {
+suite('Kodia - Browser Automation (Playwright/Chromium)', function () {
+	// every test launches a real Chromium (1-5s here): mocha's 5s default made a different test time out each run
+	this.timeout(60_000);
+
 	let service: KodiaBrowserMainService;
 	let sessionId: string;
 	let tabId: string;

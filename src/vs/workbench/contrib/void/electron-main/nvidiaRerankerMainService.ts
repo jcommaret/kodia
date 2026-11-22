@@ -92,23 +92,8 @@ export class NvidiaRerankerMainService {
 			return results; // Not enough content to rerank
 		}
 
-		const requestBody = {
-			model: NVIDIA_RERANK_MODEL,
-			query: { text: query },
-			passages: validPassages,
-			truncate: 'END' as const,
-		};
-
 		try {
-			const response = await fetch(NVIDIA_RERANK_ENDPOINT, {
-				signal: AbortSignal.timeout(timeoutMs),
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'Authorization': `Bearer ${apiKey}`,
-				},
-				body: JSON.stringify(requestBody),
-			});
+			const response = await this._postRerank(apiKey, query, validPassages, timeoutMs);
 
 			if (!response.ok) {
 				// Log but don't expose details; fail open
@@ -131,6 +116,58 @@ export class NvidiaRerankerMainService {
 			console.warn('[NvidiaReranker] Request failed:', error instanceof Error ? error.message : String(error));
 			return results;
 		}
+	}
+
+	private _postRerank(apiKey: string, query: string, passages: { text: string }[], timeoutMs: number): Promise<Response> {
+		return fetch(NVIDIA_RERANK_ENDPOINT, {
+			signal: AbortSignal.timeout(timeoutMs),
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+			body: JSON.stringify({ model: NVIDIA_RERANK_MODEL, query: { text: query }, passages, truncate: 'END' as const }),
+		});
+	}
+
+	/**
+	 * Scores plain texts (e.g. code-search candidates) for a query: `scores[i]` is the reranker's relevance logit for
+	 * texts[i] (absolute, so comparable across requests), or null when it could not be scored. Texts are sent in
+	 * batches of 10; NVIDIA's content-safety screen rejects a whole request when any passage trips it (seen on
+	 * security-related code), so a rejected batch is split until only the offending passages are left unscored.
+	 * Returns an error when nothing could be scored (no key, HTTP error, timeout, malformed response).
+	 */
+	async rerankTexts(query: string, texts: string[], options: RerankOptions = {}): Promise<{ scores: (number | null)[] } | { error: string }> {
+		if (texts.length === 0) { return { scores: [] }; }
+		const apiKey = await this._getNvidiaApiKey();
+		if (!apiKey) { return { error: 'no NVIDIA API key is configured' }; }
+		const timeoutMs = Math.min(Math.max(1000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS), 60000);
+		const scores: (number | null)[] = texts.map(() => null);
+		let lastError = '';
+		const scoreBatch = async (idx: number[]): Promise<void> => {
+			let response: Response;
+			try { response = await this._postRerank(apiKey, query, idx.map(i => ({ text: texts[i] })), timeoutMs); }
+			catch (error) { lastError = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError') ? 'the NVIDIA reranker timed out' : `the NVIDIA reranker failed: ${error instanceof Error ? error.message : String(error)}`; return; }
+			if (!response.ok) {
+				const detail = (await response.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+				lastError = `the NVIDIA reranker answered HTTP ${response.status}${detail ? `: ${detail}` : ''}`;
+				if (response.status === 422 && idx.length > 1) { // content screening: isolate the passage(s) it objects to
+					const half = Math.ceil(idx.length / 2);
+					await Promise.all([scoreBatch(idx.slice(0, half)), scoreBatch(idx.slice(half))]);
+				}
+				return;
+			}
+			const rankings = ((await response.json().catch(() => null)) as { rankings?: { index?: unknown; logit?: unknown }[] } | null)?.rankings;
+			if (!Array.isArray(rankings)) { lastError = 'the NVIDIA reranker returned no rankings'; return; }
+			for (const r of rankings) {
+				if (typeof r.index === 'number' && Number.isInteger(r.index) && r.index >= 0 && r.index < idx.length && typeof r.logit === 'number' && Number.isFinite(r.logit)) {
+					scores[idx[r.index]] = r.logit;
+				}
+			}
+		};
+		const all = texts.map((_, i) => i);
+		const batches: number[][] = [];
+		for (let i = 0; i < all.length; i += 10) { batches.push(all.slice(i, i + 10)); }
+		await Promise.all(batches.map(scoreBatch));
+		if (scores.every(s => s === null)) { return { error: lastError || 'the NVIDIA reranker scored nothing' }; }
+		return { scores };
 	}
 
 	/**

@@ -470,7 +470,7 @@ export const builtinTools: {
 
 	browser_inspect_page: {
 		name: 'browser_inspect_page',
-		description: `Inspects the current page of a tab: returns the URL, title, visible text, interactive elements (buttons, links, inputs, selects, checkboxes, radios) with selectors, and forms. Use the returned selectors with click_element, fill_element, etc.`,
+		description: `Inspects the current page of a tab: URL, title and HTTP status; layout problems measured on the rendered page (content wider than the viewport, controls covered by other elements or off-screen, clipped text); console errors and failed requests; visible text; interactive elements (buttons, links, inputs, selects, checkboxes, radios), each with a selector that matches exactly that element; and forms. Use the returned selectors with click_element, fill_element, etc. Use it after set_viewport to check a layout at that size.`,
 		params: {
 			session_id: { description: 'The browser session ID returned by browser_launch.' },
 			tab_id: { description: 'The tab ID to inspect.' },
@@ -479,7 +479,7 @@ export const builtinTools: {
 
 	browser_click_element: {
 		name: 'browser_click_element',
-		description: `Clicks an element on the page by its CSS selector (as returned by inspect_page). Waits for the element to be visible before clicking.`,
+		description: `Clicks an element on the page by its CSS selector (as returned by inspect_page). Waits for the element to be visible before clicking, and if the click navigates, waits for the new page to load and reports it.`,
 		params: {
 			session_id: { description: 'The browser session ID returned by browser_launch.' },
 			tab_id: { description: 'The tab ID.' },
@@ -554,7 +554,7 @@ export const builtinTools: {
 
 	browser_screenshot: {
 		name: 'browser_screenshot',
-		description: `Captures a screenshot of a tab (viewport, full page, or a single element) and returns it as a base64 data URL the agent can inspect.`,
+		description: `Captures a screenshot of a tab (viewport, full page, or a single element) and saves it as a PNG file, returning its path and size. You do not see the image: to check what the page shows, use browser_inspect_page.`,
 		params: {
 			session_id: { description: 'The browser session ID returned by browser_launch.' },
 			tab_id: { description: 'The tab ID.' },
@@ -576,7 +576,7 @@ export const builtinTools: {
 
 	browser_network_failures: {
 		name: 'browser_network_failures',
-		description: `Returns failed network requests captured for a tab (e.g. ERR_CONNECTION_REFUSED, 404s), useful for detecting broken pages and missing resources.`,
+		description: `Returns failed network requests captured for a tab since its current page started loading: transport errors (e.g. ERR_CONNECTION_REFUSED) and HTTP error responses (404, 500, ...). Useful for detecting broken pages and missing resources.`,
 		params: {
 			session_id: { description: 'The browser session ID returned by browser_launch.' },
 			tab_id: { description: 'The tab ID.' },
@@ -585,7 +585,7 @@ export const builtinTools: {
 
 	browser_download: {
 		name: 'browser_download',
-		description: `Downloads a URL in a tab and saves it to disk, returning the download id and local path.`,
+		description: `Downloads a URL (absolute, or relative to the tab's page) with the browser session's cookies and saves it to disk, returning the download id, local path and size, or the HTTP error.`,
 		params: {
 			session_id: { description: 'The browser session ID returned by browser_launch.' },
 			tab_id: { description: 'The tab ID.' },
@@ -732,54 +732,54 @@ export const builtinTools: {
 	// --- Code Index & Semantic Search ---
 	code_index: {
 		name: 'code_index',
-		description: `Indexes the entire workspace codebase for semantic search. Parses files into chunks (functions, classes, blocks) and generates embeddings. Must be called before semantic search.`,
+		description: `Rebuilds the code index of the workspace folders from scratch and reports what it contains. Searches build and update the index by themselves, so this is rarely needed.`,
 		params: {},
 	},
 
 	code_index_file: {
 		name: 'code_index_file',
-		description: `Indexes a single file for semantic search. Pass the file URI.`,
+		description: `Re-reads one file into the code index now. Rarely needed: every search first updates files that changed on disk.`,
 		params: {
-			uri: { description: 'The file URI to index.' },
+			uri: { description: 'The FULL path to the file.' },
 		},
 	},
 
 	code_semantic_search: {
 		name: 'code_semantic_search',
-		description: `Searches code by meaning (semantic similarity) using TF-IDF + character n-gram embeddings. Finds relevant functions, classes, and code blocks even if they don't contain exact keywords.`,
+		description: `Finds the code relevant to a description, across the whole workspace: returns the best-matching functions, classes, methods and sections as path:start-end ranges with the lines that matched. Use it first when you do not know where something is implemented ("where are passwords hashed", "retry with backoff"). It ranks by words, splitting identifiers (authenticateUser → authenticate, user) and expanding common abbreviations (db, auth, config); it is not an embedding model, so use the words the code would likely use. Always up to date with the files on disk. Then read_file the ranges you need.`,
 		params: {
-			query: { description: 'The search query in natural language (e.g. "user authentication middleware", "database connection pool").' },
-			limit: { description: 'Optional. Maximum number of results to return. Defaults to 10.' },
+			query: { description: 'What you are looking for, in words or identifiers (e.g. "parse config file", "UserRepository save").' },
+			limit: { description: 'Optional. Maximum number of results (1-50). Defaults to 10.' },
 		},
 	},
 
 	code_keyword_search: {
 		name: 'code_keyword_search',
-		description: `Searches code by exact keyword matching. Finds files and code blocks containing specific words.`,
+		description: `Finds every exact (case-insensitive) occurrence of a string in the workspace's indexed files, with file paths and line numbers. Use it for an identifier, error message or literal you already know.`,
 		params: {
-			query: { description: 'The keyword or phrase to search for.' },
-			limit: { description: 'Optional. Maximum number of results to return. Defaults to 10.' },
+			query: { description: 'The exact text to find.' },
+			limit: { description: 'Optional. Maximum number of occurrences (1-50). Defaults to 30.' },
 		},
 	},
 
 	code_hybrid_search: {
 		name: 'code_hybrid_search',
-		description: `Combines semantic and keyword search for best results. Returns deduplicated results ranked by relevance.`,
+		description: `Same as code_semantic_search (kept for older conversations).`,
 		params: {
-			query: { description: 'The search query.' },
-			limit: { description: 'Optional. Maximum number of results to return. Defaults to 10.' },
+			query: { description: 'What you are looking for.' },
+			limit: { description: 'Optional. Maximum number of results (1-50). Defaults to 10.' },
 		},
 	},
 
 	code_index_stats: {
 		name: 'code_index_stats',
-		description: `Returns statistics about the code index: number of files indexed, total chunks, and last indexed time.`,
+		description: `Reports what the code index contains: folders, files, chunks, what was skipped and why.`,
 		params: {},
 	},
 
 	code_index_clear: {
 		name: 'code_index_clear',
-		description: `Clears the entire code index. Use this before re-indexing a changed workspace.`,
+		description: `Empties the code index (the next search rebuilds it).`,
 		params: {},
 	},
 
@@ -1112,7 +1112,9 @@ export const builtinTools: {
 
 	write_project_memory: {
 		name: 'write_project_memory',
-		description: `Saves durable notes about this project for future sessions, in the project memory (\`.kodia/memory.md\` in the repo, shown to you in PROJECT MEMORY at the start of every conversation). The memory is organized in "## " sections; this rewrites one whole section, so merge what's already there into the new content rather than repeating it. Save things worth knowing in every session: architecture, conventions, commands, decisions and their reasons, pitfalls. Keep it short and current: replace outdated notes, and delete a section by passing empty content. Never save secrets, credentials, or other sensitive information. The whole memory is capped at ~${MAX_PROJECT_MEMORY_TOKENS} tokens; a write that would exceed it is rejected, so condense other sections first.`,
+		description: `Saves durable notes about this project for future sessions, in the project memory (\`.kodia/memory.md\` in the repo, shown to you in PROJECT MEMORY at the start of every conversation). The memory is organized in "## " sections; this rewrites one whole section, so merge what's already there into the new content rather than repeating it. Save things worth knowing in every session: architecture, conventions, commands, decisions and their reasons, pitfalls. Keep it short and current: replace outdated notes, and delete a section by passing empty content. Never save secrets, credentials, or other sensitive information. ${Number.isFinite(MAX_PROJECT_MEMORY_TOKENS)
+			? `The whole memory is capped at ~${MAX_PROJECT_MEMORY_TOKENS} tokens; a write that would exceed it is rejected, so condense other sections first.`
+			: `Keep it compact: only part of a long memory fits in a small model's context (the rest is listed by section title, to be read from the file).`}`, // was: "capped at ~Infinity tokens"
 		params: {
 			section: { description: `The section title, e.g. "Architecture", "Conventions", "Commands", "Pitfalls". Reuse an existing title to rewrite that section.` },
 			content: { description: `The full new text of the section (markdown, no "## " heading). Empty to delete the section.` },
@@ -1400,6 +1402,79 @@ export const builtinTools: {
 			path: { description: 'Optional. Limit to this file path.' },
 		},
 	},
+	git_revert: {
+		name: 'git_revert',
+		description: `Undo a commit by creating a new commit that reverses it (history is kept). If it conflicts, the revert stops: resolve the conflicted files, git_stage them, then git_continue (or git_abort).`,
+		params: {
+			commit: { description: 'The commit hash or reference to revert.' },
+		},
+	},
+	git_cherry_pick: {
+		name: 'git_cherry_pick',
+		description: `Apply the changes of one commit from another branch onto the current branch as a new commit. On conflicts it stops: resolve, git_stage, then git_continue (or git_abort).`,
+		params: {
+			commit: { description: 'The commit hash or reference to apply.' },
+		},
+	},
+	git_rebase: {
+		name: 'git_rebase',
+		description: `Rebase the current branch onto another branch or commit (non-interactive; rewrites this branch's commits). Refused by git when there are uncommitted changes. On conflicts it stops: resolve, git_stage, then git_continue (or git_abort).`,
+		params: {
+			onto: { description: 'The branch or commit to rebase onto, e.g. main.' },
+		},
+	},
+	git_continue: {
+		name: 'git_continue',
+		description: `Continue the merge, revert, cherry-pick or rebase that stopped on conflicts, after the conflicted files were fixed and staged with git_stage.`,
+		params: {},
+	},
+	git_abort: {
+		name: 'git_abort',
+		description: `Abort the merge, revert, cherry-pick or rebase in progress and return to the state before it started.`,
+		params: {},
+	},
+	git_reset: {
+		name: 'git_reset',
+		description: `Move the current branch to another commit. mode "soft" keeps changes staged, "mixed" keeps them in the working tree, "hard" also resets the working tree and is refused when there are uncommitted changes. The result lists the commits the branch no longer contains and the previous HEAD, so it can be undone with git_reset to that hash.`,
+		params: {
+			ref: { description: 'The commit to move to, e.g. HEAD~1 or a hash.' },
+			mode: { description: '"soft", "mixed" or "hard". Default "mixed".' },
+		},
+	},
+	git_tag_list: {
+		name: 'git_tag_list',
+		description: `List tags (newest first) with the commit each points to.`,
+		params: {},
+	},
+	git_tag_create: {
+		name: 'git_tag_create',
+		description: `Create a tag. With a message it is an annotated tag. Fails if the tag already exists.`,
+		params: {
+			name: { description: 'The tag name, e.g. v1.2.0.' },
+			ref: { description: 'Optional. The commit to tag; default HEAD.' },
+			message: { description: 'Optional. Message for an annotated tag.' },
+		},
+	},
+	git_remote_list: {
+		name: 'git_remote_list',
+		description: `List the repository's remotes and their URLs (credentials in URLs are hidden).`,
+		params: {},
+	},
+	git_worktree_list: {
+		name: 'git_worktree_list',
+		description: `List the repository's worktrees (separate checkouts) with their branch and HEAD.`,
+		params: {},
+	},
+	git_worktree_add: {
+		name: 'git_worktree_add',
+		description: `Create a separate worktree (another checkout of this repository in its own folder) so work can happen on a branch without touching the current checkout.`,
+		params: {
+			path: { description: 'Folder for the new worktree (absolute, or relative to the repository root). It must not exist or must be empty.' },
+			branch: { description: 'The branch to check out there.' },
+			new_branch: { description: 'Optional. true to create the branch (from start_point, default HEAD). Default false: check out an existing branch.' },
+			start_point: { description: 'Optional, with new_branch. The commit or branch the new branch starts from.' },
+		},
+	},
 
 	// Test discovery and execution (Stage 3)
 	test_discover: {
@@ -1449,17 +1524,16 @@ export const builtinTools: {
 			todos: { description: 'The full todo list. Each todo has an id (a short stable key like "setup", "implement", "tests"), content (a one-line description) and status ("pending", "in_progress" or "completed").' },
 		},
 	},
-	// Subagent delegation (OpenCode parity - roadmap Stage 6). Spawns a subagent in a child
-	// thread to work on a task independently while the current turn continues.
+	// Subagent delegation (roadmap 6): runs a child agent loop in its own thread to completion and returns its report.
 	subagent: {
 		name: 'subagent',
-		description: `Spawn a subagent in a child thread to work on a task independently. The subagent runs in the background and you will be notified when it completes. Use this for tasks that can be done in parallel with your current work, or for specialized work that benefits from a dedicated agent (e.g. "write tests for the API layer" while you implement the API). Provide a clear description and full prompt.`,
+		description: `Delegate a task to a subagent: a separate agent with its own conversation, which works until it is done and then returns a report (what it changed, its tool calls and errors, and its final answer). The subagent does not see this conversation, so the prompt must contain everything it needs. Several subagent calls in the same reply run IN PARALLEL — use that for independent pieces of work (e.g. one subagent per module). Parallel subagents must work on different files: a file one of them is changing is refused to the others. Subagents cannot start subagents. Check the report (read the files, run the tests) before relying on it.`,
 		params: {
-			agent: { description: 'The type of subagent to use (e.g. "build", "review", "test").' },
+			agent: { description: 'The subagent type: "general" (can edit files and run commands), "explore" (read-only: searches and reads the code) or "review" (read-only: reviews code and reports problems).' },
 			description: { description: 'A short 3-5 word label for the task, displayed to the user.' },
 			prompt: { description: 'The full task for the subagent to perform. Include all context it needs.' },
-			model: { description: 'Optional. The model to use for the subagent (providerID/modelID).' },
-			session_i_d: { description: 'Optional. Send a follow-up to an existing subagent session.' },
+			model: { description: 'Optional. A model set up in Kodia, as provider/model (e.g. a cheaper model for exploring). Default: the model you are using.' },
+			session_i_d: { description: 'Optional. The session id from an earlier subagent report, to give that subagent a follow-up task (it keeps its conversation).' },
 		},
 	},
 
@@ -1483,7 +1557,7 @@ export const isABuiltinToolName = (toolName: string): toolName is BuiltinToolNam
 
 
 // built-in tools kept for older threads, but no longer given to models
-const toolsNotOfferedToModels: ReadonlySet<BuiltinToolName> = new Set(['read_project_memory'])
+const toolsNotOfferedToModels: ReadonlySet<BuiltinToolName> = new Set(['read_project_memory', 'code_hybrid_search'])
 
 // tools that change nothing but still need approval: Gather mode offers them too
 const readOnlyToolsNeedingApproval: ReadonlySet<BuiltinToolName> = new Set(['fetch_url', 'web_search'])
@@ -1532,8 +1606,8 @@ export const reParsedToolXMLString = (toolName: ToolName, toolParams: RawToolPar
 
 /* We expect tools to come at the end - not a hard limit, but that's just how we process them, and the flow makes more sense that way. */
 // - You are allowed to call multiple tools by specifying them consecutively. However, there should be NO text or writing between tool calls or after them.
-const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined) => {
-	return toolsXMLSystemPrompt(availableTools(chatMode, mcpTools))
+const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, explicitTools?: InternalToolInfo[]) => {
+	return toolsXMLSystemPrompt(availableTools(chatMode, mcpTools, explicitTools))
 }
 
 // the XML tool-calling instructions for models without native tool calling (specialToolFormat undefined)
@@ -1567,7 +1641,8 @@ export const toolsXMLSystemPrompt = (tools: InternalToolInfo[] | undefined) => {
 // only holds what stays the same from one message to the next (this static part, then the guidelines,
 // the project memory and the file tree — see prepareLLMChatMessages), and what changes with every message
 // (active file, open files, terminals, date) goes at the end of the user message (chat_workspaceContext).
-export const chat_systemMessage = ({ workspaceFolders, chatMode: mode, mcpTools, includeXMLToolDefinitions }: { workspaceFolders: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean }) => {
+// explicitTools: a subagent is offered exactly its own tools
+export const chat_systemMessage = ({ workspaceFolders, chatMode: mode, mcpTools, includeXMLToolDefinitions, explicitTools }: { workspaceFolders: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean, explicitTools?: InternalToolInfo[] }) => {
 	const header = (`You are an expert coding ${mode === 'agent' ? 'agent' : 'assistant'} whose job is \
 ${mode === 'agent' ? `to help the user develop, run, and make changes to their codebase.`
 			: mode === 'gather' ? `to search, understand, and reference files in the user's codebase.`
@@ -1587,7 +1662,7 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 </system_info>`)
 
 
-	const toolDefinitions = includeXMLToolDefinitions ? systemToolsXMLPrompt(mode, mcpTools) : null
+	const toolDefinitions = includeXMLToolDefinitions ? systemToolsXMLPrompt(mode, mcpTools, explicitTools) : null
 
 	const details: string[] = []
 

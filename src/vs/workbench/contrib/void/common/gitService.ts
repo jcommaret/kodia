@@ -38,7 +38,16 @@ export type GitRepositoryStatus = {
 	untracked: GitFileStatus[];
 	conflicted: GitFileStatus[];
 	mergeInProgress: boolean;
+	/** A multi-step operation stopped part-way (usually on conflicts); null when none. */
+	operationInProgress: GitOperationInProgress | null;
 };
+
+/** Operations that can stop part-way and be continued (by committing) or aborted with git_abort. */
+export type GitOperationInProgress = 'merge' | 'revert' | 'cherry-pick' | 'rebase';
+
+export type GitTagInfo = { name: string; commit: string; annotated: boolean; subject: string };
+export type GitRemoteInfo = { name: string; fetchUrl: string | null; pushUrl: string | null };
+export type GitWorktreeInfo = { path: string; head: string | null; branch: string | null; isMain: boolean; locked: boolean; prunable: boolean };
 
 /**
  * A single diff hunk.
@@ -111,6 +120,60 @@ export type GitStashEntry = {
 	index: number;
 	message: string;
 };
+
+// ---------------------------------------------------------------------------
+// Running git safely (main process): argv only, no shell
+// ---------------------------------------------------------------------------
+
+export type GitRunRequest = { cwd: string; args: string[]; timeoutMs?: number };
+export type GitRunResult = { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean };
+export type GitRunner = (request: GitRunRequest) => Promise<GitRunResult>;
+
+/** The git subcommands the agent may run (also enforced in the main process). */
+export const GIT_ALLOWED_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	'rev-parse', 'status', 'diff', 'log', 'show', 'for-each-ref', 'check-ref-format',
+	'branch', 'switch', 'add', 'restore', 'rm', 'commit', 'fetch', 'pull', 'push', 'merge', 'stash',
+	'revert', 'cherry-pick', 'rebase', 'reset', 'tag', 'remote', 'worktree',
+]);
+
+/** Subcommands whose first argument selects an action: only these actions are allowed (no remote add/set-url, no
+ * worktree remove/prune). */
+const GIT_ALLOWED_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+	remote: new Set(['-v']),
+	worktree: new Set(['list', 'add']),
+};
+
+const GIT_ALLOWED_CONFIG: ReadonlySet<string> = new Set(['core.quotepath=false', 'color.ui=false']);
+
+/** Validates a request that crossed the IPC boundary; throws on anything unexpected. */
+export function validateGitRunRequest(request: unknown): GitRunRequest {
+	const r = request as Partial<GitRunRequest> | null;
+	if (!r || typeof r !== 'object') { throw new Error('Invalid git request.'); }
+	if (typeof r.cwd !== 'string' || !(/^([a-zA-Z]:[\\/]|\\\\|\/)/.test(r.cwd))) { throw new Error('Invalid git request: cwd must be an absolute path.'); }
+	if (!Array.isArray(r.args) || r.args.length === 0 || !r.args.every(a => typeof a === 'string' && !a.includes('\0'))) { throw new Error('Invalid git request: args must be non-empty strings.'); }
+	// leading global options are limited to the `-c` settings Kodia itself adds: an arbitrary -c (e.g. core.sshCommand,
+	// core.pager, alias.*) would let a caller run any program
+	let i = 0;
+	while (r.args[i] === '-c') {
+		if (!GIT_ALLOWED_CONFIG.has(r.args[i + 1] ?? '')) { throw new Error(`Invalid git request: -c ${r.args[i + 1]} is not allowed.`); }
+		i += 2;
+	}
+	const sub = r.args[i];
+	if (!sub || !GIT_ALLOWED_SUBCOMMANDS.has(sub)) { throw new Error(`Invalid git request: "${sub}" is not an allowed git subcommand.`); }
+	const actions = GIT_ALLOWED_ACTIONS[sub];
+	if (actions && !actions.has(r.args[i + 1] ?? '')) { throw new Error(`Invalid git request: "git ${sub} ${r.args[i + 1] ?? ''}" is not allowed.`); }
+	// interactive rebase runs an editor-driven todo list (and --exec runs commands): never for the agent
+	if (sub === 'rebase' && r.args.slice(i + 1).some(a => a === '-i' || a.startsWith('--interactive') || a.startsWith('--exec') || a === '-x' || a.startsWith('-x'))) { throw new Error('Invalid git request: interactive rebase and --exec are not allowed.'); }
+	const timeoutMs = typeof r.timeoutMs === 'number' && r.timeoutMs > 0 ? Math.min(r.timeoutMs, 10 * 60_000) : undefined;
+	return { cwd: r.cwd, args: [...r.args], timeoutMs };
+}
+
+export interface IKodiaGitMainService {
+	readonly _serviceBrand: undefined;
+	run(request: GitRunRequest): Promise<GitRunResult>;
+}
+export const IKodiaGitMainService = createDecorator<IKodiaGitMainService>('kodiaGitMainService');
+export const KODIA_GIT_CHANNEL = 'void-channel-git';
 
 /**
  * Service interface for Git operations.

@@ -281,6 +281,9 @@ export class NvidiaRerankerMainService {
 	 * Retrieves the NVIDIA API key from the LLM provider settings.
 	 * The key is stored in the main process encrypted settings under the NVIDIA LLM provider.
 	 */
+	/** the NVIDIA key from the encrypted settings (main process only), e.g. for the code index's embedding model */
+	getApiKey(): Promise<string | undefined> { return this._getNvidiaApiKey(); }
+
 	private async _getNvidiaApiKey(): Promise<string | undefined> {
 		if (!this._storageService || !this._encryptionService) {
 			return undefined;

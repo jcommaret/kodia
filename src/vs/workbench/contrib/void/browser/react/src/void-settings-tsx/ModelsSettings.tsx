@@ -17,6 +17,7 @@ import { getModelCapabilities, modelOverrideKeys, ModelOverrides, getModelContex
 import { isFreeOpenRouterModel } from '../../../../common/openRouterModels.js';
 import { AddButton, AddRowButton, AnimatedCheckmarkButton, GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
 import { SearchProvidersSettings } from './SearchProvidersSettings.js';
+import { MODEL_ROUTING_ROLES, MODEL_ROUTING_ROLE_LABELS, modelSelectionKey } from '../../../../common/modelRouting.js';
 
 const ButtonLeftTextRightOption = ({ text, leftButton }: { text: string, leftButton?: React.ReactNode }) => {
 
@@ -787,11 +788,127 @@ export const LocalServer = ({ server: { title, description, instructions, autoSe
 	</div>
 }
 
+const FallbackAndRoutingSettings = () => {
+	const accessor = useAccessor()
+	const voidSettingsService = accessor.get('IVoidSettingsService')
+	const settingsState = useSettingsState()
+	const modelOptions = settingsState._modelOptions
+	const fallbackModels = settingsState.globalSettings.fallbackModels ?? []
+	const routingByRole = settingsState.globalSettings.modelRoutingByRole ?? {}
+
+	const [selectedFallbackKey, setSelectedFallbackKey] = useState('')
+
+	const addFallback = () => {
+		const opt = modelOptions.find(o => modelSelectionKey(o.selection) === selectedFallbackKey)
+		if (!opt) return
+		if (fallbackModels.some(f => modelSelectionKey(f) === selectedFallbackKey)) return
+		voidSettingsService.setGlobalSetting('fallbackModels', [...fallbackModels, opt.selection])
+		setSelectedFallbackKey('')
+	}
+
+	const removeFallback = (idx: number) => {
+		voidSettingsService.setGlobalSetting('fallbackModels', fallbackModels.filter((_, i) => i !== idx))
+	}
+
+	const setRoleModel = (role: string, key: string) => {
+		const next = { ...routingByRole }
+		if (!key) {
+			delete next[role]
+		} else {
+			const opt = modelOptions.find(o => modelSelectionKey(o.selection) === key)
+			if (opt) next[role] = opt.selection
+		}
+		voidSettingsService.setGlobalSetting('modelRoutingByRole', next)
+	}
+
+	return (
+		<div className='flex flex-col gap-4'>
+			<div className='flex flex-col gap-2'>
+				<div className='text-sm font-medium text-void-fg-1'>Automatic Fallback Models</div>
+				<div className='text-xs text-void-fg-3'>
+					When the primary model hits rate limits (429), 5xx outages, or timeouts, Kodia automatically falls back through this ordered list.
+				</div>
+				{fallbackModels.length === 0 ? (
+					<div className='text-xs text-void-fg-4'>No fallback models configured.</div>
+				) : (
+					<div className='flex flex-col gap-1'>
+						{fallbackModels.map((fb, idx) => (
+							<div key={`${modelSelectionKey(fb)}-${idx}`} className='flex items-center justify-between gap-2 px-3 py-1.5 rounded-sm border border-void-border-2 bg-void-bg-1 text-xs'>
+								<span className='font-mono text-void-fg-1'>
+									{idx + 1}. {fb.providerName} / {fb.modelName}
+								</span>
+								<button type='button' onClick={() => removeFallback(idx)} className='text-void-fg-3 hover:text-red-400'>
+									<X size={12} />
+								</button>
+							</div>
+						))}
+					</div>
+				)}
+				<div className='flex items-center gap-2'>
+					<select
+						value={selectedFallbackKey}
+						onChange={e => setSelectedFallbackKey(e.target.value)}
+						className='flex-1 px-2 py-1 rounded-sm bg-void-bg-1 border border-void-border-2 text-xs text-void-fg-1'
+					>
+						<option value=''>Select a configured model to add as fallback...</option>
+						{modelOptions.map(opt => {
+							const k = modelSelectionKey(opt.selection)
+							return <option key={k} value={k}>{opt.name}</option>
+						})}
+					</select>
+					<VoidButtonBgDarken className='px-3 py-1 text-xs' disabled={!selectedFallbackKey} onClick={addFallback}>
+						Add Fallback
+					</VoidButtonBgDarken>
+				</div>
+			</div>
+
+			<div className='flex flex-col gap-2 pt-2 border-t border-void-border-2'>
+				<div className='text-sm font-medium text-void-fg-1'>Task & Specialist Model Routing</div>
+				<div className='text-xs text-void-fg-3'>
+					Optionally assign specialized models for specific modes or subagent roles (leave on Default to use your selected Chat model).
+				</div>
+				<div className='flex flex-col gap-1.5'>
+					{MODEL_ROUTING_ROLES.map(role => {
+						const meta = MODEL_ROUTING_ROLE_LABELS[role]
+						const current = routingByRole[role]
+						const currentKey = current ? modelSelectionKey(current) : ''
+						return (
+							<div key={role} className='flex items-center justify-between gap-3 py-1 border-b border-void-border-2/50'>
+								<div className='min-w-0'>
+									<div className='text-xs font-medium text-void-fg-1'>{meta.label}</div>
+									<div className='text-[11px] text-void-fg-3'>{meta.description}</div>
+								</div>
+								<select
+									value={currentKey}
+									onChange={e => setRoleModel(role, e.target.value)}
+									className='w-52 px-2 py-1 rounded-sm bg-void-bg-1 border border-void-border-2 text-xs text-void-fg-1 shrink-0'
+								>
+									<option value=''>Default (Chat model)</option>
+									{modelOptions.map(opt => {
+										const k = modelSelectionKey(opt.selection)
+										return <option key={k} value={k}>{opt.name}</option>
+									})}
+								</select>
+							</div>
+						)
+					})}
+				</div>
+			</div>
+		</div>
+	)
+}
+
 export const ModelsSection = () => {
 	return <SettingsSection title='Models' description='The models Kodia can use, from a provider with an API key or from a server running on your computer.'>
 		<SettingGroup title='Available models' description={`The models that are on appear in Kodia's model menus. A model can't be turned on until its provider is set up below.`}>
 			<ModelDump />
 			<AutoDetectLocalModelsToggle />
+		</SettingGroup>
+
+		<SettingGroup title='Model routing & fallbacks' description='Configure automatic failover models and optional specialist role routing.'>
+			<ErrorBoundary>
+				<FallbackAndRoutingSettings />
+			</ErrorBoundary>
 		</SettingGroup>
 
 		<SettingGroup title='Cloud providers' description={`Add a provider's API key to use its models.`}>

@@ -11,26 +11,33 @@
 	--void-bg-1: var(--vscode-input-background);
 	--void-bg-1-alt: var(--vscode-badge-background);
 	--void-bg-2: var(--vscode-sideBar-background);
-	--void-bg-2-alt: color-mix(in srgb, var(--vscode-editor-background) 30%, var(--vscode-sideBar-background) 70%);
-	--void-bg-2-hover: color-mix(in srgb, var(--vscode-editor-foreground) 2%, var(--vscode-sideBar-background) 98%);
+	--void-bg-2-alt: color-mix(in srgb, var(--vscode-editor-background) 35%, var(--vscode-sideBar-background) 65%);
+	--void-bg-2-hover: color-mix(in srgb, var(--vscode-editor-foreground) 4%, var(--vscode-sideBar-background) 96%);
 	--void-bg-3: var(--vscode-editor-background);
 
-	--void-fg-0: color-mix(in srgb, var(--vscode-tab-activeForeground) 90%, black 10%);
+	--void-fg-0: color-mix(in srgb, var(--vscode-tab-activeForeground) 92%, black 8%);
 	--void-fg-1: var(--vscode-editor-foreground);
 	--void-fg-2: var(--vscode-input-foreground);
-	--void-fg-3: var(--vscode-input-placeholderForeground);
-	/* --void-fg-4: var(--vscode-tab-inactiveForeground); */
+	--void-fg-3: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground));
 	--void-fg-4: var(--vscode-list-deemphasizedForeground);
 
 	--void-warning: var(--vscode-charts-yellow);
 
-	--void-border-1: var(--vscode-commandCenter-activeBorder);
-	--void-border-2: var(--vscode-commandCenter-border);
-	--void-border-3: var(--vscode-commandCenter-inactiveBorder);
+	--void-border-1: var(--vscode-commandCenter-activeBorder, var(--vscode-focusBorder));
+	--void-border-2: var(--vscode-panel-border, var(--vscode-commandCenter-border));
+	--void-border-3: var(--vscode-editorGroup-border, var(--vscode-commandCenter-inactiveBorder));
 	--void-border-4: var(--vscode-editorGroup-border);
 
-	--void-ring-color: #007FD4;
-	--void-link-color: #007FD4;
+	--void-ring-color: var(--vscode-focusBorder, #3B6FF5);
+	--void-link-color: var(--vscode-textLink-foreground, #3B6FF5);
+
+	/* Kodia Design System semantic tokens */
+	--kodia-accent: var(--vscode-button-background, #3B6FF5);
+	--kodia-accent-hover: var(--vscode-button-hoverBackground, #4D7DF7);
+	--kodia-accent-fg: var(--vscode-button-foreground, #FFFFFF);
+	--kodia-accent-soft: color-mix(in srgb, var(--kodia-accent) 16%, transparent);
+	--kodia-card-bg: color-mix(in srgb, var(--vscode-editor-background) 70%, var(--vscode-sideBar-background) 30%);
+	--kodia-card-border: color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent);
 }
 
 .select-child-restyle select {
@@ -43,59 +50,28 @@
 	color: var(--void-fg-3);
 }
 
-* {
-	outline: none !important;
+/* Preserve clean keyboard accessibility while removing default mouse outlines */
+*:focus {
+	outline: none;
 }
 
-
+*:focus-visible {
+	outline: 1.5px solid var(--void-ring-color) !important;
+	outline-offset: 1px;
+}
 
 .inherit-bg-all-restyle > * {
 	background-color: inherit !important;
 }
 
-
 .bg-editor-style-override {
 	--vscode-sideBar-background: var(--vscode-editor-background);
 }
 
-
-
-/* html {
-	font-size: var(--vscode-font-size);
-}
-
-.btn {
-	@apply cursor-pointer transition-colors;
-
-	&.btn-primary {
-		@apply bg-vscode-button-bg text-vscode-button-fg;
-
-		&:not(:disabled) {
-			@apply hover:bg-vscode-button-hoverBg;
-		}
-	}
-
-	&.btn-sm {
-		@apply px-3 py-1 text-sm;
-	}
-
-	&.btn-secondary {
-		@apply bg-vscode-button-secondary-bg text-vscode-button-secondary-fg;
-
-		&:not(:disabled) {
-			@apply hover:bg-vscode-button-secondary-hoverBg;
-		}
-	}
-
-	&:disabled {
-		@apply opacity-75 cursor-not-allowed;
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
 	}
 }
-
-.input {
-	@apply bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-vscode-focus-border;
-}
-
-.dropdown {
-	@apply bg-vscode-dropdown-bg text-vscode-dropdown-foreground border-vscode-dropdown-border focus:outline-vscode-focus-border;
-} */

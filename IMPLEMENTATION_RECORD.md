@@ -883,6 +883,51 @@ Jest 29.7.0 and Mocha 10.7.3 are installed in git-ignored `.build/kodia-js-test-
 
 **Not covered:** command-line obfuscation (variables holding the command, `Invoke-Expression` of built strings, base64-encoded PowerShell). A pattern check cannot see through these; real sandboxing or a filesystem-level guard would be needed (roadmap 10).
 
+## 2026-11-22 (z) — Roadmap 7: code search by meaning (embedding index)
+
+**Gap:** search ranked by words (BM25 over symbol chunks), with an optional NVIDIA reranker that only re-orders the top 30 word matches. Code described in other words was never found.
+
+**Now:**
+- **`common/codeEmbeddings.ts`** (pure):
+  - A vector store keyed by the SHA-1 of exactly the embedded text (path, kind, name and code), so unchanged code is never embedded again.
+  - Unit-normalized cosine top-k; bounded at 200k vectors, oldest dropped.
+  - A compact binary format that refuses another model's or a damaged file.
+  - General reciprocal-rank fusion.
+- **`node/codeEmbedder.ts`:** any OpenAI-style `/embeddings` endpoint, so the user can bring their own model.
+  - Batches of 64; retries 429 and 5xx (honoring Retry-After); errors are reported, never turned into vectors.
+  - NVIDIA's asymmetric `input_type` is supported.
+  - In the app: NVIDIA `nemotron-3.5-embed-1b` at 1024 dimensions, the key read in the main process (none crosses IPC).
+- **`node/codeSemanticIndex.ts`:** one background embedding job (definitions first, at most 30k chunks per workspace).
+  - A search waits up to 20 s, then uses what is embedded and reports the coverage.
+  - Vectors are cached on disk per model (`<userData>/kodia/code-embeddings`), so after a restart only the query is embedded.
+  - After a failure (no key, HTTP 401), embedding is not retried for 60 s.
+- **Found live:** NVIDIA's content screening (HTTP 422) refused one batch, and that stopped all embedding. A refused batch is now split until the refused chunks are isolated; those are skipped, remembered and counted (49 of 4365 on Kodia's source). They are still found by words.
+- **Search** (`code_semantic_search`):
+  - Word candidates (50) and meaning candidates (50) are fused, one hit per region, then optionally re-ranked.
+  - The tool output names the embedding model, marks hits "found by meaning: shares no words with the query", and states the coverage.
+  - Same privacy rule as the reranker: used only when the chat model is NVIDIA's, since the code already goes there.
+
+**Live evaluation** (KODIA_LIVE=1, Kodia's own AI source, 4365 chunks, 12 questions phrased to avoid the code's own words; report in `%TEMP%\kodia-code-semantic-eval.txt`):
+
+| Ranking | top-1 | top-3 |
+|---|---|---|
+| words | 2/12 | 3/12 |
+| words + meaning | 4/12 | 6/12 |
+| words + meaning + reranker | 7/12 | 9/12 |
+
+Embedding everything took 291 s and 816k tokens. Still missed: "how many pieces of text a message will cost" (tokenizer.ts) and "which lines did the tests never run" (testCoverage.ts). Caveat: the test file holding the questions is itself indexed and sometimes appears in the results; it never pushed an expected file out of the top 3.
+
+**Tests:**
+- `test/common/codeEmbeddings.test.ts` (4): cosine, serialization round-trip and refusals, the bound, keys, fusion.
+- `test/electron-main/codeSemanticSearch.test.ts` (5 deterministic, with a word→concept stand-in embedder, + the LIVE eval):
+  - A chunk sharing no word with the query is found by meaning (words alone miss it), and the output says so.
+  - The cache across a restart embeds only the query; editing a file re-embeds only its chunk.
+  - Content screening: the refused chunk is isolated and skipped, and not sent again.
+  - A failing model: words only, the reason given, no retry storm.
+  - A slow model: the search does not wait past its budget, and the background job completes.
+
+**Not done:** the word index itself is still rebuilt in memory after a restart (the vectors are not). Only NVIDIA is wired in the app; other providers' embedding endpoints work through the same class but have no settings UI yet.
+
 ## Session report — 2026-11-21: roadmap 1–10 pass complete (mandate format)
 
 1. **Changed**:
@@ -955,7 +1000,7 @@ Jest 29.7.0 and Mocha 10.7.3 are installed in git-ignored `.build/kodia-js-test-
 | 6 | Subagents: run to completion with a fact-based report; parallel (≤4); types general/explore/review (offered + enforced); per-subagent model; follow-up by session id; no nesting; file claims between parallel subagents; stop propagates | **Integration-tested + agent-loop e2e (scenario 7, scripted)** | was fire-and-forget (parent never got results; child often crashed before its task existed); subagents.test.ts (2 e2e, fails on the old block), common/subagents.test.ts (4); no live-model run; no subagent UI |
 | 7 | Codebase index: workspace folders via git ls-files, symbol chunks, BM25 with identifier splitting, always fresh, exact-occurrence search | **Integration-tested (real folders, Kodia's own source) + agent-loop e2e** | was indexing process.cwd(), quadratic (40 files = 46 s); codeIndex.test.ts (7), codeIndexWorkspace.test.ts (4), codeSearchAgent.test.ts (1); eval 10/10 top-3, 7/10 top-1 on own questions |
 | 7 | Code search re-ranked by meaning (NVIDIA reranker, when the chat model is NVIDIA's) | **Integration-tested + live-evaluated** | rank-1 7→8/10 on own questions; candidates still come from the word index; content-screening rejections isolated |
-| 7 | Full embedding index; persisted index | **Missing** | NVIDIA's embedding models available to this key are few/retiring; index is in memory |
+| 7 | Embedding index: code search by meaning fused with words (NVIDIA `nemotron-3.5-embed-1b`, any OpenAI-style endpoint), vectors cached on disk by content hash, background embedding with honest coverage | **Integration-tested + live-evaluated** | record (z): paraphrased questions top-3 3/12 → 6/12 (+meaning) → 9/12 (+reranker); codeEmbeddings.test.ts (4), codeSemanticSearch.test.ts (5 + LIVE). The word index itself is still rebuilt in memory after a restart; only NVIDIA is wired in the app |
 | scenario 8 | Session recovery with a real model | **End-to-end verified LIVE (NVIDIA nemotron-3.5-super-vl)** | agentLoopLive.recovery.test.ts; earlier failures were the test's own wait loop (crash fired at t=0, then hung); section (r) |
 | scenario 3 | Browser-driven repair | **End-to-end verified LIVE** | agentLoopLive.repair.test.ts (after the browser_shutdown fix) |
 | 8 | Rewind/replay an agent's multi-file change (edit, overwrite, create, delete incl. recursive) | **Integration-tested (real disk)** | rewind restored nothing before; checkpointRecovery.test.ts (2); terminal-made changes not covered |

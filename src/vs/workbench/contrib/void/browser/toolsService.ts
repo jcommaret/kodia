@@ -14,6 +14,9 @@ import { createDecorator, IInstantiationService } from '../../../../platform/ins
 import { IBrowserService } from '../common/browserServiceTypes.js'
 import { formatBrowserInspection, formatBrowserPage } from '../common/browserFormatting.js'
 import { formatSubagentReport } from '../common/subagents.js'
+import { formatArchitectureMapForLLM, formatProjectHealthForLLM } from '../common/projectHealth.js'
+import { runArchitectureMap, runProjectHealthScan } from './projectHealthScanner.js'
+import { formatDbInspectForLLM, formatDbQueryForLLM, formatDockerStatusForLLM, formatEnvInspectForLLM, IKodiaOpsMainService, KODIA_OPS_CHANNEL } from '../common/kodiaOpsTypes.js'
 import { formatCodeSearch, formatIndexStats, formatLiteralSearch } from '../common/codeIndexFormatting.js'
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js'
 import { QueryBuilder } from '../../../services/search/common/queryBuilder.js'
@@ -53,6 +56,12 @@ import { INotebookExecutionService } from '../../notebook/common/notebookExecuti
 import { VSBuffer } from '../../../../base/common/buffer.js'
 import type { GitStepResult } from '../common/gitOperations.js'
 import type { GitChangedFile } from '../common/gitService.js'
+import { analyzeChangeImpact, buildProjectDigitalTwin, formatChangeImpactForLLM, queryKnowledgeGraph } from '../common/digitalTwin.js'
+import { analyzeProjectHealth, buildArchitectureMap } from '../common/projectHealth.js'
+import { collectWorkspaceProjectFiles } from './projectHealthScanner.js'
+import { createVerificationRecord, formatQualityGateEvaluationForLLM, VERIFICATION_LEVEL_ORDER, VerificationLevel } from '../common/verificationLedger.js'
+import { IVerificationLedgerService } from './verificationLedgerService.js'
+import { ISoftwareFactoryService } from '../common/softwareFactory.js'
 
 
 // tool use for AI
@@ -339,6 +348,7 @@ export class ToolsService implements IToolsService {
 		const webSearchService = ProxyChannel.toService<IWebSearchService>(mainProcessService.getChannel('void-channel-webSearch'))
 		const browserService = ProxyChannel.toService<IBrowserService>(mainProcessService.getChannel('void-channel-browser'))
 		const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
+		const kodiaOpsService = ProxyChannel.toService<IKodiaOpsMainService>(mainProcessService.getChannel(KODIA_OPS_CHANNEL))
 		const workspaceFolderPaths = () => workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
 
 		const recentPages = new Map<string, WebFetchResult>()
@@ -1086,13 +1096,19 @@ export class ToolsService implements IToolsService {
 				const { title: titleUnknown, description: descriptionUnknown } = params
 				const title = validateStr('title', titleUnknown)
 				const description = validateStr('description', descriptionUnknown)
-				const tasksUnknown = params.tasks
-				let tasks: { title: string, description: string, dependencies: string[] }[] = []
+				let tasksUnknown: unknown = params.tasks
+				if (typeof tasksUnknown === 'string') {
+					try { tasksUnknown = JSON.parse(tasksUnknown) } catch { /* leave as string */ }
+				}
+				let tasks: { title: string, description: string, dependencies: string[], priority?: 'high' | 'medium' | 'low', assignedAgent?: string, acceptanceCriteria?: string[] }[] = []
 				if (Array.isArray(tasksUnknown)) {
 					tasks = tasksUnknown.map((t: any) => ({
 						title: validateStr('title', t.title),
-						description: validateStr('description', t.description),
+						description: validateStr('description', t.description ?? t.title),
 						dependencies: Array.isArray(t.dependencies) ? t.dependencies.map((d: any) => String(d)) : [],
+						...(t.priority === 'high' || t.priority === 'medium' || t.priority === 'low' ? { priority: t.priority } : {}),
+						...(typeof t.assignedAgent === 'string' && t.assignedAgent.trim() ? { assignedAgent: t.assignedAgent.trim() } : typeof t.assigned_agent === 'string' && t.assigned_agent.trim() ? { assignedAgent: t.assigned_agent.trim() } : {}),
+						...(Array.isArray(t.acceptanceCriteria) ? { acceptanceCriteria: t.acceptanceCriteria.map((c: any) => String(c)) } : Array.isArray(t.acceptance_criteria) ? { acceptanceCriteria: t.acceptance_criteria.map((c: any) => String(c)) } : {}),
 					}))
 				}
 				return { title, description, tasks }
@@ -1286,6 +1302,97 @@ export class ToolsService implements IToolsService {
 				if (!description) throw new Error(`Invalid LLM output: description must not be empty.`)
 				if (!prompt) throw new Error(`Invalid LLM output: prompt must not be empty.`)
 				return { agent, description, prompt, model: model ?? undefined, sessionID: sessionID ?? undefined }
+			},
+
+			project_health_scan: (params: RawToolParamsObj) => {
+				const maxFiles = validateNumber(params.max_files, { default: 400 }) ?? 400
+				return { max_files: maxFiles }
+			},
+			architecture_map: (params: RawToolParamsObj) => {
+				const maxFiles = validateNumber(params.max_files, { default: 400 }) ?? 400
+				return { max_files: maxFiles }
+			},
+			workspace_diagnostics: (params: RawToolParamsObj) => {
+				const sevRaw = params.severity === undefined || params.severity === null ? 'all' : String(params.severity).toLowerCase()
+				const severity: 'error' | 'warning' | 'all' = sevRaw === 'error' ? 'error' : sevRaw === 'warning' ? 'warning' : 'all'
+				const limit = Math.max(1, Math.min(validateNumber(params.limit, { default: 100 }) ?? 100, 300))
+				return { severity, limit }
+			},
+			move_or_rename_file: (params: RawToolParamsObj) => {
+				const source_uri = validateURI(params.source_uri, workspaceContextService)
+				const target_uri = validateURI(params.target_uri, workspaceContextService)
+				const overwrite = validateBoolean(params.overwrite, { default: false }) ?? false
+				return { source_uri, target_uri, overwrite }
+			},
+			file_metadata: (params: RawToolParamsObj) => {
+				const uri = validateURI(params.uri, workspaceContextService)
+				return { uri }
+			},
+			dependency_audit: (_params: RawToolParamsObj) => ({}),
+			env_inspect: (_params: RawToolParamsObj) => ({}),
+			docker_status: (_params: RawToolParamsObj) => ({}),
+			docker_logs: (params: RawToolParamsObj) => {
+				const container = validateStr('container', params.container).trim()
+				if (!container) throw new Error('Invalid LLM output: container must not be empty.')
+				const tail = validateNumber(params.tail, { default: 100 }) ?? 100
+				return { container, tail }
+			},
+			db_inspect: (params: RawToolParamsObj) => {
+				const db_path = params.db_path ? validateStr('db_path', params.db_path).trim() : undefined
+				return { db_path }
+			},
+			db_query: (params: RawToolParamsObj) => {
+				const sql = validateStr('sql', params.sql).trim()
+				if (!sql) throw new Error('Invalid LLM output: sql must not be empty.')
+				const db_path = params.db_path ? validateStr('db_path', params.db_path).trim() : undefined
+				const allow_write = validateBoolean(params.allow_write, { default: false }) ?? false
+				return { sql, db_path, allow_write }
+			},
+			change_impact_analysis: (params: RawToolParamsObj) => {
+				const target_path = validateStr('target_path', params.target_path).trim()
+				if (!target_path) throw new Error('Invalid LLM output: target_path must not be empty.')
+				const sub_path = params.sub_path ? validateStr('sub_path', params.sub_path).trim() : undefined
+				return { target_path, sub_path }
+			},
+			knowledge_graph_query: (params: RawToolParamsObj) => {
+				const query = params.query ? validateStr('query', params.query).trim() : ''
+				const sub_path = params.sub_path ? validateStr('sub_path', params.sub_path).trim() : undefined
+				const limit = validateNumber(params.limit, { default: 15 }) ?? 15
+				return { query, sub_path, limit }
+			},
+			evaluate_quality_gates: (params: RawToolParamsObj) => {
+				const sub_path = params.sub_path ? validateStr('sub_path', params.sub_path).trim() : undefined
+				return { sub_path }
+			},
+			record_verification_evidence: (params: RawToolParamsObj) => {
+				const task_title = validateStr('task_title', params.task_title).trim()
+				const summary = validateStr('summary', params.summary).trim()
+				const rawLevel = validateStr('level', params.level).trim() as VerificationLevel
+				const level: VerificationLevel = VERIFICATION_LEVEL_ORDER.includes(rawLevel) ? rawLevel : 'implemented'
+				const passed = validateBoolean(params.passed, { default: true }) ?? true
+				const detail = validateStr('detail', params.detail).trim()
+				let files_changed: string[] | undefined
+				if (Array.isArray(params.files_changed)) {
+					files_changed = params.files_changed.map(String)
+				} else if (typeof params.files_changed === 'string' && params.files_changed.trim()) {
+					files_changed = params.files_changed.split(',').map(s => s.trim()).filter(Boolean)
+				}
+				const command = params.command ? validateStr('command', params.command).trim() : undefined
+				return { task_title, summary, level, passed, detail, files_changed, command }
+			},
+			factory_manage_requirements: (params: RawToolParamsObj) => {
+				const rawAction = validateStr('action', params.action).trim()
+				const action = (rawAction === 'add' || rawAction === 'update' || rawAction === 'add_decision') ? rawAction : 'list'
+				const id = params.id ? validateStr('id', params.id).trim() : undefined
+				const title = params.title ? validateStr('title', params.title).trim() : undefined
+				const description = params.description ? validateStr('description', params.description).trim() : undefined
+				const statusRaw = params.status ? validateStr('status', params.status).trim() : undefined
+				const status = (statusRaw === 'unstarted' || statusRaw === 'in_progress' || statusRaw === 'implemented' || statusRaw === 'verified') ? statusRaw : undefined
+				const priorityRaw = params.priority ? validateStr('priority', params.priority).trim() : undefined
+				const priority = (priorityRaw === 'high' || priorityRaw === 'medium' || priorityRaw === 'low') ? priorityRaw : undefined
+				const decision = params.decision ? validateStr('decision', params.decision).trim() : undefined
+				const consequences = params.consequences ? validateStr('consequences', params.consequences).trim() : undefined
+				return { action, id, title, description, status, priority, decision, consequences }
 			},
 
 			// Notebook operations
@@ -1951,9 +2058,10 @@ export class ToolsService implements IToolsService {
 				return { result: { indexed: await codeIndexService.indexFile(uri.fsPath), filePath: uri.fsPath } }
 			},
 			code_semantic_search: async ({ query, limit }) => {
-				// re-rank by meaning with NVIDIA's reranker only when the chat model is NVIDIA's: the code already goes there
-				const rerank = this.voidSettingsService.state.modelSelectionOfFeature['Chat']?.providerName === 'nvidia'
-				return { result: { query, ...await codeIndexService.search(workspaceFolderPaths(), query, limit, { rerank }) } }
+				// search by meaning (NVIDIA's embedding model) and re-rank (NVIDIA's reranker) only when the chat model is
+				// NVIDIA's: the code already goes there
+				const nvidia = this.voidSettingsService.state.modelSelectionOfFeature['Chat']?.providerName === 'nvidia'
+				return { result: { query, ...await codeIndexService.search(workspaceFolderPaths(), query, limit, { rerank: nvidia, semantic: nvidia }) } }
 			},
 			code_keyword_search: async ({ query, limit }) => {
 				return { result: { query, ...await codeIndexService.findLiteral(workspaceFolderPaths(), query, limit) } }
@@ -2540,6 +2648,248 @@ export class ToolsService implements IToolsService {
 			// Handled in chatThreadService._runToolCall (needs thread creation + autonomous executor).
 			subagent: async () => {
 				throw new Error('subagent tool is handled by chatThreadService, not toolsService.callTool')
+			},
+
+			project_health_scan: async ({ max_files }) => {
+				return { result: await runProjectHealthScan(fileService, workspaceContextService, max_files) }
+			},
+			architecture_map: async ({ max_files }) => {
+				return { result: await runArchitectureMap(fileService, workspaceContextService, max_files) }
+			},
+			workspace_diagnostics: async ({ severity = 'all', limit = 100 }) => {
+				const allMarkers = this.markerService.read({})
+				let totalErrors = 0
+				let totalWarnings = 0
+				const items: Array<{ uri: string, severity: 'error' | 'warning', line: number, code: string, message: string, source?: string }> = []
+				for (const m of allMarkers) {
+					if (m.severity === MarkerSeverity.Error) totalErrors++
+					else if (m.severity === MarkerSeverity.Warning) totalWarnings++
+					else continue
+					if (severity === 'error' && m.severity !== MarkerSeverity.Error) continue
+					if (severity === 'warning' && m.severity !== MarkerSeverity.Warning) continue
+					if (items.length < limit) {
+						items.push({
+							uri: m.resource.fsPath,
+							severity: m.severity === MarkerSeverity.Error ? 'error' : 'warning',
+							line: m.startLineNumber,
+							code: typeof m.code === 'string' ? m.code : m.code?.value || '',
+							message: m.message,
+							source: m.source,
+						})
+					}
+				}
+				return { result: { totalErrors, totalWarnings, items } }
+			},
+			move_or_rename_file: async ({ source_uri, target_uri, overwrite }) => {
+				if (!workspaceContextService.isInsideWorkspace(source_uri)) {
+					throw new Error(`Source path is outside the open workspace: ${source_uri.fsPath}`)
+				}
+				if (!workspaceContextService.isInsideWorkspace(target_uri)) {
+					throw new Error(`Target path is outside the open workspace: ${target_uri.fsPath}`)
+				}
+				await fileService.move(source_uri, target_uri, Boolean(overwrite))
+				return { result: { sourceUri: source_uri, targetUri: target_uri } }
+			},
+			file_metadata: async ({ uri }) => {
+				const stat = await fileService.stat(uri)
+				let lineCount: number | null = null
+				let lineEnding: 'CRLF' | 'LF' | 'mixed' | 'none' = 'none'
+				let isBinary = false
+				if (!stat.isDirectory && stat.size <= 2_000_000) {
+					try {
+						const raw = await fileService.readFile(uri)
+						const bytes = raw.value.buffer
+						const probeLen = Math.min(bytes.length, 4096)
+						for (let i = 0; i < probeLen; i++) {
+							if (bytes[i] === 0) { isBinary = true; break }
+						}
+						if (!isBinary) {
+							const text = raw.value.toString()
+							const crlf = (text.match(/\r\n/g) ?? []).length
+							const lfOnly = (text.match(/(?<!\r)\n/g) ?? []).length
+							lineCount = text.length === 0 ? 0 : text.split(/\r?\n/).length
+							lineEnding = crlf > 0 && lfOnly > 0 ? 'mixed' : crlf > 0 ? 'CRLF' : lfOnly > 0 ? 'LF' : 'none'
+						}
+					} catch { /* unreadable content */ }
+				}
+				return {
+					result: {
+						uri: uri.fsPath,
+						size: stat.size,
+						mtime: stat.mtime,
+						isDirectory: stat.isDirectory,
+						isSymbolicLink: stat.isSymbolicLink,
+						lineCount,
+						lineEnding,
+						isBinary,
+					}
+				}
+			},
+			dependency_audit: async () => {
+				const manifests: Array<{ file: string, ecosystem: string, dependencies: number, devDependencies: number, scripts: string[], riskySpecs: string[], license?: string, engines?: Record<string, string> }> = []
+				const folders = workspaceContextService.getWorkspace().folders
+				for (const folder of folders) {
+					// package.json
+					try {
+						const pkgUri = URI.joinPath(folder.uri, 'package.json')
+						const text = (await fileService.readFile(pkgUri)).value.toString()
+						const pkg = JSON.parse(text) as { dependencies?: Record<string, string>, devDependencies?: Record<string, string>, scripts?: Record<string, string>, license?: string, engines?: Record<string, string> }
+						const deps = pkg.dependencies ?? {}
+						const devDeps = pkg.devDependencies ?? {}
+						const riskySpecs: string[] = []
+						for (const [k, v] of [...Object.entries(deps), ...Object.entries(devDeps)]) {
+							const trimmed = String(v).trim()
+							if (trimmed === '*' || trimmed === 'latest' || /^https?:\/\//i.test(trimmed)) {
+								riskySpecs.push(`${k}@${trimmed}`)
+							}
+						}
+						manifests.push({
+							file: pkgUri.fsPath,
+							ecosystem: 'npm/node',
+							dependencies: Object.keys(deps).length,
+							devDependencies: Object.keys(devDeps).length,
+							scripts: Object.keys(pkg.scripts ?? {}),
+							riskySpecs,
+							license: pkg.license,
+							engines: pkg.engines,
+						})
+					} catch { /* no package.json */ }
+					// requirements.txt
+					try {
+						const reqUri = URI.joinPath(folder.uri, 'requirements.txt')
+						const lines = (await fileService.readFile(reqUri)).value.toString().split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+						const riskySpecs = lines.filter(l => !/[=<>!~]/.test(l))
+						manifests.push({
+							file: reqUri.fsPath,
+							ecosystem: 'python/pip',
+							dependencies: lines.length,
+							devDependencies: 0,
+							scripts: [],
+							riskySpecs: riskySpecs.map(r => `${r} (unpinned)`),
+						})
+					} catch { /* no requirements.txt */ }
+					// Cargo.toml / go.mod
+					for (const [fileName, ecosystem] of [['Cargo.toml', 'rust/cargo'], ['go.mod', 'go/modules']] as const) {
+						try {
+							const u = URI.joinPath(folder.uri, fileName)
+							const content = (await fileService.readFile(u)).value.toString()
+							const depCount = ecosystem === 'go/modules'
+								? (content.match(/^\s+[a-zA-Z0-9._-]+\/[a-zA-Z0-9._/-]+\s+v/gm) ?? []).length
+								: (content.match(/^[a-zA-Z0-9_-]+\s*=/gm) ?? []).length
+							manifests.push({ file: u.fsPath, ecosystem, dependencies: depCount, devDependencies: 0, scripts: [], riskySpecs: [] })
+						} catch { /* not present */ }
+					}
+				}
+				return { result: { manifests } }
+			},
+			env_inspect: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				return { result: await kodiaOpsService.inspectEnvironment(root) }
+			},
+			docker_status: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				return { result: await kodiaOpsService.getDockerStatus(root) }
+			},
+			docker_logs: async ({ container, tail }) => {
+				return { result: await kodiaOpsService.getDockerLogs(container, tail) }
+			},
+			db_inspect: async ({ db_path }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				return { result: await kodiaOpsService.inspectDatabase(root, db_path) }
+			},
+			db_query: async ({ sql, db_path, allow_write }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				return { result: await kodiaOpsService.queryDatabase(root, sql, db_path, allow_write) }
+			},
+			change_impact_analysis: async ({ target_path, sub_path }) => {
+				const files = await collectWorkspaceProjectFiles(this.fileService, workspaceContextService, { subPath: sub_path })
+				const twin = buildProjectDigitalTwin(files)
+				return { result: analyzeChangeImpact(twin, target_path) }
+			},
+			knowledge_graph_query: async ({ query, sub_path, limit }) => {
+				const files = await collectWorkspaceProjectFiles(this.fileService, workspaceContextService, { subPath: sub_path })
+				const twin = buildProjectDigitalTwin(files)
+				const matches = queryKnowledgeGraph(twin, query, limit ?? 15)
+				return {
+					result: {
+						totalModules: twin.nodes.length,
+						totalSymbols: twin.totalSymbols,
+						totalApis: twin.totalApis,
+						totalDbEntities: twin.totalDbEntities,
+						untestedCount: twin.untestedModules.length,
+						matches,
+					},
+				}
+			},
+			evaluate_quality_gates: async ({ sub_path }) => {
+				let ledger: IVerificationLedgerService | undefined
+				try { ledger = instantiationService.invokeFunction(a => a.get(IVerificationLedgerService)) } catch { ledger = undefined }
+				if (ledger) {
+					return { result: await ledger.runWorkspaceQualityGates(sub_path) }
+				}
+				// Fallback when running inside minimal unit test harness without IVerificationLedgerService registered
+				const files = await collectWorkspaceProjectFiles(this.fileService, workspaceContextService, { subPath: sub_path })
+				const health = analyzeProjectHealth(files)
+				const arch = buildArchitectureMap(files)
+				const { computeEngineeringQualityScore } = await import('../common/projectHealth.js')
+				const { evaluateQualityGates } = await import('../common/verificationLedger.js')
+				const score = computeEngineeringQualityScore(health, arch)
+				const errorMarkers = this.markerService.read({ severities: MarkerSeverity.Error })
+				const evaluation = evaluateQualityGates({
+					criticalFindings: health.counts.critical,
+					highFindings: health.counts.high,
+					qualityScore: score.score,
+					circularDependencies: arch.cycles.length,
+					workspaceErrors: errorMarkers.length,
+				})
+				const record = createVerificationRecord({
+					taskTitle: sub_path ? `Quality Gates (${sub_path})` : 'Workspace Autonomous Quality Gates',
+					summary: `Quality Gates ${evaluation.passed ? 'PASSED' : 'FAILED'} (Score ${score.score}/100)`,
+					checks: evaluation.gates.map(g => ({
+						name: g.label,
+						level: 'static_checks',
+						passed: g.passed,
+						detail: `actual=${g.actual} (${g.threshold})`,
+						timestamp: evaluation.evaluatedAt,
+					})),
+					qualityScore: score.score,
+				})
+				return { result: { evaluation, record } }
+			},
+			record_verification_evidence: async ({ task_title, summary, level, passed, detail, files_changed, command }) => {
+				let ledger: IVerificationLedgerService | undefined
+				try { ledger = instantiationService.invokeFunction(a => a.get(IVerificationLedgerService)) } catch { ledger = undefined }
+				const check = { name: task_title, level, passed, detail, command, timestamp: new Date().toISOString() }
+				const rec = ledger
+					? ledger.addRecord({ taskTitle: task_title, summary, filesChanged: files_changed, checks: [check] })
+					: createVerificationRecord({ taskTitle: task_title, summary, filesChanged: files_changed, checks: [check] })
+				return { result: rec }
+			},
+			factory_manage_requirements: async ({ action, id, title, description, status, priority, decision, consequences }) => {
+				let factory: ISoftwareFactoryService | undefined
+				try { factory = instantiationService.invokeFunction(a => a.get(ISoftwareFactoryService)) } catch { factory = undefined }
+				if (!factory) {
+					return { result: { message: 'SoftwareFactoryService is unavailable in this minimal runtime.' } }
+				}
+				if (action === 'add') {
+					const created = factory.addRequirement({ title: title ?? 'Untitled Requirement', description: description ?? '', priority })
+					return { result: { message: `Added ${created.id}: ${created.title}`, requirements: factory.getRequirements() } }
+				}
+				if (action === 'update' && id) {
+					const updated = factory.updateRequirement(id, { title, description, status, priority })
+					return { result: { message: updated ? `Updated ${updated.id} → ${updated.status}` : `Requirement ${id} not found`, requirements: factory.getRequirements() } }
+				}
+				if (action === 'add_decision') {
+					const adr = factory.addDecision({ title: title ?? 'Architecture Decision', context: description ?? '', decision: decision ?? '', consequences })
+					return { result: { message: `Recorded ${adr.id}: ${adr.title}`, decisions: factory.getDecisions() } }
+				}
+				return {
+					result: {
+						message: `${factory.getRequirements().length} requirement(s), ${factory.getDecisions().length} ADR(s).`,
+						requirements: factory.getRequirements(),
+						decisions: factory.getDecisions(),
+					},
+				}
 			},
 
 			// Notebook operations
@@ -3526,6 +3876,61 @@ export class ToolsService implements IToolsService {
 
 			// Subagent delegation (roadmap 6); chatThreadService runs it and formats the same report
 			subagent: (_params, result) => formatSubagentReport(result),
+			project_health_scan: (_params, result) => formatProjectHealthForLLM(result),
+			architecture_map: (_params, result) => formatArchitectureMapForLLM(result),
+			workspace_diagnostics: (_params, result) => {
+				if (result.items.length === 0) {
+					return `Workspace Diagnostics: 0 errors, 0 warnings.`
+				}
+				const lines = [`Workspace Diagnostics: ${result.totalErrors} error(s), ${result.totalWarnings} warning(s) (showing ${result.items.length}):`]
+				for (const item of result.items) {
+					lines.push(`- [${item.severity.toUpperCase()}] ${item.uri}:${item.line}${item.code ? ` (${item.code})` : ''}: ${item.message}`)
+				}
+				return lines.join('\n')
+			},
+			move_or_rename_file: (_params, result) => `Moved ${result.sourceUri.fsPath} → ${result.targetUri.fsPath}.`,
+			file_metadata: (_params, result) => [
+				`File: ${result.uri}`,
+				`Type: ${result.isDirectory ? 'directory' : result.isBinary ? 'binary file' : 'text file'}${result.isSymbolicLink ? ' (symlink)' : ''}`,
+				`Size: ${result.size} bytes`,
+				...(result.lineCount !== null ? [`Lines: ${result.lineCount} (${result.lineEnding})`] : []),
+				`Modified: ${new Date(result.mtime).toISOString()}`,
+			].join('\n'),
+			dependency_audit: (_params, result) => {
+				if (result.manifests.length === 0) return 'No dependency manifests (package.json, requirements.txt, Cargo.toml, go.mod) found at workspace root.'
+				return result.manifests.map(m => [
+					`Manifest: ${m.file} (${m.ecosystem})`,
+					`  Dependencies: ${m.dependencies} runtime, ${m.devDependencies} dev${m.license ? ` | License: ${m.license}` : ''}`,
+					...(m.scripts.length ? [`  Scripts: ${m.scripts.slice(0, 12).join(', ')}`] : []),
+					...(m.riskySpecs.length ? [`  Unpinned/Risky Specs (${m.riskySpecs.length}): ${m.riskySpecs.slice(0, 10).join(', ')}`] : ['  Unpinned/Risky Specs: none']),
+				].join('\n')).join('\n\n')
+			},
+			env_inspect: (_params, result) => formatEnvInspectForLLM(result),
+			docker_status: (_params, result) => formatDockerStatusForLLM(result),
+			docker_logs: (_params, result) => result.error ? `Docker logs error (${result.container}): ${result.error}` : `Docker logs (${result.container}):\n${result.logs || '(empty)'}`,
+			db_inspect: (_params, result) => formatDbInspectForLLM(result),
+			db_query: (_params, result) => formatDbQueryForLLM(result),
+			change_impact_analysis: (_params, result) => formatChangeImpactForLLM(result),
+			knowledge_graph_query: (_params, result) => {
+				const header = `Project Digital Twin (${result.totalModules} modules, ${result.totalSymbols} symbols, ${result.totalApis} APIs, ${result.totalDbEntities} DB entities, ${result.untestedCount} untested modules)`;
+				if (result.matches.length === 0) return `${header}\nNo matching nodes found.`;
+				return [
+					header,
+					...result.matches.map(n => `- [${n.kind}] ${n.id} (${n.lines}L, importedBy=${n.importedBy.length}, tests=${n.relatedTests.length}${n.exportedSymbols.length ? `, exports: ${n.exportedSymbols.slice(0, 6).join(', ')}` : ''}${n.apiEndpoints.length ? `, APIs: ${n.apiEndpoints.slice(0, 3).join(', ')}` : ''})`),
+				].join('\n');
+			},
+			evaluate_quality_gates: (_params, result) => formatQualityGateEvaluationForLLM(result.evaluation),
+			record_verification_evidence: (_params, result) => `Verification record ${result.id} saved (${result.passed ? 'PASSED' : 'FAILED'}, level: ${result.highestLevel}) — ${result.summary}`,
+			factory_manage_requirements: (_params, result) => {
+				const lines = [result.message];
+				if (result.requirements && result.requirements.length > 0) {
+					lines.push(...result.requirements.slice(0, 20).map(r => `- [${r.id}][${r.status}][${r.priority}] ${r.title}`));
+				}
+				if (result.decisions && result.decisions.length > 0) {
+					lines.push(...result.decisions.slice(0, 10).map(d => `- [${d.id}][${d.status}] ${d.title}: ${d.decision}`));
+				}
+				return lines.join('\n');
+			},
 
 			// Notebook operations
 			read_notebook: (params, result) => {

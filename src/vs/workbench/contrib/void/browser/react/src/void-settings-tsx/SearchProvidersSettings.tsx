@@ -8,12 +8,12 @@ import { useAccessor, useSettingsState } from '../util/services.js';
 import { SearchProviderCard } from './SearchProviderCard.js';
 import { WebSearchProviderName, SearchProviderSettings, IWebSearchService } from '../../../../common/webSearchTypes.js';
 import { DEFAULT_SEARCH_PROVIDER_SETTINGS, SEARCH_PROVIDER_DISPLAY_INFO, validateNvidiaRerankerSettings, normalizeNvidiaRerankerSettings, getDefaultNvidiaRerankerSettings, validateSearchCacheSettings, normalizeSearchCacheSettings, getDefaultSearchCacheSettings } from '../../../../common/webSearchSettings.js';
-import { SettingGroup } from './SettingsControls.js';
+import { SettingGroup, SettingSwitch } from './SettingsControls.js';
 import { IVoidSettingsService } from '../../../../common/voidSettingsService.js';
 import { IMetricsService } from '../../../../common/metricsService.js';
 import { INotificationService } from '../../../../../../../platform/notification/common/notification.js';
 import Severity from '../../../../../../../base/common/severity.js';
-import { VoidSwitch, VoidSimpleInputBox } from '../util/inputs.js';
+import { VoidSimpleInputBox } from '../util/inputs.js';
 
 const WEB_SEARCH_PROVIDERS: WebSearchProviderName[] = [
 	'brave',
@@ -46,7 +46,7 @@ export const SearchProvidersSettings = () => {
 	// Track drag state for drag-and-drop reordering
 	const [draggedId, setDraggedId] = useState<WebSearchProviderName | null>(null);
 	// Track which provider is currently being tested to prevent duplicate requests
-	const [testingProvider, setTestingProvider] = useState<WebSearchProviderName | null>(null);
+	const [testingProvider, setTestingProvider] = useState<WebSearchProviderName | 'nvidia-reranker' | null>(null);
 
 	const handleDragStart = (e: React.DragEvent, providerName: WebSearchProviderName) => {
 		setDraggedId(providerName);
@@ -199,7 +199,7 @@ export const SearchProvidersSettings = () => {
 			return;
 		}
 
-		setTestingProvider('nvidia-reranker' as WebSearchProviderName);
+		setTestingProvider('nvidia-reranker');
 		metricsService.capture('Web Search Test Connection', { provider: 'nvidia-reranker' });
 
 		try {
@@ -229,7 +229,7 @@ export const SearchProvidersSettings = () => {
 	return (
 		<SettingGroup title='Web Search Providers' description='Configure search providers for web search and agent tools. Drag to reorder priority.'>
 			<div className='mb-4'>
-				<VoidSwitch
+				<SettingSwitch
 					value={freeOnly}
 					onChange={(newVal) => {
 						voidSettingsService.setGlobalSetting('webSearchFreeOnly', newVal);
@@ -241,7 +241,7 @@ export const SearchProvidersSettings = () => {
 
 			<SettingGroup title='NVIDIA Nemotron Reranker' description='Optional post-processing to reorder search results by relevance using NVIDIA Nemotron-3.5-Rerank-8B.'>
 				<div className='mb-4'>
-					<VoidSwitch
+					<SettingSwitch
 						value={rerankerEnabled}
 						onChange={(newVal) => {
 							handleRerankerSettingsChange({ webSearchRerankerEnabled: newVal });
@@ -251,8 +251,8 @@ export const SearchProvidersSettings = () => {
 					/>
 				</div>
 
-				<div className='mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800'>
-					<p className='font-medium mb-1'>Privacy Notice</p>
+				<div className='mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md text-xs text-void-fg-2'>
+					<p className='font-medium mb-1 text-amber-400'>Privacy Notice</p>
 					<ul className='list-disc pl-5 space-y-1'>
 						<li>This feature sends your search query and selected result snippets to NVIDIA&apos;s hosted reranking API.</li>
 						<li>Data is processed on NVIDIA&apos;s servers, not locally.</li>
@@ -262,9 +262,9 @@ export const SearchProvidersSettings = () => {
 					</ul>
 				</div>
 
-				<div className='mb-4'>
+				<div className='mb-4 flex flex-col gap-1'>
+					<label className='text-xs font-medium text-void-fg-2'>Maximum passages to rerank</label>
 					<VoidSimpleInputBox
-						label='Maximum passages to rerank'
 						value={String(rerankerMaxPassages)}
 						onChangeValue={(newVal) => {
 							const num = parseInt(newVal, 10);
@@ -276,36 +276,31 @@ export const SearchProvidersSettings = () => {
 						type='number'
 						min={1}
 						max={100}
-						description="Maximum number of search result passages sent to NVIDIA for reranking per query. Higher values may improve relevance but increase latency and cost. Default: 20."
+						compact={true}
 					/>
+					<div className='text-xs text-void-fg-3'>Maximum number of search result passages sent to NVIDIA for reranking per query. Higher values may improve relevance but increase latency and cost. Default: 20.</div>
 				</div>
 
 				<div className='mb-4 flex items-center gap-3'>
-					<VoidSwitch
-						value={testingProvider === 'nvidia-reranker'}
-						onChange={() => {}}
-						disabled
-						label={testingProvider === 'nvidia-reranker' ? 'Testing connection...' : 'Test NVIDIA reranker connection'}
-					/>
 					<button
 						type='button'
 						onClick={handleTestRerankerConnection}
 						disabled={testingProvider !== null}
-						className='px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+						style={{ backgroundColor: 'var(--kodia-accent)', color: 'var(--kodia-accent-fg)' }}
+						className='px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-opacity hover:opacity-90'
 					>
-						Test Connection
+						{testingProvider === 'nvidia-reranker' ? 'Testing connection…' : 'Test NVIDIA Reranker Connection'}
 					</button>
 				</div>
 
-				<div className='text-sm text-gray-600'>
-					<p>Requires an NVIDIA API key configured in the <a href='#' className='underline hover:text-blue-600'>NVIDIA LLM provider settings</a>.</p>
-					<p>Reranking uses your existing NVIDIA API key (nvapi-...). No separate key is needed.</p>
+				<div className='text-xs text-void-fg-3'>
+					<p>Requires an NVIDIA API key configured in the NVIDIA cloud provider settings above. No separate key is needed.</p>
 				</div>
 			</SettingGroup>
 
 			<SettingGroup title='Search Result Cache' description='Optional in-memory cache for search results to reduce API calls and improve response time for repeated queries.'>
 				<div className='mb-4'>
-					<VoidSwitch
+					<SettingSwitch
 						value={cacheEnabled}
 						onChange={(newVal) => {
 							handleCacheSettingsChange({ webSearchCacheEnabled: newVal });
@@ -315,8 +310,8 @@ export const SearchProvidersSettings = () => {
 					/>
 				</div>
 
-				<div className='mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800'>
-					<p className='font-medium mb-1'>Cache Behavior</p>
+				<div className='mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md text-xs text-void-fg-2'>
+					<p className='font-medium mb-1 text-amber-400'>Cache Behavior</p>
 					<ul className='list-disc pl-5 space-y-1'>
 						<li>Only successful search results are cached.</li>
 						<li>Cache is stored in application memory only (not persisted to disk).</li>
@@ -327,9 +322,9 @@ export const SearchProvidersSettings = () => {
 					</ul>
 				</div>
 
-				<div className='mb-4'>
+				<div className='mb-4 flex flex-col gap-1'>
+					<label className='text-xs font-medium text-void-fg-2'>Maximum cache TTL (seconds)</label>
 					<VoidSimpleInputBox
-						label='Maximum cache TTL (seconds)'
 						value={String(cacheTTL)}
 						onChangeValue={(newVal) => {
 							const num = parseInt(newVal, 10);
@@ -341,11 +336,12 @@ export const SearchProvidersSettings = () => {
 						type='number'
 						min={60}
 						max={86400}
-						description="Time-to-live for cache entries in seconds. Minimum: 60 (1 minute), Maximum: 86400 (24 hours). Default: 3600 (1 hour)."
+						compact={true}
 					/>
+					<div className='text-xs text-void-fg-3'>Time-to-live for cache entries in seconds. Minimum: 60 (1 minute), Maximum: 86400 (24 hours). Default: 3600 (1 hour).</div>
 				</div>
 
-				<div className='text-sm text-gray-600'>
+				<div className='text-xs text-void-fg-3'>
 					<p>Cache is stored in application memory only and is cleared on restart.</p>
 					<p>Reranked results are cached after reranking is applied.</p>
 				</div>

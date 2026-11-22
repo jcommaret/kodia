@@ -13,7 +13,10 @@ import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
 import { availableTools, builtinTools, chat_userMessageContent, isABuiltinToolName, summarizeThread_systemMessage, summarizeThread_userMessage } from '../common/prompt/prompts.js';
-import { formatSubagentReport, MAX_PARALLEL_SUBAGENTS, resolveSubagentType, SUBAGENT_TIMEOUT_MS, SUBAGENT_TOOL_NAME, SubagentFileClaims, SubagentReport, SubagentStatus, SubagentToolCallFact, SubagentType, subagentRoleText, subagentToolNames, summarizeSubagentRun } from '../common/subagents.js';
+import { CustomSubagentDefinition, formatSubagentReport, MAX_PARALLEL_SUBAGENTS, parseCustomAgentMarkdown, resolveSubagentType, SUBAGENT_TIMEOUT_MS, SUBAGENT_TOOL_NAME, SubagentFileClaims, SubagentProfile, SubagentReport, SubagentStatus, SubagentToolCallFact, SubagentType, subagentRoleText, subagentToolNames, summarizeSubagentRun } from '../common/subagents.js';
+import { IKodiaHooksMainService, KodiaHookEvent, KodiaHookPayload, KodiaHookRunResult } from '../common/kodiaHooks.js';
+import { IExecutionObservabilityService } from '../common/executionObservability.js';
+import { ICustomCommandsService } from './customCommandsService.js';
 import { FILE_CHANGING_TOOLS } from '../common/completionCheck.js';
 import { describeOmittedTools, toolsWithinBudget } from '../common/toolBudget.js';
 import { estimateTokens } from '../common/tokenizer.js';
@@ -57,6 +60,9 @@ import { COMPLETION_CHECK_REQUEST, shouldRequestCompletionCheck } from '../commo
 import { isTestFilePath, testFileWithoutTestCases, testFileWithoutTestCasesNote, testWeakeningNote, testWeakeningReasons } from '../common/testIntegrity.js';
 import { IToolOutputService } from '../common/toolOutputService.js';
 import { RetryPolicy, createRetryErrorInfo } from '../common/retryPolicy.js';
+import { isFallbackEligibleError, modelSelectionKey, resolveRoutedModelSelection, selectNextFallbackModel } from '../common/modelRouting.js';
+import { repairToolParams } from '../common/toolParamRepair.js';
+import { FailurePatternMemory } from '../common/failureMemory.js';
 
 
 // related to retrying when LLM message has error
@@ -312,6 +318,13 @@ export interface IChatThreadService {
 
 	onDidChangeCurrentThread: Event<void>;
 	onDidChangeStreamState: Event<{ threadId: string }>
+	onDidChangeQueuedMessages: Event<{ threadId: string }>;
+
+	// Queued steering messages (submitted while a turn is running; auto-dispatched when idle)
+	enqueueUserMessage(threadId: string, userMessage: string): void;
+	getQueuedMessages(threadId: string): readonly string[];
+	removeQueuedMessage(threadId: string, index: number): void;
+	clearQueuedMessages(threadId: string): void;
 
 	getCurrentThread(): ThreadType;
 	openNewThread(): void;
@@ -370,6 +383,18 @@ export interface IChatThreadService {
 	// jump to history
 	/** resolves once every file is restored on disk */
 	jumpToCheckpointBeforeMessageIdx(opts: { threadId: string, messageIdx: number, jumpToUserModified: boolean }): Promise<void>;
+	/** Restore workspace files directly to a specific checkpoint message index. */
+	restoreCheckpointAtIdx(threadId: string, checkpointIdx: number): Promise<void>;
+	/** Capture a user-labeled checkpoint of all files modified in this thread. */
+	createNamedCheckpoint(threadId: string, label: string): Promise<number>;
+	/** Return deduplicated file paths changed in this thread's history. */
+	getThreadChangedFiles(threadId: string): string[];
+	/** Return the earliest pre-edit snapshot captured for a file in this thread (if any). */
+	getInitialFileSnapshot(threadId: string, fsPath: string): VoidFileSnapshot | undefined;
+	/** Restore a single file back to its earliest pre-edit snapshot in this thread. */
+	revertSingleFile(threadId: string, fsPath: string): Promise<boolean>;
+	/** Manually compact older tool results in a thread to free context window. */
+	compactThreadContext(threadId: string): boolean;
 
 	focusCurrentChat: () => Promise<void>
 	blurCurrentChat: () => Promise<void>
@@ -385,6 +410,41 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 
 	private readonly _onDidChangeStreamState = new Emitter<{ threadId: string }>();
 	readonly onDidChangeStreamState: Event<{ threadId: string }> = this._onDidChangeStreamState.event;
+
+	private readonly _onDidChangeQueuedMessages = this._register(new Emitter<{ threadId: string }>());
+	readonly onDidChangeQueuedMessages: Event<{ threadId: string }> = this._onDidChangeQueuedMessages.event;
+	private readonly _queuedMessagesOfThread = new Map<string, string[]>();
+	private readonly _failureMemory = new FailurePatternMemory();
+
+	enqueueUserMessage(threadId: string, userMessage: string): void {
+		const trimmed = userMessage.trim();
+		if (!trimmed) { return; }
+		let q = this._queuedMessagesOfThread.get(threadId);
+		if (!q) {
+			q = [];
+			this._queuedMessagesOfThread.set(threadId, q);
+		}
+		q.push(trimmed);
+		this._onDidChangeQueuedMessages.fire({ threadId });
+	}
+
+	getQueuedMessages(threadId: string): readonly string[] {
+		return this._queuedMessagesOfThread.get(threadId) ?? [];
+	}
+
+	removeQueuedMessage(threadId: string, index: number): void {
+		const q = this._queuedMessagesOfThread.get(threadId);
+		if (!q || index < 0 || index >= q.length) { return; }
+		q.splice(index, 1);
+		if (q.length === 0) { this._queuedMessagesOfThread.delete(threadId); }
+		this._onDidChangeQueuedMessages.fire({ threadId });
+	}
+
+	clearQueuedMessages(threadId: string): void {
+		if (this._queuedMessagesOfThread.delete(threadId)) {
+			this._onDidChangeQueuedMessages.fire({ threadId });
+		}
+	}
 
 	readonly streamState: ThreadStreamState = {}
 	state: ThreadsState // allThreads is persisted, currentThread is not
@@ -407,7 +467,7 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 
 	// --- subagents (roadmap 6) ---
 	// the tools a subagent thread may run (absent: the chat mode decides, as for any thread)
-	private readonly _toolPolicyOfThread = new Map<string, { agent: SubagentType; allowed: ReadonlySet<string> }>()
+	private readonly _toolPolicyOfThread = new Map<string, { agent: SubagentType; allowed: ReadonlySet<string>; profile?: SubagentProfile }>()
 	// the model each running agent loop uses, so a subagent can default to its parent's
 	private readonly _modelOfRunningThread = new Map<string, { modelSelection: ModelSelection | null; modelSelectionOptions: ModelSelectionOptions | undefined }>()
 	private readonly _subagentFileClaims = new SubagentFileClaims()
@@ -431,6 +491,9 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		@IToolOutputService private readonly _toolOutputService: IToolOutputService,
 		@IMCPService private readonly _mcpService: IMCPService,
 		@ITaskPlanService private readonly taskPlanService: ITaskPlanService,
+		@IKodiaHooksMainService private readonly _hooksService: IKodiaHooksMainService,
+		@IExecutionObservabilityService private readonly _observabilityService: IExecutionObservabilityService,
+		@ICustomCommandsService private readonly _customCommandsService: ICustomCommandsService,
 	) {
 		super()
 		this.state = { allThreads: {}, currentThreadId: null as unknown as string } // default state
@@ -452,8 +515,13 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		}
 		// Session recovery: nothing runs in a freshly started Kodia, so a tool saved as running was cut off by the
 		// previous one stopping. Say so in every thread now (not only when one is opened), and say why.
+		// Also hydrate persisted task plans into TaskPlanService so update_task_plan / UI work after restart.
 		for (const threadId in allThreads) {
-			if (allThreads[threadId]?.messages.some(m => m.role === 'tool' && m.type === 'running_now')) {
+			const thread = allThreads[threadId]
+			if (thread?.taskPlan) {
+				this.taskPlanService.hydratePlan(threadId, thread.taskPlan)
+			}
+			if (thread?.messages.some(m => m.role === 'tool' && m.type === 'running_now')) {
 				this._rejectRunningTools(threadId, this.toolErrMsgs.interruptedByShutdown)
 			}
 		}
@@ -463,6 +531,71 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 
 
 
+	}
+
+	private _workspaceFolderPaths(): string[] {
+		try {
+			return this._workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
+		} catch {
+			return []
+		}
+	}
+
+	private async _runHook(
+		event: KodiaHookEvent,
+		payload: Omit<KodiaHookPayload, 'event' | 'timestamp' | 'workspaceDir'>,
+	): Promise<KodiaHookRunResult | undefined> {
+		if (!this._hooksService) { return undefined }
+		const folders = this._workspaceFolderPaths()
+		if (folders.length === 0) { return undefined }
+		try {
+			const res = await this._hooksService.runHooks(folders, {
+				...payload,
+				event,
+				workspaceDir: folders[0],
+				timestamp: new Date().toISOString(),
+			})
+			if (res && res.entries.length > 0 && this._observabilityService) {
+				const spanId = this._observabilityService.startSpan({
+					kind: 'hook',
+					threadId: payload.threadId,
+					toolCallId: payload.toolCallId,
+					name: `hook:${event}`,
+					detail: payload.toolName ?? payload.agentType ?? payload.taskTitle,
+				})
+				this._observabilityService.endSpan(spanId, {
+					status: res.decision === 'block' ? 'blocked' : 'completed',
+					detail: `${res.entries.length} hook(s), decision=${res.decision}`,
+					errorCategory: res.decision === 'block' ? 'hook_blocked' : undefined,
+					errorMessage: res.decision === 'block' ? res.reason : undefined,
+				})
+			}
+			return res
+		} catch {
+			return undefined
+		}
+	}
+
+	private async _discoverCustomAgents(): Promise<Map<string, CustomSubagentDefinition>> {
+		const out = new Map<string, CustomSubagentDefinition>()
+		const folders = this._workspaceContextService.getWorkspace().folders
+		for (const folder of folders) {
+			for (const rel of ['.kodia/agents', '.claude/agents']) {
+				const dirUri = URI.joinPath(folder.uri, rel)
+				let stat
+				try { stat = await this._fileService.resolve(dirUri) } catch { continue }
+				if (!stat.isDirectory || !stat.children) { continue }
+				for (const child of stat.children) {
+					if (child.isDirectory || !child.name.toLowerCase().endsWith('.md')) { continue }
+					try {
+						const content = (await this._fileService.readFile(child.resource)).value.toString()
+						const parsed = parseCustomAgentMarkdown(child.resource.fsPath, content)
+						if (parsed && !out.has(parsed.name)) { out.set(parsed.name, parsed) }
+					} catch { /* skip unreadable agent file */ }
+				}
+			}
+		}
+		return out
 	}
 
 	async focusCurrentChat() {
@@ -911,10 +1044,22 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 
 
 		if (!opts.preapproved) { // skip this if pre-approved
-			// 1. validate tool params
+			// 1. Deterministic BYOK argument auto-repair + param validation
 			try {
 				if (isBuiltInTool) {
-					const params = this._toolsService.validateParams[toolName](opts.unvalidatedToolParams)
+					const wsRoot = this._workspaceContextService.getWorkspace().folders[0]?.uri.fsPath
+					const { repairedParams, repairs } = repairToolParams(toolName, opts.unvalidatedToolParams, wsRoot)
+					if (repairs.length > 0) {
+						const repSpan = this._observabilityService?.startSpan({
+							kind: 'tool_call',
+							threadId,
+							toolCallId: toolId,
+							name: `auto-repair:${toolName}`,
+							detail: repairs.join(', '),
+						})
+						if (repSpan) { this._observabilityService?.endSpan(repSpan, { status: 'completed' }) }
+					}
+					const params = this._toolsService.validateParams[toolName](repairedParams)
 					toolParams = params
 				}
 				else {
@@ -931,12 +1076,57 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			toolParams = opts.validatedParams
 		}
 
+		// Disabled tools policy (Settings -> Agent -> Tool Policy)
+		const disabledTools = this._settingsService.state.globalSettings.disabledTools ?? []
+		if (disabledTools.includes(toolName)) {
+			const msg = `Tool "${toolName}" is disabled in Kodia Settings.`
+			this._addMessageToThread(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: msg, name: toolName, content: msg, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			return {}
+		}
+
 		// Subagents: a tool outside the subagent's type is refused (offering only its tools is not enough: a model
 		// can name any tool), and a file another subagent running in parallel is changing is left to that agent.
 		const subagentRefusal = this._subagentRefusal(threadId, toolName, toolParams)
 		if (subagentRefusal) {
 			this._addMessageToThread(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: subagentRefusal, name: toolName, content: subagentRefusal, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
 			return {}
+		}
+
+		// Subagent delegation (roadmap 6): runs the child agent to completion and returns its report
+		if (isBuiltInTool && toolName === SUBAGENT_TOOL_NAME) {
+			return this._runSubagent(threadId, toolId, toolParams as BuiltinToolCallParams['subagent'], opts.unvalidatedToolParams, mcpServerName, parallel)
+		}
+
+		// Register parallel interruptor synchronously BEFORE any await (PreToolUse hook, checkpoints, etc.)
+		// so abortRunning() can always interrupt every tool in a parallel read-only batch immediately.
+		let interrupted = false
+		let activeInterruptFn: (() => void) | undefined
+		const interruptorPromise = Promise.resolve(() => {
+			interrupted = true
+			activeInterruptFn?.()
+		})
+		const resolveInterruptor = (fn: () => void) => { activeInterruptFn = fn }
+		parallel?.onInterruptor(interruptorPromise)
+
+		// PreToolUse lifecycle hook (Mandate Part 3M)
+		const preHook = await this._runHook('PreToolUse', {
+			threadId,
+			toolName,
+			toolCallId: toolId,
+			toolInput: opts.unvalidatedToolParams as Record<string, unknown>,
+		})
+		if (interrupted) { resolveInterruptor(() => { }); return { interrupted: true } }
+		if (preHook?.decision === 'block') {
+			resolveInterruptor(() => { })
+			const msg = `Blocked by PreToolUse hook: ${preHook.reason ?? 'operation disallowed'}`
+			this._addMessageToThread(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: msg, name: toolName, content: msg, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			return {}
+		}
+		if (preHook?.updatedInput && !opts.preapproved) {
+			try {
+				const mergedRaw = { ...opts.unvalidatedToolParams, ...preHook.updatedInput } as RawToolParamsObj
+				toolParams = isBuiltInTool ? this._toolsService.validateParams[toolName](mergedRaw) : mergedRaw
+			} catch { /* keep validated params if hook's updatedInput failed validation */ }
 		}
 
 		// 2. Centralized autonomy decision. Replaces the previous
@@ -960,6 +1150,7 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			isOutsideWorkspace: isOutside,
 		});
 		if (evaluation.decision === 'block') {
+			resolveInterruptor(() => { })
 			this._addMessageToThread(threadId, {
 				role: 'tool',
 				type: 'tool_error',
@@ -974,13 +1165,29 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			return {};
 		}
 
-		if (evaluation.decision === 'requireApproval' && !opts.preapproved) {
+		const hookAsked = preHook?.decision === 'ask';
+		if ((evaluation.decision === 'requireApproval' || hookAsked) && !opts.preapproved) {
+			const permHook = await this._runHook('PermissionRequest', {
+				threadId,
+				toolName,
+				toolCallId: toolId,
+				toolInput: opts.unvalidatedToolParams as Record<string, unknown>,
+				message: hookAsked ? preHook?.reason : evaluation.reason,
+			})
+			if (permHook?.decision === 'block') {
+				resolveInterruptor(() => { })
+				const msg = `Permission denied by hook: ${permHook.reason ?? 'disallowed'}`
+				this._addMessageToThread(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: msg, name: toolName, content: msg, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+				return {}
+			}
+			resolveInterruptor(() => { })
+			const approvalReason = hookAsked ? (preHook?.reason ?? 'Requested by PreToolUse hook') : evaluation.reason
 			// Pre-approved calls have already been user-approved; only
 			// explicit block policies can stop them at this point.
 			this._addMessageToThread(threadId, {
 				role: 'tool',
 				type: 'tool_request',
-				content: `(Awaiting user permission to ${toolName}: ${evaluation.reason})`,
+				content: `(Awaiting user permission to ${toolName}: ${approvalReason})`,
 				result: null,
 				name: toolName,
 				params: toolParams,
@@ -988,6 +1195,14 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 				rawParams: opts.unvalidatedToolParams,
 				mcpServerName,
 			});
+			this._observabilityService?.startSpan({
+				kind: 'approval',
+				threadId,
+				toolCallId: toolId,
+				name: toolName,
+				detail: approvalReason,
+				status: 'awaiting_approval',
+			})
 			return { awaitingUserApproval: true };
 		}
 
@@ -997,9 +1212,15 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		// Task plan tools are handled directly (they need thread context for the plan service)
 		const taskPlanTools: Set<string> = new Set(['create_task_plan', 'update_task_plan', 'get_task_plan']);
 		if (isBuiltInTool && taskPlanTools.has(toolName)) {
+			resolveInterruptor(() => { })
+			// Ensure plan is hydrated from thread if Kodia restarted
+			const persistedPlan = this.state.allThreads[threadId]?.taskPlan;
+			if (persistedPlan) { this.taskPlanService.hydratePlan(threadId, persistedPlan); }
+
 			const params = toolParams as any;
 			let toolResult: any;
 			let toolError: string | null = null;
+			let completedTaskTitle: string | undefined;
 			try {
 				if (toolName === 'create_task_plan') {
 					const plan = this.taskPlanService.createPlan(threadId, params.title, params.description, params.tasks);
@@ -1008,10 +1229,13 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 				} else if (toolName === 'update_task_plan') {
 					const plan = this.taskPlanService.updateTask(threadId, params.taskId, params.status, params.result, params.error);
 					if (!plan) {
-						toolError = 'No task plan found for thread ' + threadId + '. Create one first with create_task_plan.';
+						toolError = 'No task plan found for thread ' + threadId + ' or invalid status transition for task ' + params.taskId + '.';
 					} else {
 						this._setThreadTaskPlan(threadId, plan);
 						toolResult = { plan };
+						if (params.status === 'completed') {
+							completedTaskTitle = plan.tasks.find(t => t.id === params.taskId)?.title;
+						}
 					}
 				} else if (toolName === 'get_task_plan') {
 					const plan = this.taskPlanService.getPlan(threadId);
@@ -1036,12 +1260,12 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			const planObj = this.taskPlanService.getPlan(threadId);
 			const toolResultStr = planObj ? formatTaskPlanForLLM(planObj) : '';
 			this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: toolResult, name: toolName, content: toolResultStr, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			if (completedTaskTitle) {
+				void this._runHook('TaskCompleted', { threadId, taskId: params.taskId, taskTitle: completedTaskTitle })
+			}
+			const taskSpanId = this._observabilityService?.startSpan({ kind: 'task_update', threadId, toolCallId: toolId, taskId: params.taskId, name: toolName, detail: completedTaskTitle ?? params.title })
+			if (taskSpanId) { this._observabilityService?.endSpan(taskSpanId, { status: 'completed' }) }
 			return {};
-		}
-
-		// Subagent delegation (roadmap 6): runs the child agent to completion and returns its report
-		if (isBuiltInTool && toolName === SUBAGENT_TOOL_NAME) {
-			return this._runSubagent(threadId, toolId, toolParams as BuiltinToolCallParams['subagent'], opts.unvalidatedToolParams, mcpServerName, parallel)
 		}
 
 		// Test-integrity guard: remember a test file's content before a change, to detect weakening afterwards
@@ -1049,21 +1273,21 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		const testFileBefore = testFileUri ? await this._readTextIfExists(testFileUri) : undefined
 
 		// Recovery: what this call is about to change, as it is on disk now (a checkpoint the user can rewind to)
-		// (awaits only for file-changing tools: read-only tools of a parallel batch must reach onInterruptor below
-		// without awaiting anything, or the batch could not be interrupted)
 		const changedPaths = isBuiltInTool && FILE_CHANGING_TOOLS.has(toolName) ? await this._pathsChangedBy(toolName, toolParams) : []
 		if (changedPaths.length > 0) await this._addFileChangeCheckpoint(threadId, changedPaths)
 
 		// 3. call the tool
-		// this._setStreamState(threadId, { isRunning: 'tool' }, 'merge')
 		const runningTool = { role: 'tool', type: 'running_now', name: toolName, params: toolParams, content: '(value not received yet...)', result: null, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName } as const
 		this._updateLatestTool(threadId, runningTool)
 
+		const toolSpanId = this._observabilityService?.startSpan({
+			kind: 'tool_call',
+			threadId,
+			toolCallId: toolId,
+			name: toolName,
+			detail: targetUri ? this._workspaceRelativePath(targetUri) : undefined,
+		})
 
-		let interrupted = false
-		let resolveInterruptor: (r: () => void) => void = () => { }
-		const interruptorPromise = new Promise<() => void>(res => { resolveInterruptor = res })
-		parallel?.onInterruptor(interruptorPromise) // synchronous, so the caller has every interruptor before its first await
 		try {
 
 			// set stream state
@@ -1084,8 +1308,8 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 				let toolResultObj: Awaited<typeof toolCallPromise>
 				try { toolResultObj = await Promise.race([toolCallPromise, toolTimeout]) }
 				finally { clearTimeout(toolTimer) } // don't keep a 10-minute timer alive per tool call
-				const interruptor = () => { interrupted = true; toolResultObj.interruptTool?.() }
-				resolveInterruptor(interruptor)
+				activeInterruptFn = () => { interrupted = true; toolResultObj.interruptTool?.() }
+				resolveInterruptor(activeInterruptFn)
 
 				toolResult = await toolResultObj.result
 			}
@@ -1096,7 +1320,8 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 
 				// MCP calls can't be cancelled, but mark them interrupted so an aborted call neither
 				// overwrites its 'rejected' message nor lets the agent loop continue when it returns
-				resolveInterruptor(() => { interrupted = true })
+				activeInterruptFn = () => { interrupted = true }
+				resolveInterruptor(activeInterruptFn)
 
 				toolResult = (await Promise.race([
 					this._mcpService.callMCPTool({
@@ -1110,14 +1335,30 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 				])).result
 			}
 
-			if (interrupted) { return { interrupted: true } } // the tool result is added where we interrupt, not here
+			if (interrupted) {
+				if (toolSpanId) { this._observabilityService?.endSpan(toolSpanId, { status: 'cancelled' }) }
+				return { interrupted: true }
+			} // the tool result is added where we interrupt, not here
 		}
 		catch (error) {
 			resolveInterruptor(() => { }) // resolve for the sake of it
-			if (interrupted) { return { interrupted: true } } // the tool result is added where we interrupt, not here
+			if (interrupted) {
+				if (toolSpanId) { this._observabilityService?.endSpan(toolSpanId, { status: 'cancelled' }) }
+				return { interrupted: true }
+			} // the tool result is added where we interrupt, not here
 
 			const errorMessage = getErrorMessage(error)
-			this._updateLatestTool(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: errorMessage, name: toolName, content: errorMessage, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			const pastLesson = this._failureMemory.recordFailure(toolName, errorMessage)
+			const enrichedError = pastLesson ? `${errorMessage}\n\n[Kodia Past Lesson]: ${pastLesson}` : errorMessage
+			if (toolSpanId) { this._observabilityService?.endSpan(toolSpanId, { status: 'failed', errorMessage }) }
+			this._updateLatestTool(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: enrichedError, name: toolName, content: enrichedError, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			void this._runHook('PostToolUseFailure', {
+				threadId,
+				toolName,
+				toolCallId: toolId,
+				toolInput: opts.unvalidatedToolParams as Record<string, unknown>,
+				toolError: errorMessage,
+			})
 			if (changedPaths.length > 0) { // a failed change may still have changed something
 				await this._addFileChangeCheckpoint(threadId, changedPaths)
 				await this._flushThreads()
@@ -1144,6 +1385,7 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			}
 		} catch (error) {
 			const errorMessage = this.toolErrMsgs.errWhenStringifying(error)
+			if (toolSpanId) { this._observabilityService?.endSpan(toolSpanId, { status: 'failed', errorMessage }) }
 			this._updateLatestTool(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: errorMessage, name: toolName, content: errorMessage, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
 			return {}
 		}
@@ -1156,6 +1398,31 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			if (reasons.length > 0) toolResultStr += `\n\n${testWeakeningNote(displayPath, reasons)}`
 			else if (testFileWithoutTestCases(testFileUri.fsPath, testFileAfter)) toolResultStr += `\n\n${testFileWithoutTestCasesNote(displayPath)}`
 		}
+
+		// PostToolUse lifecycle hook (and WorktreeCreate when a git worktree was added)
+		const postHook = await this._runHook('PostToolUse', {
+			threadId,
+			toolName,
+			toolCallId: toolId,
+			toolInput: opts.unvalidatedToolParams as Record<string, unknown>,
+			toolResult: toolResultStr.slice(0, 4000),
+		})
+		if (postHook?.systemMessages.length) {
+			toolResultStr += `\n\n[Hook note]\n${postHook.systemMessages.join('\n')}`
+		}
+		if (toolName === 'git_worktree_add') {
+			const wtPath = (toolParams as { path?: string }).path
+			void this._runHook('WorktreeCreate', { threadId, toolName, toolCallId: toolId, worktreePath: wtPath })
+		}
+
+		if (toolSpanId) { this._observabilityService?.endSpan(toolSpanId, { status: 'completed' }) }
+		// Self-improving failure memory: if this tool recently failed, remember the working call summary
+		const recoverySummary = typeof (toolParams as { command?: string }).command === 'string'
+			? `Succeeded with command: ${(toolParams as { command: string }).command}`
+			: typeof (toolParams as { uri?: URI }).uri?.fsPath === 'string'
+				? `Succeeded on ${(toolParams as { uri: URI }).uri.fsPath}`
+				: `Succeeded calling ${toolName}`
+		this._failureMemory.recordRecovery(toolName, recoverySummary)
 
 		// 5. add to history and keep going
 		this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: toolResult, name: toolName, content: toolResultStr, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
@@ -1256,16 +1523,31 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			this._updateLatestTool(parentId, { role: 'tool', type: 'tool_error', params, result: message, name, content: message, id: toolId, rawParams, mcpServerName })
 			return {}
 		}
-		// everything up to the interruptor is synchronous: a parallel batch collects every interruptor before awaiting
+		// Register interruptor synchronously BEFORE any await (custom-agent discovery, hooks, etc.)
+		// so a parallel batch collects every interruptor before awaiting.
+		let interrupted = false
+		let activeChildId: string | undefined
+		const interruptor = Promise.resolve(() => {
+			interrupted = true
+			if (activeChildId) { this.abortRunning(activeChildId) }
+		})
+		if (parallel) { parallel.onInterruptor(interruptor) }
+
 		if (this.state.allThreads[parentId]?.subagentOf) { return fail('A subagent cannot start subagents. Do the work yourself, or finish and say what should be delegated.') }
 		const running = this._runningSubagentsOfParent.get(parentId) ?? new Set<string>()
 		this._runningSubagentsOfParent.set(parentId, running)
 		if (running.size >= MAX_PARALLEL_SUBAGENTS) { return fail(`At most ${MAX_PARALLEL_SUBAGENTS} subagents can run at the same time; ${running.size} are running. Wait for their reports.`) }
-		const model = this._resolveSubagentModel(parentId, params.model)
-		if ('error' in model) { return fail(model.error) }
+
+		// Reserve the tool-message slot synchronously in call order before awaiting async discovery/hooks.
+		this._updateLatestTool(parentId, { role: 'tool', type: 'running_now', name, params, content: `(subagent "${params.description}" is starting...)`, result: null, id: toolId, rawParams, mcpServerName })
+
+		const customAgents = await this._discoverCustomAgents()
+		if (interrupted) { return { interrupted: true } }
 
 		let childId: string
 		let agent: SubagentType
+		let profile: SubagentProfile | undefined
+		let pendingNewThread: ThreadType | undefined
 		if (params.sessionID) {
 			const existing = this.state.allThreads[params.sessionID]
 			if (!existing?.subagentOf || existing.subagentOf.parentThreadId !== parentId) { return fail(`There is no subagent session "${params.sessionID}" started from this conversation.`) }
@@ -1276,28 +1558,60 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			}
 			childId = existing.id
 			agent = existing.subagentOf.agent // the type it was started with
+			const resolved = resolveSubagentType(agent, customAgents)
+			profile = 'error' in resolved ? undefined : resolved.profile
 		} else {
-			const resolved = resolveSubagentType(params.agent)
+			const resolved = resolveSubagentType(params.agent, customAgents)
 			if ('error' in resolved) { return fail(resolved.error) }
 			agent = resolved.type
+			profile = resolved.profile
+			pendingNewThread = { ...newThreadObject(), subagentOf: { parentThreadId: parentId, agent, description: params.description } }
+			childId = pendingNewThread.id
+		}
+
+		// Validate model BEFORE persisting any new child thread so failed calls leave no orphan threads
+		const model = this._resolveSubagentModel(parentId, params.model ?? profile?.defaultModel)
+		if ('error' in model) { return fail(model.error) }
+
+		// SubagentStart lifecycle hook
+		const startHook = await this._runHook('SubagentStart', {
+			threadId: parentId,
+			toolName: name,
+			toolCallId: toolId,
+			agentType: agent,
+			subagentSessionId: childId,
+			message: params.description,
+		})
+		if (interrupted) { return { interrupted: true } }
+		if (startHook?.decision === 'block') {
+			return fail(`Blocked by SubagentStart hook: ${startHook.reason ?? 'subagent disallowed'}`)
+		}
+
+		if (pendingNewThread) {
 			// created directly: never reuse one of the user's empty threads, never switch the user's current thread
-			const thread: ThreadType = { ...newThreadObject(), subagentOf: { parentThreadId: parentId, agent, description: params.description } }
-			childId = thread.id
-			const newThreads: ChatThreads = { ...this.state.allThreads, [childId]: thread }
+			const newThreads: ChatThreads = { ...this.state.allThreads, [childId]: pendingNewThread }
 			this._storeAllThreads(newThreads)
 			this._setState({ allThreads: newThreads })
 		}
 
 		const offered = (availableTools(this._settingsService.state.globalSettings.chatMode, this._mcpService.getMCPTools()) ?? []).map(t => t.name)
-		const allowed = new Set(subagentToolNames(agent, offered, n => !isABuiltinToolName(n) || n in approvalTypeOfBuiltinToolName))
-		this._toolPolicyOfThread.set(childId, { agent, allowed })
+		const allowed = new Set(subagentToolNames(agent, offered, n => !isABuiltinToolName(n) || n in approvalTypeOfBuiltinToolName, profile))
+		this._toolPolicyOfThread.set(childId, { agent, allowed, profile })
 		running.add(childId)
+		activeChildId = childId
 
 		this._updateLatestTool(parentId, { role: 'tool', type: 'running_now', name, params, content: `(subagent "${params.description}" is working...)`, result: null, id: toolId, rawParams, mcpServerName })
-		let interrupted = false
-		const interruptor = Promise.resolve(() => { interrupted = true; this.abortRunning(childId) })
-		if (parallel) { parallel.onInterruptor(interruptor) }
-		else { this._setStreamState(parentId, { isRunning: 'tool', interrupt: interruptor, toolInfo: { toolName: name, toolParams: params, id: toolId, content: 'interrupted...', rawParams, mcpServerName } }) }
+		if (!parallel) { this._setStreamState(parentId, { isRunning: 'tool', interrupt: interruptor, toolInfo: { toolName: name, toolParams: params, id: toolId, content: 'interrupted...', rawParams, mcpServerName } }) }
+
+		const subagentSpanId = this._observabilityService?.startSpan({
+			kind: 'subagent',
+			threadId: parentId,
+			toolCallId: toolId,
+			agentId: childId,
+			name: `subagent:${agent}`,
+			detail: params.description,
+			modelName: model.modelSelection?.modelName,
+		})
 
 		const startedAt = Date.now()
 		const startIdx = this.state.allThreads[childId]?.messages.length ?? 0
@@ -1314,7 +1628,10 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			running.delete(childId)
 			this._subagentFileClaims.releaseAll(childId)
 		}
-		if (interrupted) { return { interrupted: true } } // the parent's abort marks this call interrupted
+		if (interrupted) {
+			if (subagentSpanId) { this._observabilityService?.endSpan(subagentSpanId, { status: 'cancelled' }) }
+			return { interrupted: true }
+		} // the parent's abort marks this call interrupted
 
 		const messages = this.state.allThreads[childId]?.messages.slice(startIdx) ?? []
 		const facts: SubagentToolCallFact[] = []
@@ -1342,6 +1659,21 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			durationMs: Date.now() - startedAt,
 		}
 		const content = formatSubagentReport(report)
+		if (subagentSpanId) {
+			this._observabilityService?.endSpan(subagentSpanId, {
+				status: status === 'failed' || status === 'timed_out' ? 'failed' : status === 'awaiting_approval' ? 'awaiting_approval' : 'completed',
+				detail: `${report.toolCalls.total} tools, ${report.filesChanged.length} files`,
+				errorMessage: report.problems[0],
+			})
+		}
+		void this._runHook('SubagentStop', {
+			threadId: parentId,
+			toolName: name,
+			toolCallId: toolId,
+			agentType: agent,
+			subagentSessionId: childId,
+			message: `${params.description} (${status})`,
+		})
 		this._updateLatestTool(parentId, { role: 'tool', type: status === 'failed' || status === 'timed_out' ? 'tool_error' : 'success', params, result: status === 'failed' || status === 'timed_out' ? content : report, name, content, id: toolId, rawParams, mcpServerName } as ChatMessage & { role: 'tool' })
 		return {}
 	}
@@ -1398,9 +1730,22 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		// _runToolCall does not need setStreamState({idle}) before it, but it needs it after it. (handles its own setStreamState)
 
 		// above just defines helpers, below starts the actual function
-		const { chatMode } = this._settingsService.state.globalSettings // should not change as we loop even if user changes it, so it goes here
+		const { chatMode, disabledTools = [], modelRoutingByRole, fallbackModels } = this._settingsService.state.globalSettings // should not change as we loop even if user changes it, so it goes here
 		const { overridesOfModel } = this._settingsService.state
 		const turnId = generateUuid()
+
+		const subagentOf = this.state.allThreads[threadId]?.subagentOf
+		// Intelligent role/mode model routing (explicit subagent model overrides already arrive in modelSelection)
+		const routed = resolveRoutedModelSelection({
+			primary: modelSelection,
+			routingMap: modelRoutingByRole,
+			chatMode,
+			subagentRole: subagentOf?.agent,
+			explicitOverride: subagentOf ? undefined : undefined,
+		})
+		let activeModelSelection: ModelSelection | null = routed.selection ?? modelSelection
+		const triedModelKeys = new Set<string>()
+		if (activeModelSelection) { triedModelKeys.add(modelSelectionKey(activeModelSelection)) }
 
 		let nMessagesSent = 0
 		let nudgedForUnfulfilledAction = false
@@ -1417,20 +1762,23 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		this._progressOfThread.delete(threadId)
 		const progress = this._progress(threadId)
 		// what a subagent started now inherits by default
-		this._modelOfRunningThread.set(threadId, { modelSelection, modelSelectionOptions })
+		this._modelOfRunningThread.set(threadId, { modelSelection: activeModelSelection, modelSelectionOptions })
 		// a subagent thread is offered only its type's tools (the policy is also enforced when a tool is called)
 		const toolPolicy = this._toolPolicyOfThread.get(threadId)
-		const policyTools: InternalToolInfo[] | undefined = toolPolicy ? this._toolInfosOf(toolPolicy.allowed) : undefined
+		const disabledSet = disabledTools.length > 0 ? new Set(disabledTools) : undefined
+		const policyTools: InternalToolInfo[] | undefined = toolPolicy
+			? this._toolInfosOf(toolPolicy.allowed).filter(t => !disabledSet?.has(t.name))
+			: undefined
+		const baseAvailable = policyTools ?? availableTools(chatMode, this._mcpService.getMCPTools(), undefined, disabledTools) ?? []
 		// a small-context model gets a prioritized subset of the tools when all of them would take over half its window
-		const budgeted = modelSelection ? toolsWithinBudget(
-			policyTools ?? availableTools(chatMode, this._mcpService.getMCPTools()) ?? [],
-			getModelCapabilities(modelSelection.providerName, modelSelection.modelName, overridesOfModel).contextWindow,
+		const budgeted = activeModelSelection ? toolsWithinBudget(
+			baseAvailable,
+			getModelCapabilities(activeModelSelection.providerName, activeModelSelection.modelName, overridesOfModel).contextWindow,
 			estimateTokens,
 		) : undefined
-		const explicitTools: InternalToolInfo[] | undefined = budgeted?.tools ?? policyTools
-		const subagentOf = this.state.allThreads[threadId]?.subagentOf
+		const explicitTools: InternalToolInfo[] | undefined = budgeted?.tools ?? policyTools ?? (disabledSet ? baseAvailable : undefined)
 		const promptNotes = [
-			toolPolicy && subagentOf ? subagentRoleText(subagentOf.agent, subagentOf.description) : '',
+			toolPolicy && subagentOf ? subagentRoleText(subagentOf.agent, subagentOf.description, toolPolicy.profile) : '',
 			budgeted ? describeOmittedTools(budgeted.omitted) : '',
 		].filter(Boolean).join('\n\n')
 		const subagentPrompt = explicitTools ? { tools: explicitTools, role: promptNotes } : undefined
@@ -1491,7 +1839,7 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 
 			const prepare = () => this._convertToLLMMessagesService.prepareLLMChatMessages({
 				chatMessages: this.state.allThreads[threadId]?.messages ?? [],
-				modelSelection,
+				modelSelection: activeModelSelection,
 				chatMode,
 				turnId, // the same system prompt for every request of this turn, so the prompt cache holds
 				subagent: subagentPrompt,
@@ -1500,8 +1848,8 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			// too long for the model: clear old tool results once, rather than truncating messages on every request
 			if (prepared.wasStillOverBudgetAfterTrimming && this._clearOldToolResults(threadId)) prepared = await prepare()
 			// still too long: summarize the older messages (when that fails, prepare's truncation is the fallback)
-			if (prepared.wasStillOverBudgetAfterTrimming && modelSelection && !interruptedWhenIdle) {
-				const summarized = await this._summarizeOlderMessages(threadId, { modelSelection, modelSelectionOptions, overridesOfModel, onInterrupt: () => { interruptedWhenIdle = true } })
+			if (prepared.wasStillOverBudgetAfterTrimming && activeModelSelection && !interruptedWhenIdle) {
+				const summarized = await this._summarizeOlderMessages(threadId, { modelSelection: activeModelSelection, modelSelectionOptions, overridesOfModel, onInterrupt: () => { interruptedWhenIdle = true } })
 				if (!interruptedWhenIdle) this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
 				if (summarized && !interruptedWhenIdle) prepared = await prepare()
 			}
@@ -1534,6 +1882,14 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 					}, LLM_INACTIVITY_TIMEOUT_MS)
 				}
 
+				const llmSpanId = this._observabilityService?.startSpan({
+					kind: 'llm_request',
+					threadId,
+					turnId,
+					name: activeModelSelection ? `${activeModelSelection.providerName}/${activeModelSelection.modelName}` : 'LLM request',
+					detail: `step ${nMessagesSent}`,
+					modelName: activeModelSelection?.modelName,
+				})
 				llmCancelToken = this._llmMessageService.sendLLMMessage({
 					messagesType: 'chatMessages',
 					chatMode,
@@ -1541,7 +1897,7 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 					promptCacheKey: threadId, // every request of the agent loop resends the thread's prefix
 					tools: explicitTools,
 					promptCacheTTL: this._settingsService.state.globalSettings.oneHourPromptCache ? '1h' : undefined,
-					modelSelection,
+					modelSelection: activeModelSelection,
 					modelSelectionOptions,
 					overridesOfModel,
 					logging: { loggingName: `Chat - ${chatMode}`, loggingExtras: { threadId, nMessagesSent, chatMode } },
@@ -1551,14 +1907,23 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 						this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: fullText, reasoningSoFar: fullReasoning, toolCallSoFar: toolCall ?? null }, interrupt: Promise.resolve(() => { if (llmCancelToken) this._llmMessageService.abort(llmCancelToken) }) })
 					},
 					onFinalMessage: async ({ fullText, fullReasoning, toolCalls, anthropicReasoning, usage, finishReason }) => {
-						if (usage && modelSelection) this._convertToLLMMessagesService.recordInputTokens(modelSelection, estimatedInputTokens, usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))
+						if (usage && activeModelSelection) this._convertToLLMMessagesService.recordInputTokens(activeModelSelection, estimatedInputTokens, usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))
+						if (llmSpanId) {
+							this._observabilityService?.endSpan(llmSpanId, {
+								status: 'completed',
+								detail: toolCalls?.length ? `${toolCalls.length} tool call(s)` : (finishReason ?? 'stop'),
+								tokens: usage ? { input: usage.input, output: usage.output, cacheRead: usage.cacheRead } : undefined,
+							})
+						}
 						// finishReason must be passed on: the output-limit continuation below depends on it
 						resMessageIsDonePromise({ type: 'llmDone', toolCalls, info: { fullText, fullReasoning, anthropicReasoning, usage, finishReason } }) // resolve with tool calls
 					},
 					onError: async (error) => {
+						if (llmSpanId) { this._observabilityService?.endSpan(llmSpanId, { status: 'failed', errorMessage: error?.message }) }
 						resMessageIsDonePromise({ type: 'llmError', error: error })
 					},
 					onAbort: () => {
+						if (llmSpanId) { this._observabilityService?.endSpan(llmSpanId, { status: 'cancelled' }) }
 						// stop the loop to free up the promise, but don't modify state (already handled by whatever stopped it)
 						resMessageIsDonePromise({ type: 'llmAborted' })
 						this._metricsService.capture('Agent Loop Done (Aborted)', { nMessagesSent, chatMode })
@@ -1601,25 +1966,28 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 					// The request was longer than the model's real context window (common when the window was only
 					// guessed for an unrecognized model): learn the limit, rebuild the request under it, and retry.
 					const errorText = `${error.message ?? ''} ${error.fullError?.message ?? ''}`
-					const isOverflow = !!modelSelection && isContextOverflowError(errorText)
-					if (modelSelection && isOverflow && overflowRecoveries < MAX_CONTEXT_OVERFLOW_RECOVERIES_PER_TURN) {
+					const isOverflow = !!activeModelSelection && isContextOverflowError(errorText)
+					if (activeModelSelection && isOverflow && overflowRecoveries < MAX_CONTEXT_OVERFLOW_RECOVERIES_PER_TURN) {
 						overflowRecoveries += 1
-						this._convertToLLMMessagesService.recordContextOverflow(modelSelection, contextLimitFromError(errorText))
+						this._convertToLLMMessagesService.recordContextOverflow(activeModelSelection, contextLimitFromError(errorText))
 						this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
 						shouldRetryLLM = false
 						shouldSendAnotherMessage = true // the outer loop prepares the messages again, now under the learned budget
 						continue
 					}
 					const fullError = error.fullError
+					const parsedStatusMatch = /\bHTTP\s+(\d{3})\b/i.exec(errorText)
+					const inferredStatus: number | null = (fullError as any)?.status ?? (parsedStatusMatch ? Number(parsedStatusMatch[1]) : null)
 					const errInfo = createRetryErrorInfo({
 						name: fullError?.name,
-						message: fullError?.message,
+						message: fullError?.message ?? error.message,
 						code: (fullError as any)?.code ?? null,
-						status: (fullError as any)?.status ?? null,
+						status: inferredStatus,
 						headers: (fullError as any)?.headers ?? null,
 					})
-					// resending a request the provider already rejected as too long cannot succeed: never back off and retry it
-					const decision = isOverflow ? { retry: false, delayMs: 0 } : this._retryPolicy(threadId).decide(errInfo, true)
+					// Never waste 10 retries (~90s) on context overflow or deterministic 4xx client/auth/not-found errors
+					const isNonRetryableClientError = inferredStatus === 400 || inferredStatus === 401 || inferredStatus === 403 || inferredStatus === 404
+					const decision = (isOverflow || isNonRetryableClientError) ? { retry: false, delayMs: 0 } : this._retryPolicy(threadId).decide(errInfo, true)
 					if (decision.retry) {
 						this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
 						await timeout(decision.delayMs)
@@ -1628,6 +1996,30 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 							return
 						}
 						continue // retry with exponential backoff
+					}
+					// Automatic fallback model chain on transient/provider failures (Mandate §8 / §21.5)
+					if (!isOverflow && isFallbackEligibleError(errorText, inferredStatus)) {
+						const nextFallback = selectNextFallbackModel(triedModelKeys, fallbackModels)
+						if (nextFallback) {
+							triedModelKeys.add(modelSelectionKey(nextFallback))
+							const prevLabel = activeModelSelection ? `${activeModelSelection.providerName}/${activeModelSelection.modelName}` : 'primary'
+							activeModelSelection = nextFallback
+							this._modelOfRunningThread.set(threadId, { modelSelection: activeModelSelection, modelSelectionOptions })
+							this._retryPolicy(threadId).reset()
+							const fbSpan = this._observabilityService?.startSpan({
+								kind: 'llm_request',
+								threadId,
+								turnId,
+								name: `fallback -> ${nextFallback.providerName}/${nextFallback.modelName}`,
+								detail: `switched from ${prevLabel} after provider error`,
+								modelName: nextFallback.modelName,
+							})
+							if (fbSpan) { this._observabilityService?.endSpan(fbSpan, { status: 'completed' }) }
+							this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
+							shouldRetryLLM = false
+							shouldSendAnotherMessage = true // re-prepare messages under fallback model's format/context window
+							continue
+						}
 					}
 					// retry policy says stop
 					const { displayContentSoFar, reasoningSoFar, toolCallSoFar } = this.streamState[threadId].llmInfo
@@ -1647,7 +2039,7 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 				shouldRetryLLM = false
 				const { toolCalls, info } = llmRes
 
-				this._addMessageToThread(threadId, { role: 'assistant', displayContent: info.fullText, reasoning: info.fullReasoning, anthropicReasoning: info.anthropicReasoning, modelSelection: modelSelection ?? undefined, usage: info.usage })
+				this._addMessageToThread(threadId, { role: 'assistant', displayContent: info.fullText, reasoning: info.fullReasoning, anthropicReasoning: info.anthropicReasoning, modelSelection: activeModelSelection ?? undefined, usage: info.usage })
 
 				// OpenCode-style output-limit continuation: when the model hit its output token limit
 				// mid-response (finishReason === 'length') and made no tool calls, inject a synthetic
@@ -1725,10 +2117,28 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		this._setStreamState(threadId, { isRunning: isRunningWhenEnd })
 
 		// add checkpoint before the next user message
-		if (!isRunningWhenEnd) this._addUserCheckpoint({ threadId })
+		if (!isRunningWhenEnd) {
+			this._addUserCheckpoint({ threadId })
+			void this._runHook('Stop', { threadId, message: `Agent turn completed after ${nMessagesSent} step(s)` })
+		}
 
 		// capture number of messages sent
 		this._metricsService.capture('Agent Loop Done', { nMessagesSent, chatMode })
+
+		// Auto-dispatch the next queued steering message if the turn finished cleanly (not waiting approval)
+		if (!isRunningWhenEnd && !interruptedWhenIdle) {
+			const queue = this._queuedMessagesOfThread.get(threadId)
+			if (queue && queue.length > 0) {
+				const nextMessage = queue.shift()!
+				if (queue.length === 0) { this._queuedMessagesOfThread.delete(threadId) }
+				this._onDidChangeQueuedMessages.fire({ threadId })
+				setTimeout(() => {
+					if (!this.streamState[threadId]?.isRunning) {
+						void this.addUserMessageAndStreamResponse({ userMessage: nextMessage, threadId })
+					}
+				}, 0)
+			}
+		}
 	}
 
 
@@ -1822,6 +2232,10 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 	/** every path a file-changing tool call may change: its target, and for a deleted folder everything inside it */
 	private async _pathsChangedBy(toolName: ToolName, toolParams: ToolCallParams<ToolName>): Promise<URI[]> {
 		if (!FILE_CHANGING_TOOLS.has(toolName)) return []
+		if (toolName === 'move_or_rename_file') {
+			const p = toolParams as { source_uri?: URI; target_uri?: URI }
+			return [p.source_uri, p.target_uri].filter((u): u is URI => !!u)
+		}
 		const uri = (toolParams as { uri?: URI }).uri
 		if (!uri) return []
 		if (toolName !== 'delete_file_or_folder') return [uri]
@@ -1835,6 +2249,79 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		}
 		await visit(uri)
 		return out
+	}
+
+	getThreadChangedFiles(threadId: string): string[] {
+		const thread = this.state.allThreads[threadId]
+		if (!thread) return []
+		const files = new Set<string>()
+		for (const m of thread.messages) {
+			if (m.role === 'checkpoint') {
+				for (const fsPath of Object.keys(m.voidFileSnapshotOfURI ?? {})) {
+					files.add(fsPath)
+				}
+			} else if (m.role === 'tool' && m.type === 'success' && FILE_CHANGING_TOOLS.has(m.name)) {
+				const p = m.params as { uri?: URI; source_uri?: URI; target_uri?: URI }
+				if (p?.uri?.fsPath) files.add(p.uri.fsPath)
+				if (p?.source_uri?.fsPath) files.add(p.source_uri.fsPath)
+				if (p?.target_uri?.fsPath) files.add(p.target_uri.fsPath)
+			}
+		}
+		return [...files]
+	}
+
+	getInitialFileSnapshot(threadId: string, fsPath: string): VoidFileSnapshot | undefined {
+		const thread = this.state.allThreads[threadId]
+		if (!thread) return undefined
+		const targetNorm = fsPath.toLowerCase()
+		for (const m of thread.messages) {
+			if (m.role !== 'checkpoint') continue
+			for (const [k, snap] of Object.entries(m.voidFileSnapshotOfURI ?? {})) {
+				if (snap && !snap.pruned && k.toLowerCase() === targetNorm) {
+					return snap
+				}
+			}
+		}
+		return undefined
+	}
+
+	async revertSingleFile(threadId: string, fsPath: string): Promise<boolean> {
+		if (this.streamState[threadId]?.isRunning) return false
+		const snap = this.getInitialFileSnapshot(threadId, fsPath)
+		if (!snap) return false
+		const failures = await this._restoreSnapshots([[fsPath, snap]])
+		if (failures.length) {
+			this._notificationService.notify({ severity: Severity.Warning, message: `Could not revert ${fsPath}: ${failures.join('; ')}` })
+			return false
+		}
+		return true
+	}
+
+	async createNamedCheckpoint(threadId: string, label: string): Promise<number> {
+		const thread = this.state.allThreads[threadId]
+		if (!thread) return -1
+		const cleanLabel = label.trim() || `Checkpoint ${new Date().toLocaleTimeString()}`
+		const trackedPaths = this.getThreadChangedFiles(threadId)
+		const voidFileSnapshotOfURI: { [fsPath: string]: VoidFileSnapshot | undefined } = {}
+		for (const fsPath of trackedPaths) {
+			const snap = await this._snapshotOfPath(URI.file(fsPath))
+			if (snap) voidFileSnapshotOfURI[fsPath] = snap
+		}
+		this._addCheckpoint(threadId, {
+			role: 'checkpoint',
+			type: 'user_edit',
+			label: cleanLabel,
+			createdAt: new Date().toISOString(),
+			voidFileSnapshotOfURI,
+			userModifications: { voidFileSnapshotOfURI: {} },
+		})
+		const idx = (this.state.allThreads[threadId]?.messages.length ?? 1) - 1
+		await this._runHook('CheckpointCreate', { threadId, message: cleanLabel })
+		return idx
+	}
+
+	compactThreadContext(threadId: string): boolean {
+		return this._clearOldToolResults(threadId)
 	}
 
 	/** a path as it is now: its content (and Kodia's diff areas when it is open), a folder, or nothing */
@@ -1938,13 +2425,39 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 	private _getCheckpointBeforeMessage = ({ threadId, messageIdx }: { threadId: string, messageIdx: number }): [CheckpointEntry, number] | undefined => {
 		const thread = this.state.allThreads[threadId]
 		if (!thread) return undefined
-		for (let i = messageIdx; i >= 0; i--) {
+		const startIdx = Math.min(messageIdx, thread.messages.length - 1)
+		for (let i = startIdx; i >= 0; i--) {
 			const message = thread.messages[i]
-			if (message.role === 'checkpoint') {
+			if (message?.role === 'checkpoint') {
 				return [message, i]
 			}
 		}
 		return undefined
+	}
+
+	async restoreCheckpointAtIdx(threadId: string, checkpointIdx: number): Promise<void> {
+		const thread = this.state.allThreads[threadId]
+		if (!thread) return
+		if (this.streamState[threadId]?.isRunning) return
+		const entry = thread.messages[checkpointIdx]
+		if (!entry || entry.role !== 'checkpoint') return
+
+		// Collect the effective snapshot for every file captured at or before checkpointIdx
+		const toRestore: [string, VoidFileSnapshot][] = []
+		const seen = new Set<string>()
+		for (const [fsPath, snap] of Object.entries(entry.voidFileSnapshotOfURI ?? {})) {
+			if (snap && !seen.has(fsPath)) {
+				seen.add(fsPath)
+				toRestore.push([fsPath, snap])
+			}
+		}
+		if (toRestore.length > 0) {
+			const failures = await this._restoreSnapshots(toRestore)
+			if (failures.length) {
+				this._notificationService.notify({ severity: Severity.Warning, message: `Kodia could not restore ${failures.length} file(s) to that checkpoint:\n${failures.join('\n')}` })
+			}
+		}
+		this._setThreadState(threadId, { currCheckpointIdx: checkpointIdx })
 	}
 
 	private _getCheckpointsBetween({ threadId, loIdx, hiIdx }: { threadId: string, loIdx: number, hiIdx: number }) {
@@ -2193,19 +2706,39 @@ We only need to do it for files that were edited since `from`, ie files between 
 		// add dummy before this message to keep checkpoint before user message idea consistent
 		if (thread.messages.length === 0) {
 			this._addUserCheckpoint({ threadId })
+			void this._runHook('SessionStart', { threadId })
 		}
 
+		// Custom slash command expansion (.kodia/commands/*.md, .claude/commands/*.md)
+		const displayInstructions = userMessage
+		let effectiveInstructions = userMessage
+		const expandedCmd = await this._customCommandsService?.tryExpandSlashCommand(userMessage)
+		if (expandedCmd) {
+			effectiveInstructions = `[Custom Command /${expandedCmd.command.name} from ${expandedCmd.command.sourcePath}]\n${expandedCmd.expandedPrompt}`
+		}
+
+		// UserPromptSubmit lifecycle hook
+		const promptHook = await this._runHook('UserPromptSubmit', { threadId, userPrompt: effectiveInstructions })
+		if (promptHook?.decision === 'block') {
+			this._setStreamState(threadId, {
+				isRunning: undefined,
+				error: { message: `Blocked by UserPromptSubmit hook: ${promptHook.reason ?? 'prompt disallowed'}`, fullError: null },
+			})
+			return
+		}
+		if (promptHook?.systemMessages.length) {
+			effectiveInstructions = `${effectiveInstructions}\n\n[Hook context]\n${promptHook.systemMessages.join('\n')}`
+		}
 
 		// add user's message to chat history
-		const instructions = userMessage
 		const currSelns: StagingSelectionItem[] = _chatSelections ?? thread.state.stagingSelections
 
-		const userMessageContent = await chat_userMessageContent(instructions, currSelns, { directoryStrService: this._directoryStringService, fileService: this._fileService }) // user message + names of files (NOT content)
+		const userMessageContent = await chat_userMessageContent(effectiveInstructions, currSelns, { directoryStrService: this._directoryStringService, fileService: this._fileService }) // user message + names of files (NOT content)
 		// the editor state (active file, open files...) now, frozen into the message: in the system prompt, it
 		// would change between messages and void the prompt cache of the whole thread
 		const workspaceContext = this._convertToLLMMessagesService.getWorkspaceContext(this._settingsService.state.globalSettings.chatMode)
 		const content = workspaceContext ? `${userMessageContent}\n\n${workspaceContext}` : userMessageContent
-		const userHistoryElt: ChatMessage = { role: 'user', content, displayContent: instructions, selections: currSelns, state: defaultMessageState }
+		const userHistoryElt: ChatMessage = { role: 'user', content, displayContent: displayInstructions, selections: currSelns, state: defaultMessageState }
 		this._addMessageToThread(threadId, userHistoryElt)
 
 		this._setThreadState(threadId, { currCheckpointIdx: null }) // no longer at a checkpoint because started streaming
@@ -2570,10 +3103,10 @@ We only need to do it for files that were edited since `from`, ie files between 
 
 
 	openNewThread() {
-		// if a thread with 0 messages already exists, switch to it
+		// if a non-subagent thread with 0 messages already exists, switch to it
 		const { allThreads: currentThreads } = this.state
 		for (const threadId in currentThreads) {
-			if (currentThreads[threadId]!.messages.length === 0) {
+			if (currentThreads[threadId]!.messages.length === 0 && !currentThreads[threadId]!.subagentOf) {
 				// switch to the existing empty thread and exit
 				this.switchToThread(threadId)
 				return

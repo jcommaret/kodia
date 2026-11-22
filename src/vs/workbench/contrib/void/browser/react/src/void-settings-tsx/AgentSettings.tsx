@@ -13,6 +13,11 @@ import { AutonomyMode, autonomyModes } from '../../../../common/autonomyPolicy.j
 import { TaskPlan, TaskStatus, getPlanProgress } from '../../../../common/autonomousTask.js'
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { ITaskPlanService } from '../../../../common/taskPlanService.js';
+import { KodiaHookDefinition, KodiaHookExecutionEntry } from '../../../../common/kodiaHooks.js';
+import { builtinToolNames } from '../../../../common/prompt/prompts.js';
+import { getToolCategory } from '../../../../common/toolDisplayMeta.js';
+import { URI } from '../../../../../../../base/common/uri.js';
+import { VSBuffer } from '../../../../../../../base/common/buffer.js';
 import { GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
 import { Circle, Check, X, AlertTriangle } from 'lucide-react';
 
@@ -49,7 +54,6 @@ const labelOfApprovalType: { [T in ToolApprovalType]: string } = {
 	'planning': 'Plan tasks without asking',
 	'debug': 'Debug without asking',
 	'web pages': 'Fetch web pages without asking',
-	'web_search': 'Fetch web pages without asking',
 	'browser': 'Browser automation without asking',
 	'MCP tools': 'Use MCP tools without asking',
 	'git': 'Git operations without asking',
@@ -293,6 +297,164 @@ const MCPServersList = () => {
 	return <div className="my-2">{content}</div>
 };
 
+const LifecycleHooksSettings = () => {
+	const accessor = useAccessor()
+	const hooksService = accessor.get('IKodiaHooksMainService')
+	const workspaceContextService = accessor.get('IWorkspaceContextService')
+	const fileService = accessor.get('IFileService')
+	const commandService = accessor.get('ICommandService')
+	const notificationService = accessor.get('INotificationService')
+
+	const [hooks, setHooks] = useState<KodiaHookDefinition[]>([])
+	const [audit, setAudit] = useState<KodiaHookExecutionEntry[]>([])
+	const [loading, setLoading] = useState(false)
+
+	const workspaceRoot = workspaceContextService.getWorkspace().folders[0]?.uri
+
+	const refresh = useCallback(async () => {
+		if (!hooksService) return
+		setLoading(true)
+		try {
+			const [loaded, log] = await Promise.all([
+				workspaceRoot ? hooksService.listConfiguredHooks([workspaceRoot.fsPath]) : Promise.resolve([]),
+				hooksService.getAuditLog(10),
+			])
+			setHooks(loaded)
+			setAudit(log)
+		} catch {
+			// Ignore if workspace unavailable
+		} finally {
+			setLoading(false)
+		}
+	}, [hooksService, workspaceRoot])
+
+	useEffect(() => { refresh() }, [refresh])
+
+	const openOrCreateHooksFile = async () => {
+		if (!workspaceRoot) {
+			notificationService.info('Open a workspace folder first to configure .kodia/hooks.json.')
+			return
+		}
+		const target = URI.joinPath(workspaceRoot, '.kodia', 'hooks.json')
+		try {
+			const exists = await fileService.exists(target)
+			if (!exists) {
+				const starter = JSON.stringify({
+					hooks: {
+						PreToolUse: [
+							{
+								matcher: 'write_file|edit_file',
+								command: 'node -e "process.exit(0)"',
+								timeoutMs: 5000,
+								enabled: false,
+							},
+						],
+					},
+				}, null, 2) + '\n'
+				await fileService.writeFile(target, VSBuffer.fromString(starter))
+			}
+			await commandService.executeCommand('vscode.open', target)
+			await refresh()
+		} catch (err) {
+			notificationService.error(`Could not open .kodia/hooks.json: ${err instanceof Error ? err.message : String(err)}`)
+		}
+	}
+
+	return (
+		<div className="flex flex-col gap-2">
+			<div className="flex items-center gap-2">
+				<VoidButtonBgDarken className="px-4 py-1" onClick={openOrCreateHooksFile}>
+					Open / Create .kodia/hooks.json
+				</VoidButtonBgDarken>
+				<VoidButtonBgDarken className="px-3 py-1" onClick={refresh}>
+					{loading ? 'Refreshing...' : 'Refresh'}
+				</VoidButtonBgDarken>
+			</div>
+			{hooks.length === 0 ? (
+				<div className="text-xs text-void-fg-3">
+					No hooks configured in .kodia/hooks.json or .claude/settings.json. Supports PreToolUse, PostToolUse, PermissionRequest, UserPromptSubmit, SubagentStart/Stop, TaskCompleted, and Stop events.
+				</div>
+			) : (
+				<div className="flex flex-col gap-1.5">
+					{hooks.map((h, idx) => (
+						<div key={`${h.event}-${h.matcher ?? '*'}-${idx}`} className="border border-void-border-2 bg-void-bg-1 px-3 py-2 rounded-sm text-xs">
+							<div className="flex items-center justify-between gap-2">
+								<span className="font-medium text-void-fg-1">{h.event}{h.matcher ? ` (${h.matcher})` : ''}</span>
+								<span className="text-void-fg-3">{h.enabled ? 'enabled' : 'disabled'} · {h.timeoutMs}ms</span>
+							</div>
+							<div className="font-mono text-void-fg-2 truncate mt-0.5">{h.command}</div>
+						</div>
+					))}
+				</div>
+			)}
+			{audit.length > 0 && (
+				<div className="text-xs text-void-fg-3 mt-1">
+					Recent executions: {audit.slice(0, 3).map(a => `${a.event}→${a.decision} (${a.durationMs}ms)`).join(' · ')}
+				</div>
+			)}
+		</div>
+	)
+}
+
+const ToolPolicySettings = () => {
+	const accessor = useAccessor()
+	const voidSettingsService = accessor.get('IVoidSettingsService')
+	const disabledTools = useSettingsState().globalSettings.disabledTools ?? []
+	const disabledSet = new Set(disabledTools)
+	const [filter, setFilter] = useState('')
+
+	const filteredTools = builtinToolNames.filter(name => {
+		const q = filter.trim().toLowerCase()
+		if (!q) return true
+		return name.toLowerCase().includes(q) || getToolCategory(name).toLowerCase().includes(q)
+	})
+
+	const toggleTool = (toolName: string, enabled: boolean) => {
+		const next = new Set(voidSettingsService.state.globalSettings.disabledTools ?? [])
+		if (enabled) next.delete(toolName)
+		else next.add(toolName)
+		voidSettingsService.setGlobalSetting('disabledTools', [...next])
+	}
+
+	return (
+		<div className="flex flex-col gap-2">
+			<div className="flex items-center gap-2">
+				<input
+					type="text"
+					value={filter}
+					onChange={e => setFilter(e.target.value)}
+					placeholder={`Filter ${builtinToolNames.length} built-in tools by name or category...`}
+					className="flex-1 px-2.5 py-1 rounded-sm bg-void-bg-1 border border-void-border-2 text-xs text-void-fg-1 outline-none"
+				/>
+				{disabledTools.length > 0 && (
+					<VoidButtonBgDarken className="px-3 py-1 text-xs" onClick={() => voidSettingsService.setGlobalSetting('disabledTools', [])}>
+						Re-enable All ({disabledTools.length})
+					</VoidButtonBgDarken>
+				)}
+			</div>
+			<div className="max-h-56 overflow-y-auto border border-void-border-2 rounded-sm bg-void-bg-1 divide-y divide-void-border-2/40">
+				{filteredTools.slice(0, 60).map(name => {
+					const enabled = !disabledSet.has(name)
+					return (
+						<div key={name} className="flex items-center justify-between px-3 py-1.5 text-xs">
+							<div className="flex items-center gap-2 min-w-0">
+								<span className="font-mono text-void-fg-1 truncate">{name}</span>
+								<span className="text-[10px] px-1.5 py-0.5 rounded bg-void-bg-2 text-void-fg-3">{getToolCategory(name)}</span>
+							</div>
+							<VoidSwitch size="xs" value={enabled} onChange={v => toggleTool(name, v)} />
+						</div>
+					)
+				})}
+				{filteredTools.length > 60 && (
+					<div className="px-3 py-1.5 text-[11px] text-void-fg-3">
+						Showing first 60 of {filteredTools.length} tools — type above to narrow.
+					</div>
+				)}
+			</div>
+		</div>
+	)
+}
+
 export const AgentSection = () => {
 	const mcpService = useAccessor().get('IMCPService')
 	return <SettingsSection title='Agent' description={`What the agent can do on its own in Agent mode, and the tools it has.`}>
@@ -327,6 +489,18 @@ export const AgentSection = () => {
 				label='Have the agent verify its work before finishing'
 				description='After the agent changes files, Kodia asks it once to check the result against your request: read the files, run the tests or build, and fix what fails. Costs one extra model request per such turn.'
 			/>
+		</SettingGroup>
+
+		<SettingGroup title='Lifecycle hooks' description='Deterministic shell hooks triggered on PreToolUse, PostToolUse, SubagentStart/Stop, TaskCompleted, CheckpointCreate, and other agent events (.kodia/hooks.json or .claude/settings.json).'>
+			<ErrorBoundary>
+				<LifecycleHooksSettings />
+			</ErrorBoundary>
+		</SettingGroup>
+
+		<SettingGroup title='Tool policy' description='Enable or disable individual built-in agent tools. Disabled tools are hidden from models and refused at runtime.'>
+			<ErrorBoundary>
+				<ToolPolicySettings />
+			</ErrorBoundary>
 		</SettingGroup>
 
 		<SettingGroup title='MCP servers' description='Model Context Protocol servers give the agent more tools.'>

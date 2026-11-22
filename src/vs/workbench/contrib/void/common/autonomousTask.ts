@@ -7,6 +7,8 @@ import { URI } from '../../../../base/common/uri.js';
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked';
 
+export type TaskPriority = 'high' | 'medium' | 'low';
+
 export type TaskPlanTask = {
 	id: string;
 	title: string;
@@ -15,6 +17,12 @@ export type TaskPlanTask = {
 	dependencies: string[]; // task IDs that must be completed before this task
 	result?: string; // result/output from completed task
 	error?: string; // error message if failed
+	priority?: TaskPriority;
+	assignedAgent?: string;
+	acceptanceCriteria?: string[];
+	evidence?: string;
+	retryCount?: number;
+	updatedAt?: string;
 };
 
 export type TaskPlan = {
@@ -41,34 +49,117 @@ export const newTaskPlan = (title: string, description: string): TaskPlan => {
 	};
 };
 
-export const newTask = (title: string, description: string, dependencies: string[] = []): TaskPlanTask => {
+export const newTask = (
+	title: string,
+	description: string,
+	dependencies: string[] = [],
+	extras?: { priority?: TaskPriority; assignedAgent?: string; acceptanceCriteria?: string[] },
+): TaskPlanTask => {
 	return {
 		id: 'task-' + Math.random().toString(36).slice(2, 11),
 		title,
 		description,
 		status: 'pending',
 		dependencies,
+		...(extras?.priority ? { priority: extras.priority } : {}),
+		...(extras?.assignedAgent ? { assignedAgent: extras.assignedAgent } : {}),
+		...(extras?.acceptanceCriteria?.length ? { acceptanceCriteria: extras.acceptanceCriteria } : {}),
+		updatedAt: new Date().toISOString(),
 	};
 };
 
 export const addTask = (plan: TaskPlan, task: TaskPlanTask): TaskPlan => {
+	const tasks = [...plan.tasks, task];
 	return {
 		...plan,
-		tasks: [...plan.tasks, task],
+		tasks,
+		overallStatus: computeOverallStatus(tasks),
 		updatedAt: new Date().toISOString(),
 	};
 };
 
-export const updateTaskStatus = (plan: TaskPlan, taskId: string, status: TaskStatus, result?: string, error?: string): TaskPlan => {
+export const updateTaskStatus = (plan: TaskPlan, taskId: string, status: TaskStatus, result?: string, error?: string, evidence?: string): TaskPlan => {
+	const now = new Date().toISOString();
+	const tasks = plan.tasks.map(t =>
+		t.id === taskId
+			? {
+				...t,
+				status,
+				...(result !== undefined ? { result } : {}),
+				...(error !== undefined ? { error } : {}),
+				...(evidence !== undefined ? { evidence } : {}),
+				updatedAt: now,
+			}
+			: t
+	);
 	return {
 		...plan,
-		tasks: plan.tasks.map(t =>
-			t.id === taskId
-				? { ...t, status, ...(result !== undefined ? { result } : {}), ...(error !== undefined ? { error } : {}) }
-				: t
-		),
-		overallStatus: computeOverallStatus(plan.tasks.map(t => t.id === taskId ? { ...t, status } : t)),
-		updatedAt: new Date().toISOString(),
+		tasks,
+		overallStatus: computeOverallStatus(tasks),
+		updatedAt: now,
+	};
+};
+
+/** Explicitly reset a failed or blocked task back to pending so it can be retried. */
+export const retryTask = (plan: TaskPlan, taskId: string): TaskPlan => {
+	const now = new Date().toISOString();
+	const tasks = plan.tasks.map(t =>
+		t.id === taskId && (t.status === 'failed' || t.status === 'blocked')
+			? { ...t, status: 'pending' as TaskStatus, error: undefined, retryCount: (t.retryCount ?? 0) + 1, updatedAt: now }
+			: t
+	);
+	return {
+		...plan,
+		tasks,
+		overallStatus: computeOverallStatus(tasks),
+		updatedAt: now,
+	};
+};
+
+export type TaskEditPatch = {
+	title?: string;
+	description?: string;
+	dependencies?: string[];
+	priority?: TaskPriority;
+	assignedAgent?: string | undefined;
+	acceptanceCriteria?: string[];
+	evidence?: string;
+};
+
+export const editTask = (plan: TaskPlan, taskId: string, patch: TaskEditPatch): TaskPlan => {
+	const now = new Date().toISOString();
+	const tasks = plan.tasks.map(t => {
+		if (t.id !== taskId) { return t; }
+		return {
+			...t,
+			...(patch.title !== undefined ? { title: patch.title } : {}),
+			...(patch.description !== undefined ? { description: patch.description } : {}),
+			...(patch.dependencies !== undefined ? { dependencies: patch.dependencies } : {}),
+			...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+			...('assignedAgent' in patch ? { assignedAgent: patch.assignedAgent } : {}),
+			...(patch.acceptanceCriteria !== undefined ? { acceptanceCriteria: patch.acceptanceCriteria } : {}),
+			...(patch.evidence !== undefined ? { evidence: patch.evidence } : {}),
+			updatedAt: now,
+		};
+	});
+	return {
+		...plan,
+		tasks,
+		overallStatus: computeOverallStatus(tasks),
+		updatedAt: now,
+	};
+};
+
+export const removeTask = (plan: TaskPlan, taskId: string): TaskPlan => {
+	const now = new Date().toISOString();
+	const tasks = plan.tasks
+		.filter(t => t.id !== taskId)
+		.map(t => ({ ...t, dependencies: t.dependencies.filter(d => d !== taskId) }));
+	return {
+		...plan,
+		tasks,
+		overallStatus: computeOverallStatus(tasks),
+		updatedAt: now,
 	};
 };
 
@@ -84,15 +175,16 @@ export const computeOverallStatus = (tasks: TaskPlanTask[]): 'pending' | 'in_pro
 	return 'pending';
 };
 
-export const getNextPendingTask = (plan: TaskPlan): TaskPlanTask | null => {
-	// Find tasks whose dependencies are all completed
+export const getParallelReadyTasks = (plan: TaskPlan): TaskPlanTask[] => {
 	const completedIds = new Set(plan.tasks.filter(t => t.status === 'completed').map(t => t.id));
-	for (const task of plan.tasks) {
-		if (task.status !== 'pending') continue;
-		const depsSatisfied = task.dependencies.every(depId => completedIds.has(depId));
-		if (depsSatisfied) return task;
-	}
-	return null;
+	const priorityRank: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2 };
+	return plan.tasks
+		.filter(task => task.status === 'pending' && task.dependencies.every(depId => completedIds.has(depId)))
+		.sort((a, b) => (priorityRank[a.priority ?? 'medium'] - priorityRank[b.priority ?? 'medium']));
+};
+
+export const getNextPendingTask = (plan: TaskPlan): TaskPlanTask | null => {
+	return getParallelReadyTasks(plan)[0] ?? null;
 };
 
 export const getTaskById = (plan: TaskPlan, taskId: string): TaskPlanTask | undefined => {
@@ -158,11 +250,22 @@ export const formatTaskPlanForLLM = (plan: TaskPlan): string => {
 	lines.push('');
 	lines.push('Tasks:');
 	for (const task of plan.tasks) {
-		const deps = task.dependencies.length > 0 ? ` (depends on: ${task.dependencies.join(', ')})` : '';
-		lines.push(`- [${task.status}] ${task.id}: ${task.title}`);
-		lines.push(`  Description: ${task.description}${deps}`);
+		const meta: string[] = [];
+		if (task.priority) meta.push(`priority: ${task.priority}`);
+		if (task.assignedAgent) meta.push(`agent: ${task.assignedAgent}`);
+		if (task.dependencies.length > 0) meta.push(`depends on: ${task.dependencies.join(', ')}`);
+		const metaStr = meta.length > 0 ? ` (${meta.join('; ')})` : '';
+		lines.push(`- [${task.status}] ${task.id}: ${task.title}${metaStr}`);
+		lines.push(`  Description: ${task.description}`);
+		if (task.acceptanceCriteria?.length) lines.push(`  Acceptance criteria: ${task.acceptanceCriteria.join(' | ')}`);
 		if (task.result) lines.push(`  Result: ${task.result}`);
+		if (task.evidence) lines.push(`  Evidence: ${task.evidence}`);
 		if (task.error) lines.push(`  Error: ${task.error}`);
+	}
+	const ready = getParallelReadyTasks(plan);
+	if (ready.length > 0) {
+		lines.push('');
+		lines.push(`Ready tasks (${ready.length}${ready.length > 1 ? ', parallelizable' : ''}): ${ready.map(t => `${t.id} (${t.title})`).join(', ')}`);
 	}
 	return lines.join('\n');
 };

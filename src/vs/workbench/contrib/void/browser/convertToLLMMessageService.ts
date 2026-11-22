@@ -145,8 +145,8 @@ export class ConvertToLLMMessageService extends Disposable implements IConvertTo
 		const guidelines = this._getGuidelines()
 		if (guidelines) sections.push(`GUIDELINES (from the user's settings and the project's rules files):\n${guidelines}`)
 
-		// the agent loads a skill with read_file, which only these modes have
-		if (!disableSystemMessage && (chatMode === 'agent' || chatMode === 'gather')) {
+		// the agent loads a skill with read_file, which all tool-enabled modes have
+		if (!disableSystemMessage && chatMode !== 'normal') {
 			const skills = await this._getSkills()
 			if (skills.length > 0) sections.push(chat_skills(skills))
 		}
@@ -159,7 +159,7 @@ export class ConvertToLLMMessageService extends Disposable implements IConvertTo
 
 		if (!disableSystemMessage) {
 			const directoryStr = await this.directoryStrService.getAllDirectoriesStr({
-				cutOffMessage: chatMode === 'agent' || chatMode === 'gather' ?
+				cutOffMessage: chatMode !== 'normal' ?
 					`...Directories string cut off, use tools to read more...`
 					: `...Directories string cut off, ask user for more if necessary...`
 			})

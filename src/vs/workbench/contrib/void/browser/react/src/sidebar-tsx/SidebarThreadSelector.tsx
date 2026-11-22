@@ -6,14 +6,16 @@
 import { useState } from 'react';
 import { IconShell1 } from '../markdown/ApplyBlockHoverButtons.js';
 import { useAccessor, useChatThreadsState, useFullChatThreadsStreamState } from '../util/services.js';
-import { Check, Copy, Icon, LoaderCircle, MessageCircleQuestion, Trash2, X } from 'lucide-react';
+import { Check, Copy, Download, LoaderCircle, MessageCircleQuestion, Search, Trash2, X } from 'lucide-react';
 import { IsRunningType, ThreadType } from '../../../chatThreadService.js';
+import { exportThreadToMarkdown, filterThreadsByQuery } from '../../../../common/threadExport.js';
 
 
-const numInitialThreads = 3
+const numInitialThreads = 5
 
 export const PastThreadsList = ({ className = '' }: { className?: string }) => {
 	const [showAll, setShowAll] = useState(false);
+	const [searchQuery, setSearchQuery] = useState('');
 
 	const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
 
@@ -32,19 +34,41 @@ export const PastThreadsList = ({ className = '' }: { className?: string }) => {
 		return <div key="error" className="p-1">{`Error accessing chat history.`}</div>;
 	}
 
-	// sorted by most recent to least recent
-	const sortedThreadIds = Object.keys(allThreads ?? {})
+	// sorted by most recent to least recent (subagent threads are managed in the Agents tab)
+	const allVisibleThreads = Object.keys(allThreads ?? {})
 		.sort((threadId1, threadId2) => (allThreads[threadId1]?.lastModified ?? 0) > (allThreads[threadId2]?.lastModified ?? 0) ? -1 : 1)
-		.filter(threadId => (allThreads![threadId]?.messages.length ?? 0) !== 0)
+		.map(threadId => allThreads![threadId])
+		.filter((t): t is ThreadType => !!t && (t.messages.length ?? 0) !== 0 && !t.subagentOf)
 
-	// Get only first 5 threads if not showing all
-	const hasMoreThreads = sortedThreadIds.length > numInitialThreads;
-	const displayThreads = showAll ? sortedThreadIds : sortedThreadIds.slice(0, numInitialThreads);
+	const filteredThreads = searchQuery.trim() ? filterThreadsByQuery(allVisibleThreads, searchQuery) : allVisibleThreads;
+	const sortedThreadIds = filteredThreads.map(t => t.id);
+
+	// Get only first N threads if not showing all and not actively searching
+	const hasMoreThreads = !searchQuery.trim() && sortedThreadIds.length > numInitialThreads;
+	const displayThreads = (showAll || searchQuery.trim()) ? sortedThreadIds : sortedThreadIds.slice(0, numInitialThreads);
 
 	return (
 		<div className={`flex flex-col mb-2 gap-2 w-full text-nowrap text-void-fg-3 select-none relative ${className}`}>
-			{displayThreads.length === 0 // this should never happen
-				? <></>
+			{allVisibleThreads.length > 2 && (
+				<div className="flex items-center gap-1.5 px-2 py-1 rounded border border-void-border-2 bg-void-bg-1 text-xs">
+					<Search size={11} className="text-void-fg-3 shrink-0" />
+					<input
+						type="text"
+						value={searchQuery}
+						onChange={e => setSearchQuery(e.target.value)}
+						placeholder={`Search ${allVisibleThreads.length} sessions...`}
+						className="w-full bg-transparent text-void-fg-1 placeholder:text-void-fg-4 outline-none text-xs"
+					/>
+					{searchQuery && (
+						<button type="button" onClick={() => setSearchQuery('')} className="text-void-fg-3 hover:text-void-fg-1">
+							<X size={11} />
+						</button>
+					)}
+				</div>
+			)}
+
+			{displayThreads.length === 0
+				? (searchQuery.trim() ? <div className="text-xs text-void-fg-4 p-1">{`No sessions match "${searchQuery.trim()}".`}</div> : <></>)
 				: displayThreads.map((threadId, i) => {
 					const pastThread = allThreads[threadId];
 					if (!pastThread) {
@@ -112,16 +136,37 @@ const formatTime = (date: Date) => {
 };
 
 
+const ExportMarkdownButton = ({ pastThread }: { pastThread: ThreadType }) => {
+	const accessor = useAccessor()
+	const clipboardService = accessor.get('IClipboardService')
+	const notificationService = accessor.get('INotificationService')
+	return <IconShell1
+		Icon={Download}
+		className='size-[11px]'
+		onClick={(e: React.MouseEvent) => {
+			e.stopPropagation()
+			const md = exportThreadToMarkdown(pastThread)
+			clipboardService.writeText(md).then(
+				() => notificationService.info('Copied conversation transcript as Markdown.'),
+				() => notificationService.error('Could not copy conversation transcript.')
+			)
+		}}
+		data-tooltip-id='void-tooltip'
+		data-tooltip-place='top'
+		data-tooltip-content='Copy Markdown transcript'
+	/>
+}
+
 const DuplicateButton = ({ threadId }: { threadId: string }) => {
 	const accessor = useAccessor()
 	const chatThreadsService = accessor.get('IChatThreadService')
 	return <IconShell1
 		Icon={Copy}
 		className='size-[11px]'
-		onClick={() => { chatThreadsService.duplicateThread(threadId); }}
+		onClick={(e: React.MouseEvent) => { e.stopPropagation(); chatThreadsService.duplicateThread(threadId); }}
 		data-tooltip-id='void-tooltip'
 		data-tooltip-place='top'
-		data-tooltip-content='Duplicate thread'
+		data-tooltip-content='Fork / duplicate thread'
 	>
 	</IconShell1>
 
@@ -235,10 +280,8 @@ const PastThreadElement = ({ pastThread, idx, hoveredIdx, setHoveredIdx, isRunni
 			<div className="flex items-center gap-x-1 opacity-60">
 				{idx === hoveredIdx ?
 					<>
-						{/* trash icon */}
+						<ExportMarkdownButton pastThread={pastThread} />
 						<DuplicateButton threadId={pastThread.id} />
-
-						{/* trash icon */}
 						<TrashButton threadId={pastThread.id} />
 					</>
 					: <>

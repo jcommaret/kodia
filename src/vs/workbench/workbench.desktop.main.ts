@@ -63,6 +63,8 @@ import './services/encryption/electron-browser/encryptionService.js';
 import '../workbench/contrib/void/electron-browser/webSearchService.js';
 import '../workbench/contrib/void/electron-browser/browserService.js';
 import '../workbench/contrib/void/electron-browser/kodiaGitService.js';
+import '../workbench/contrib/void/electron-browser/kodiaHooksService.js';
+import '../workbench/contrib/void/electron-browser/kodiaOpsService.js';
 import './services/imageResize/electron-browser/imageResizeService.js';
 import './services/localTranscription/electron-browser/localTranscriptionService.js';
 import './services/secrets/electron-browser/secretStorageService.js';

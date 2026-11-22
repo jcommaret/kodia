@@ -13,7 +13,7 @@
  */
 
 export const FILE_CHANGING_TOOLS: ReadonlySet<string> = new Set([
-	'create_file_or_folder', 'write_file', 'rewrite_file', 'edit_file', 'delete_file_or_folder',
+	'create_file_or_folder', 'write_file', 'rewrite_file', 'edit_file', 'delete_file_or_folder', 'move_or_rename_file',
 ]);
 
 type MessageLike = { role: string; type?: string; name?: string };
@@ -24,7 +24,7 @@ export function turnChangedFiles(messagesThisTurn: readonly MessageLike[]): bool
 }
 
 export function shouldRequestCompletionCheck(opts: { chatMode: string; alreadyRequested: boolean; messagesThisTurn: readonly MessageLike[] }): boolean {
-	return opts.chatMode === 'agent' && !opts.alreadyRequested && turnChangedFiles(opts.messagesThisTurn);
+	return (opts.chatMode === 'agent' || opts.chatMode === 'debug') && !opts.alreadyRequested && turnChangedFiles(opts.messagesThisTurn);
 }
 
 export const COMPLETION_CHECK_REQUEST = `Kodia: before you finish, check your work against the request — with evidence, not from memory.

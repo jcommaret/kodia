@@ -14,7 +14,9 @@ import { PROJECT_MEMORY_FILE_PATH } from '../../../../common/projectMemoryServic
 import { builtinInstructionsFrameworks, downloadInstructionsFramework, InstructionsFramework } from '../../../../common/instructionsFrameworks.js';
 import { generateUuid } from '../../../../../../../base/common/uuid.js';
 import { URI } from '../../../../../../../base/common/uri.js';
+import { VSBuffer } from '../../../../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../../../../base/common/cancellation.js';
+import { CustomSlashCommand } from '../../../../common/customCommands.js';
 import { PROJECT_RULES_FILE_NAMES } from '../../../../common/prompt/prompts.js';
 import { SkillOfPrompt, skillsOfPrompt } from '../../../../common/agentSkills.js';
 import { AddButton, AddRowButton, ConfirmButton, GlobalSettingSwitch, SettingGroup, SettingsSection } from './SettingsControls.js'
@@ -387,6 +389,95 @@ const ProjectMemory = () => {
 	</>
 }
 
+const CustomCommandsSettings = () => {
+	const accessor = useAccessor()
+	const customCommandsService = accessor.get('ICustomCommandsService')
+	const workspaceContextService = accessor.get('IWorkspaceContextService')
+	const fileService = accessor.get('IFileService')
+	const commandService = accessor.get('ICommandService')
+	const notificationService = accessor.get('INotificationService')
+
+	const [commands, setCommands] = useState<readonly CustomSlashCommand[]>([])
+	const [loading, setLoading] = useState(false)
+
+	const refresh = async () => {
+		setLoading(true)
+		try {
+			setCommands([...await customCommandsService.listCommands()])
+		} finally {
+			setLoading(false)
+		}
+	}
+
+	useEffect(() => { refresh() }, [customCommandsService])
+
+	const createSampleCommand = async () => {
+		const folder = workspaceContextService.getWorkspace().folders[0]?.uri
+		if (!folder) {
+			notificationService.info('Open a workspace folder first to create .kodia/commands/*.md.')
+			return
+		}
+		const target = URI.joinPath(folder, '.kodia', 'commands', 'review.md')
+		try {
+			const exists = await fileService.exists(target)
+			if (!exists) {
+				const content = [
+					'---',
+					'description: Review recent git changes for bugs, security risks, and missing tests',
+					'argument-hint: [focus-area]',
+					'---',
+					'Run `git_diff` and `project_health_scan`, then review all modified files carefully.',
+					'Focus area (if specified): $ARGUMENTS',
+					'Report only concrete defects with exact file paths and line numbers.',
+				].join('\n') + '\n'
+				await fileService.writeFile(target, VSBuffer.fromString(content))
+			}
+			await commandService.executeCommand('vscode.open', target)
+			await refresh()
+		} catch (err) {
+			notificationService.error(`Could not create sample command: ${err instanceof Error ? err.message : String(err)}`)
+		}
+	}
+
+	return (
+		<div className='flex flex-col gap-2'>
+			<div className='flex items-center gap-2'>
+				<VoidButtonBgDarken className='px-4 py-1' onClick={createSampleCommand}>
+					Create / Open /review Command
+				</VoidButtonBgDarken>
+				<VoidButtonBgDarken className='px-3 py-1' onClick={refresh}>
+					{loading ? 'Refreshing...' : 'Refresh'}
+				</VoidButtonBgDarken>
+			</div>
+			{commands.length === 0 ? (
+				<div className='text-sm text-void-fg-3'>
+					No custom slash commands found in .kodia/commands or .claude/commands. Type /command-name in chat to invoke them.
+				</div>
+			) : (
+				<div className='flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-2'>
+					{commands.map(cmd => (
+						<div key={cmd.sourcePath} className='border border-void-border-2 bg-void-bg-1 py-2 px-3 rounded-sm'>
+							<div className='flex items-center justify-between gap-4'>
+								<div className='text-root font-medium text-void-fg-1 truncate'>
+									/{cmd.name}{cmd.argumentHint ? ` ${cmd.argumentHint}` : ''}
+								</div>
+								<button
+									type='button'
+									className='text-sm text-void-fg-3 hover:brightness-125 shrink-0'
+									onClick={() => commandService.executeCommand('vscode.open', URI.file(cmd.sourcePath))}
+								>
+									Open
+								</button>
+							</div>
+							{cmd.description && <div className='text-sm text-void-fg-3 mt-1'>{cmd.description}</div>}
+						</div>
+					))}
+				</div>
+			)}
+		</div>
+	)
+}
+
 export const InstructionsSection = () => {
 	return <SettingsSection title='Instructions & Context' description='What Kodia tells the AI besides your messages: your instructions, the guidelines you turned on, and what the agent remembers about the project.'>
 		<SettingGroup title='Instructions' description='Your instructions, sent with every request.'>
@@ -407,9 +498,15 @@ export const InstructionsSection = () => {
 			</ErrorBoundary>
 		</SettingGroup>
 
-		<SettingGroup title='Skills' description={<ChatMarkdownRender inPTag={true} string={`Instructions for specific tasks, each in a folder with a \`SKILL.md\` (in \`.kodia/skills\`, \`.claude/skills\` or \`.agents/skills\` of your workspace, or \`~/.claude/skills\`, \`~/.agents/skills\`). In Agent and Gather modes, the chat gets each skill's name and description, and the agent reads a skill when a task matches it.`} chatMessageLocation={undefined} />}>
+		<SettingGroup title='Skills' description={<ChatMarkdownRender inPTag={true} string={`Instructions for specific tasks, each in a folder with a \`SKILL.md\` (in \`.kodia/skills\`, \`.claude/skills\` or \`.agents/skills\` of your workspace, or \`~/.claude/skills\`, \`~/.agents/skills\`). In Agent, Plan, Debug, and Gather modes, the chat gets each skill's name and description, and the agent reads a skill when a task matches it.`} chatMessageLocation={undefined} />}>
 			<ErrorBoundary>
 				<Skills />
+			</ErrorBoundary>
+		</SettingGroup>
+
+		<SettingGroup title='Custom slash commands' description={<ChatMarkdownRender inPTag={true} string={`Reusable prompt workflows defined in \`.kodia/commands/*.md\` or \`.claude/commands/*.md\` with \`$ARGUMENTS\` and positional \`$1..$9\` support.`} chatMessageLocation={undefined} />}>
+			<ErrorBoundary>
+				<CustomCommandsSettings />
 			</ErrorBoundary>
 		</SettingGroup>
 

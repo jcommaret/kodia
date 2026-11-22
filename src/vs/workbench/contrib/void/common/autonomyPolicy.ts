@@ -162,6 +162,15 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'test_history',
 	'test_check_flaky',
 	'test_debug',
+	'project_health_scan',
+	'architecture_map',
+	'workspace_diagnostics',
+	'file_metadata',
+	'dependency_audit',
+	'env_inspect',
+	'docker_status',
+	'docker_logs',
+	'db_inspect',
 ]);
 
 /**

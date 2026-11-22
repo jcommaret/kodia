@@ -12,6 +12,11 @@ import { TestFramework, TestFileInfo, TestRunResultData, TestHistoryResult, Test
 import { BrowserInspectResult, BrowserTabResult } from './browserServiceTypes.js';
 import { SubagentReport } from './subagents.js';
 import { CodeSearchResponse, IndexStats, LiteralSearchResponse } from './codeIndexServiceTypes.js';
+import { ArchitectureMapReport, ProjectHealthReport } from './projectHealth.js';
+import { DbInspectReport, DbQueryReport, DockerLogsReport, DockerStatusReport, EnvInspectReport } from './kodiaOpsTypes.js';
+import { ChangeImpactReport, DigitalTwinNode } from './digitalTwin.js';
+import { QualityGateEvaluation, VerificationLevel, VerificationRecord } from './verificationLedger.js';
+import { ArchitectureDecisionRecord, ProjectRequirement } from './softwareFactory.js';
 
 
 
@@ -39,6 +44,7 @@ export type { BrowserElement } from './browserServiceTypes.js';
 export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: 'edits' | 'terminal' | 'web pages' | 'MCP tools' | 'planning' | 'git' | 'test' | 'browser' | 'debug' }> = {
 	'create_file_or_folder': 'edits',
 	'delete_file_or_folder': 'edits',
+	'move_or_rename_file': 'edits',
 	'rewrite_file': 'edits',
 	'write_file': 'edits',
 	'edit_file': 'edits',
@@ -134,6 +140,7 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'dev_server_status': 'terminal',
 	'dep_install': 'terminal',
 	'db_migrate': 'terminal',
+	'db_query': 'terminal',
 	'lint_run': 'terminal',
 	'log_read': 'terminal',
 	'autonomous_dev_cycle': 'terminal',
@@ -370,6 +377,26 @@ export type BuiltinToolCallParams = {
 	'git_worktree_add': { path: string, branch: string, new_branch: boolean, start_point: string | null },
 	'git_commit_context': { max_diff_chars: number | null },
 	'git_pr_prepare': { base: string | null },
+	// Project health, secret/security scanning, and architecture dependency mapping
+	'project_health_scan': { max_files?: number },
+	'architecture_map': { max_files?: number },
+	// Workspace diagnostics, file metadata, safe move/rename, dependency manifest audit
+	'workspace_diagnostics': { severity?: 'error' | 'warning' | 'all', limit?: number },
+	'move_or_rename_file': { source_uri: URI, target_uri: URI, overwrite?: boolean },
+	'file_metadata': { uri: URI },
+	'dependency_audit': {},
+	// Native Environment, Docker, and SQLite Database tools
+	'env_inspect': {},
+	'docker_status': {},
+	'docker_logs': { container: string, tail?: number },
+	'db_inspect': { db_path?: string },
+	'db_query': { sql: string, db_path?: string, allow_write?: boolean },
+	// Digital Twin, Proof-Carrying Verification & Software Factory
+	'change_impact_analysis': { target_path: string, sub_path?: string },
+	'knowledge_graph_query': { query: string, sub_path?: string, limit?: number },
+	'evaluate_quality_gates': { sub_path?: string },
+	'record_verification_evidence': { task_title: string, summary: string, level: VerificationLevel, passed: boolean, detail: string, files_changed?: string[], command?: string },
+	'factory_manage_requirements': { action: 'list' | 'add' | 'update' | 'add_decision', id?: string, title?: string, description?: string, status?: 'unstarted' | 'in_progress' | 'implemented' | 'verified', priority?: 'high' | 'medium' | 'low', decision?: string, consequences?: string },
 }
 
 // RESULT OF TOOL CALL
@@ -548,6 +575,22 @@ export type BuiltinToolResultType = {
 	'execute_notebook': { results: NotebookExecutionResult[] },
 	'select_notebook_kernel': { kernel_id: string },
 	'list_notebook_kernels': { kernels: NotebookKernelInfo[] },
+	'project_health_scan': ProjectHealthReport,
+	'architecture_map': ArchitectureMapReport,
+	'workspace_diagnostics': { totalErrors: number, totalWarnings: number, items: Array<{ uri: string, severity: 'error' | 'warning', line: number, code: string, message: string, source?: string }> },
+	'move_or_rename_file': { sourceUri: URI, targetUri: URI },
+	'file_metadata': { uri: string, size: number, mtime: number, isDirectory: boolean, isSymbolicLink: boolean, lineCount: number | null, lineEnding: 'CRLF' | 'LF' | 'mixed' | 'none', isBinary: boolean },
+	'dependency_audit': { manifests: Array<{ file: string, ecosystem: string, dependencies: number, devDependencies: number, scripts: string[], riskySpecs: string[], license?: string, engines?: Record<string, string> }> },
+	'env_inspect': EnvInspectReport,
+	'docker_status': DockerStatusReport,
+	'docker_logs': DockerLogsReport,
+	'db_inspect': DbInspectReport,
+	'db_query': DbQueryReport,
+	'change_impact_analysis': ChangeImpactReport,
+	'knowledge_graph_query': { totalModules: number, totalSymbols: number, totalApis: number, totalDbEntities: number, untestedCount: number, matches: DigitalTwinNode[] },
+	'evaluate_quality_gates': { evaluation: QualityGateEvaluation, record: VerificationRecord },
+	'record_verification_evidence': VerificationRecord,
+	'factory_manage_requirements': { message: string, requirements?: readonly ProjectRequirement[], decisions?: readonly ArchitectureDecisionRecord[] },
 }
 
 

@@ -39,6 +39,10 @@ export type DecorativeCanceledTool = {
 export type CheckpointEntry = {
 	role: 'checkpoint';
 	type: 'user_edit' | 'tool_edit';
+	/** Optional user-assigned name for named checkpoints (Mandate §2.1 / §21.4). */
+	label?: string;
+	/** Optional ISO timestamp when this checkpoint was captured. */
+	createdAt?: string;
 	voidFileSnapshotOfURI: { [fsPath: string]: VoidFileSnapshot | undefined };
 
 	userModifications: {

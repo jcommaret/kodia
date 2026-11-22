@@ -39,6 +39,11 @@ import { ToolApprovalTypeSwitch } from '../void-settings-tsx/AgentSettings.js';
 
 import { persistentTerminalNameOfId } from '../../../terminalToolService.js';
 import { removeMCPToolNamePrefix } from '../../../../common/mcpServiceTypes.js';
+import { getToolCategory, getToolDisplayTitles, summarizeToolParams } from '../../../../common/toolDisplayMeta.js';
+import { CustomSlashCommand } from '../../../../common/customCommands.js';
+import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
+import { SubagentReport } from '../../../../common/subagents.js';
+import { buildRemodifyPromptRequest, extractRewrittenPrompt } from '../../../../common/promptRewriter.js';
 
 
 
@@ -255,16 +260,20 @@ const ReasoningOptionSlider = ({ featureName }: { featureName: FeatureName }) =>
 
 
 
-const nameOfChatMode = {
-	'normal': 'Chat',
+const nameOfChatMode: Record<ChatMode, string> = {
+	'normal': 'Ask',
 	'gather': 'Gather',
+	'plan': 'Plan',
 	'agent': 'Agent',
+	'debug': 'Debug',
 }
 
-const detailOfChatMode = {
-	'normal': 'Normal chat',
-	'gather': 'Reads files, but can\'t edit',
-	'agent': 'Edits files and uses tools',
+const detailOfChatMode: Record<ChatMode, string> = {
+	'normal': 'Chat without tools',
+	'gather': 'Reads & searches codebase (read-only)',
+	'plan': 'Inspects codebase & creates living task plans (read-only)',
+	'agent': 'Autonomous coding, editing, terminal, tests, Git & browser',
+	'debug': 'Root-cause debugging with breakpoints, stack & variables',
 }
 
 
@@ -274,7 +283,7 @@ const ChatModeDropdown = ({ className }: { className: string }) => {
 	const voidSettingsService = accessor.get('IVoidSettingsService')
 	const settingsState = useSettingsState()
 
-	const options: ChatMode[] = useMemo(() => ['normal', 'gather', 'agent'], [])
+	const options: ChatMode[] = useMemo(() => ['agent', 'plan', 'debug', 'gather', 'normal'], [])
 
 	const onChangeOption = useCallback((newVal: ChatMode) => {
 		voidSettingsService.setGlobalSetting('chatMode', newVal)
@@ -417,6 +426,73 @@ const AttachFilesButton = () => {
 	</>
 }
 
+const AutonomyQuickCycle = () => {
+	const accessor = useAccessor()
+	const voidSettingsService = accessor.get('IVoidSettingsService')
+	const mode = useSettingsState().globalSettings.agentAutonomyMode
+	const cycle: Record<'assist' | 'agent' | 'autonomous', { next: 'assist' | 'agent' | 'autonomous'; label: string; tip: string }> = {
+		assist: { next: 'agent', label: 'Assist', tip: 'Autonomy: Assist (asks before edits/commands) — click to switch to Agent' },
+		agent: { next: 'autonomous', label: 'Agent', tip: 'Autonomy: Agent (default) — click to switch to Autonomous' },
+		autonomous: { next: 'assist', label: 'Auto', tip: 'Autonomy: Autonomous (minimal prompts) — click to switch to Assist' },
+	}
+	const info = cycle[mode] ?? cycle.agent
+	return (
+		<button
+			type="button"
+			onClick={() => voidSettingsService.setGlobalSetting('agentAutonomyMode', info.next)}
+			className="text-[11px] text-void-fg-3 hover:text-void-fg-1 bg-void-bg-1 border border-void-border-2 rounded py-0.5 px-1.5 cursor-pointer whitespace-nowrap"
+			title={info.tip}
+		>
+			{info.label}
+		</button>
+	)
+}
+
+const ContextQuickActions = ({ tokenCount, contextWindow }: { tokenCount?: number; contextWindow?: number }) => {
+	const accessor = useAccessor()
+	const chatThreadService = accessor.get('IChatThreadService')
+	const notificationService = accessor.get('INotificationService')
+	const pct = tokenCount && contextWindow ? Math.min(100, Math.round((tokenCount / contextWindow) * 100)) : undefined
+	return (
+		<div className="flex items-center gap-1.5">
+			{tokenCount !== undefined && tokenCount > 0 && (
+				<span
+					className={`text-[10px] leading-none select-none ${pct !== undefined && pct >= 80 ? 'text-orange-400 font-medium' : 'text-void-fg-3'}`}
+					title={contextWindow ? `Context window usage: ${pct}%` : undefined}
+				>
+					{contextWindow ? `${formatTokenCount(tokenCount)} / ${formatTokenCount(contextWindow)} (${pct}%)` : `${formatTokenCount(tokenCount)} tokens`}
+				</span>
+			)}
+			<button
+				type="button"
+				onClick={async () => {
+					const tid = chatThreadService.state.currentThreadId
+					const idx = await chatThreadService.createNamedCheckpoint(tid, `Checkpoint ${new Date().toLocaleTimeString()}`)
+					if (idx >= 0) notificationService.info('Saved named checkpoint.')
+				}}
+				className="text-[10px] text-void-fg-3 hover:text-void-fg-1 px-1 py-0.5 rounded border border-void-border-2 bg-void-bg-1"
+				title="Save a named file checkpoint of the current workspace state"
+			>
+				Checkpoint
+			</button>
+			{tokenCount !== undefined && tokenCount > 0 && (
+				<button
+					type="button"
+					onClick={() => {
+						const tid = chatThreadService.state.currentThreadId
+						const compacted = chatThreadService.compactThreadContext(tid)
+						notificationService.info(compacted ? 'Compacted older tool outputs to free context.' : 'Context is already compact.')
+					}}
+					className="text-[10px] text-void-fg-3 hover:text-void-fg-1 px-1 py-0.5 rounded border border-void-border-2 bg-void-bg-1"
+					title="Compact older tool outputs to free context window tokens"
+				>
+					Compact
+				</button>
+			)}
+		</div>
+	)
+}
+
 export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 	children,
 	onSubmit,
@@ -489,18 +565,23 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 					<div className='flex items-center flex-wrap gap-x-2 gap-y-1 text-nowrap w-full'>
 						{enableAttachButton && <AttachFilesButton />}
 						{featureName === 'Chat' && <ChatModeDropdown className='text-xs text-void-fg-3 bg-void-bg-1 border border-void-border-2 rounded py-0.5 px-1' />}
+						{featureName === 'Chat' && <AutonomyQuickCycle />}
 						<ModelDropdown featureName={featureName} className='text-xs text-void-fg-3 bg-void-bg-1 rounded flex-1 min-w-[120px]' />
 					</div>
 				</div>
 			)}
 
-			{/* Bottom row - Token count & Send button */}
+			{/* Bottom row - Token count, quick actions & Send button */}
 			<div className='flex flex-row justify-between items-end gap-1 w-full mt-1'>
 				<div className="flex flex-col items-start gap-y-0.5">
-					{tokenCount !== undefined && tokenCount > 0 && (
-						<span className='text-void-fg-3 text-[10px] leading-none select-none pointer-events-none'>
-							{contextWindow ? `${formatTokenCount(tokenCount)} / ${formatTokenCount(contextWindow)}` : `${formatTokenCount(tokenCount)} tokens`}
-						</span>
+					{featureName === 'Chat' ? (
+						<ContextQuickActions tokenCount={tokenCount} contextWindow={contextWindow} />
+					) : (
+						tokenCount !== undefined && tokenCount > 0 && (
+							<span className='text-void-fg-3 text-[10px] leading-none select-none pointer-events-none'>
+								{contextWindow ? `${formatTokenCount(tokenCount)} / ${formatTokenCount(contextWindow)}` : `${formatTokenCount(tokenCount)} tokens`}
+							</span>
+						)
 					)}
 				</div>
 
@@ -780,8 +861,9 @@ export const SelectedFiles = (
 					<span className="truncate overflow-hidden text-ellipsis"
 						data-tooltip-id='void-tooltip'
 						data-tooltip-content={selection.type === 'Image' || selection.type === 'TextFile' ? selection.name
-							: selection.type === 'PDF' || selection.type === 'Document' ? `${selection.name} (${selection.mimeType || 'document'})`
-								: getRelative(selection.uri, accessor)}
+							: selection.type === 'PDF' ? `${selection.name} (${selection.pageCount} pages)`
+								: selection.type === 'Document' ? `${selection.name} (${selection.mimeType || 'document'})`
+									: getRelative(selection.uri, accessor)}
 						data-tooltip-place='top'
 						data-tooltip-delay-show={3000}
 					>
@@ -1017,7 +1099,7 @@ const ToolHeaderWrapper = ({
 
 
 
-const EditTool = ({ toolMessage, threadId, messageIdx, content }: Parameters<ResultWrapper<'edit_file' | 'rewrite_file'>>[0] & { content: string }) => {
+const EditTool = ({ toolMessage, threadId, messageIdx, content }: Parameters<ResultWrapper<'edit_file' | 'rewrite_file' | 'write_file'>>[0] & { content: string }) => {
 	const accessor = useAccessor()
 	const isError = false
 	const isRejected = toolMessage.type === 'rejected'
@@ -1498,7 +1580,7 @@ const titleOfBuiltinToolName = {
 	'read_project_memory': { done: 'Read project memory', proposed: 'Read project memory', running: loadingTitleWrapper('Reading project memory') },
 	'fetch_url': { done: 'Fetched', proposed: 'Fetch', running: loadingTitleWrapper('Fetching') },
 	'write_project_memory': { done: 'Saved project memory', proposed: 'Save project memory', running: loadingTitleWrapper('Saving project memory') },
-} as const satisfies Record<BuiltinToolName, { done: any, proposed: any, running: any }>
+} as const satisfies Partial<Record<BuiltinToolName, { done: any, proposed: any, running: any }>>
 
 
 const getTitle = (toolMessage: Pick<ChatMessage & { role: 'tool' }, 'name' | 'type' | 'mcpServerName'>): React.ReactNode => {
@@ -1523,12 +1605,19 @@ const getTitle = (toolMessage: Pick<ChatMessage & { role: 'tool' }, 'name' | 'ty
 		return title
 	}
 
-	// built-in title
+	// built-in title (safe for all 146+ built-in tools via getToolDisplayTitles)
 	else {
 		const toolName = t.name as BuiltinToolName
-		if (t.type === 'success') return titleOfBuiltinToolName[toolName].done
-		if (t.type === 'running_now') return titleOfBuiltinToolName[toolName].running
-		return titleOfBuiltinToolName[toolName].proposed
+		const explicit = (titleOfBuiltinToolName as Partial<Record<BuiltinToolName, { done: any, proposed: any, running: any }>>)[toolName]
+		if (explicit) {
+			if (t.type === 'success') return explicit.done
+			if (t.type === 'running_now') return explicit.running
+			return explicit.proposed
+		}
+		const meta = getToolDisplayTitles(toolName)
+		if (t.type === 'success') return meta.done
+		if (t.type === 'running_now') return loadingTitleWrapper(meta.running)
+		return meta.proposed
 	}
 }
 
@@ -1671,11 +1760,20 @@ const toolNameToDesc = (toolName: BuiltinToolName, _toolParams: BuiltinToolCallP
 			const toolParams = _toolParams as BuiltinToolCallParams['write_project_memory']
 			if (!toolParams.section) return { desc1: '' } // threads from before sections
 			return { desc1: toolParams.content.trim() ? `"${toolParams.section}"` : `Delete "${toolParams.section}"` }
-		}
+		},
+		'write_file': () => {
+			const toolParams = _toolParams as BuiltinToolCallParams['write_file']
+			return {
+				desc1: getBasename(toolParams.uri.fsPath),
+				desc1Info: getRelative(toolParams.uri, accessor),
+			}
+		},
 	}
 
 	try {
-		return x[toolName]?.() || { desc1: '' }
+		const fn = (x as Partial<Record<BuiltinToolName, () => { desc1: React.ReactNode, desc1Info?: string }>>)[toolName]
+		if (fn) return fn()
+		return summarizeToolParams(toolName, _toolParams as unknown as Record<string, unknown>)
 	}
 	catch {
 		return { desc1: '' }
@@ -1830,13 +1928,13 @@ const BottomChildren = ({ children, title }: { children: React.ReactNode, title:
 }
 
 
-const EditToolHeaderButtons = ({ applyBoxId, uri, codeStr, toolName, threadId }: { threadId: string, applyBoxId: string, uri: URI, codeStr: string, toolName: 'edit_file' | 'rewrite_file' }) => {
+const EditToolHeaderButtons = ({ applyBoxId, uri, codeStr, toolName, threadId }: { threadId: string, applyBoxId: string, uri: URI, codeStr: string, toolName: 'edit_file' | 'rewrite_file' | 'write_file' }) => {
 	const { streamState } = useEditToolStreamState({ applyBoxId, uri })
 	return <div className='flex items-center gap-1'>
 		{/* <StatusIndicatorForApplyButton applyBoxId={applyBoxId} uri={uri} /> */}
 		{/* <JumpToFileButton uri={uri} /> */}
 		{streamState === 'idle-no-changes' && <CopyButton codeStr={codeStr} toolTipName='Copy' />}
-		<EditToolAcceptRejectButtonsHTML type={toolName} codeStr={codeStr} applyBoxId={applyBoxId} uri={uri} threadId={threadId} />
+		<EditToolAcceptRejectButtonsHTML type={toolName === 'write_file' ? 'rewrite_file' : toolName} codeStr={codeStr} applyBoxId={applyBoxId} uri={uri} threadId={threadId} />
 	</div>
 }
 
@@ -2061,7 +2159,7 @@ const MCPToolWrapper = ({ toolMessage }: WrapperProps<string>) => {
 
 type ResultWrapper<T extends ToolName> = (props: WrapperProps<T>) => React.ReactNode
 
-const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: ResultWrapper<T>, } } = {
+const builtinToolNameToComponent: Partial<{ [T in BuiltinToolName]: { resultWrapper: ResultWrapper<T>, } }> = {
 	'read_file': {
 		resultWrapper: ({ toolMessage }) => {
 			const accessor = useAccessor()
@@ -2536,6 +2634,11 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			return <EditTool {...params} content={params.toolMessage.params.newContent} />
 		}
 	},
+	'write_file': {
+		resultWrapper: (params) => {
+			return <EditTool {...params} content={params.toolMessage.params.newContent} />
+		}
+	},
 	'edit_file': {
 		resultWrapper: (params) => {
 			return <EditTool {...params} content={params.toolMessage.params.searchReplaceBlocks} />
@@ -2735,6 +2838,113 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 };
 
 
+const SubagentToolCard: ResultWrapper<'subagent'> = ({ toolMessage }) => {
+	const accessor = useAccessor()
+	const chatThreadService = accessor.get('IChatThreadService')
+	const title = getTitle(toolMessage)
+	const { desc1, desc1Info } = toolNameToDesc(toolMessage.name, toolMessage.params, accessor)
+	const isRejected = toolMessage.type === 'rejected'
+	const isError = toolMessage.type === 'tool_error'
+	const componentParams: ToolHeaderParams = { title, desc1, desc1Info, isError, icon: null, isRejected }
+
+	if (toolMessage.type === 'success') {
+		const report = toolMessage.result as SubagentReport
+		if (report && typeof report === 'object') {
+			componentParams.desc2 = `${report.toolCalls.total} tools · ${report.filesChanged.length} files · ${Math.round(report.durationMs / 1000)}s`
+			componentParams.children = (
+				<ToolChildrenWrapper>
+					<div className='space-y-1.5 text-xs p-1'>
+						<div className='flex items-center justify-between gap-2'>
+							<span className='text-void-fg-2'>
+								Role: <code className='px-1 bg-void-bg-3 rounded'>{report.agent}</code> · Status: <strong>{report.status}</strong>
+							</span>
+							{report.sessionID && (
+								<button
+									type='button'
+									onClick={() => chatThreadService.switchToThread(report.sessionID)}
+									className='px-1.5 py-0.5 text-[10px] rounded border border-void-border-2 bg-void-bg-2 hover:bg-void-bg-3 text-void-fg-1'
+								>
+									Inspect transcript →
+								</button>
+							)}
+						</div>
+						{report.filesChanged.length > 0 && (
+							<div className='text-[11px] text-void-fg-3'>
+								Files changed: {report.filesChanged.join(', ')}
+							</div>
+						)}
+						{report.problems.length > 0 && (
+							<div className='text-[11px] text-red-400 whitespace-pre-wrap'>
+								{report.problems.join('\n')}
+							</div>
+						)}
+						{report.output && (
+							<CodeChildren className='bg-void-bg-3'>
+								<pre className='font-mono whitespace-pre-wrap text-[11px]'>{report.output}</pre>
+							</CodeChildren>
+						)}
+					</div>
+				</ToolChildrenWrapper>
+			)
+		}
+	} else if (toolMessage.type === 'tool_error') {
+		componentParams.bottomChildren = <BottomChildren title='Error'>
+			<CodeChildren>{toolMessage.result}</CodeChildren>
+		</BottomChildren>
+	}
+
+	return <ToolHeaderWrapper {...componentParams} />
+}
+
+const GenericBuiltinToolCard = ({ toolMessage }: { toolMessage: Exclude<ToolMessage<ToolName>, { type: 'invalid_params' }> }) => {
+	const accessor = useAccessor()
+	const title = getTitle(toolMessage)
+	const { desc1, desc1Info } = toolNameToDesc(toolMessage.name as BuiltinToolName, toolMessage.params as any, accessor)
+	const category = getToolCategory(toolMessage.name)
+	const isRejected = toolMessage.type === 'rejected'
+	const isError = toolMessage.type === 'tool_error'
+	const componentParams: ToolHeaderParams = {
+		title,
+		desc1,
+		desc1Info,
+		info: category !== 'mcp' ? category : undefined,
+		isError,
+		icon: null,
+		isRejected,
+	}
+
+	if (toolMessage.type === 'tool_request') {
+		componentParams.children = (
+			<ToolChildrenWrapper>
+				<CodeChildren className='bg-void-bg-3'>
+					<pre className='font-mono whitespace-pre-wrap text-[11px]'>
+						{toolMessage.content || JSON.stringify(toolMessage.rawParams, null, 2)}
+					</pre>
+				</CodeChildren>
+			</ToolChildrenWrapper>
+		)
+	} else if (toolMessage.type === 'success') {
+		const outputText = (toolMessage.content ?? '').trim()
+		if (outputText) {
+			componentParams.children = (
+				<ToolChildrenWrapper>
+					<CodeChildren className='bg-void-bg-3'>
+						<pre className='font-mono whitespace-pre-wrap text-[11px]'>
+							{outputText.length > 6000 ? `${outputText.slice(0, 6000)}\n...(truncated in card)` : outputText}
+						</pre>
+					</CodeChildren>
+				</ToolChildrenWrapper>
+			)
+		}
+	} else if (toolMessage.type === 'tool_error') {
+		componentParams.bottomChildren = <BottomChildren title='Error'>
+			<CodeChildren>{toolMessage.result}</CodeChildren>
+		</BottomChildren>
+	}
+
+	return <ToolHeaderWrapper {...componentParams} />
+}
+
 const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIsRunning }: { message: CheckpointEntry, threadId: string; messageIdx: number, isCheckpointGhost: boolean, threadIsRunning: boolean }) => {
 	const accessor = useAccessor()
 	const chatThreadService = accessor.get('IChatThreadService')
@@ -2828,24 +3038,31 @@ const _ChatBubble = ({ threadId, chatMessage, currCheckpointIdx, isCommitted, me
 
 		const toolName = chatMessage.name
 		const isBuiltInTool = isABuiltinToolName(toolName)
-		const ToolResultWrapper = isBuiltInTool ? builtinToolNameToComponent[toolName]?.resultWrapper as ResultWrapper<ToolName>
+		const ToolResultWrapper = isBuiltInTool
+			? (toolName === 'subagent'
+				? SubagentToolCard as ResultWrapper<ToolName>
+				: ((builtinToolNameToComponent as Partial<Record<BuiltinToolName, { resultWrapper: ResultWrapper<any> }>>)[toolName]?.resultWrapper as ResultWrapper<ToolName> | undefined))
 			: MCPToolWrapper as ResultWrapper<ToolName>
 
-		if (ToolResultWrapper)
-			return <>
-				<div className={`${isCheckpointGhost ? 'opacity-50' : ''}`}>
-					<ToolResultWrapper
-						toolMessage={chatMessage}
-						messageIdx={messageIdx}
-						threadId={threadId}
-					/>
-				</div>
-				{chatMessage.type === 'tool_request' ?
-					<div className={`${isCheckpointGhost ? 'opacity-50 pointer-events-none' : ''}`}>
-						<ToolRequestAcceptRejectButtons toolName={chatMessage.name} />
-					</div> : null}
-			</>
-		return null
+		const renderedCard = ToolResultWrapper ? (
+			<ToolResultWrapper
+				toolMessage={chatMessage}
+				messageIdx={messageIdx}
+				threadId={threadId}
+			/>
+		) : (
+			<GenericBuiltinToolCard toolMessage={chatMessage} />
+		)
+
+		return <>
+			<div className={`${isCheckpointGhost ? 'opacity-50' : ''}`}>
+				{renderedCard}
+			</div>
+			{chatMessage.type === 'tool_request' ?
+				<div className={`${isCheckpointGhost ? 'opacity-50 pointer-events-none' : ''}`}>
+					<ToolRequestAcceptRejectButtons toolName={chatMessage.name} />
+				</div> : null}
+		</>
 	}
 
 	else if (role === 'interrupted_streaming_tool') {
@@ -3162,7 +3379,7 @@ const EditToolSoFar = ({ toolCallSoFar, }: { toolCallSoFar: RawToolCallObj }) =>
 
 	const uri = toolCallSoFar.rawParams.uri ? URI.file(toolCallSoFar.rawParams.uri) : undefined
 
-	const title = titleOfBuiltinToolName[toolCallSoFar.name].proposed
+	const title = getToolDisplayTitles(toolCallSoFar.name).proposed
 
 	const uriDone = toolCallSoFar.doneParams.includes('uri')
 	const desc1 = <span className='flex items-center'>
@@ -3182,7 +3399,7 @@ const EditToolSoFar = ({ toolCallSoFar, }: { toolCallSoFar: RawToolCallObj }) =>
 	>
 		<EditToolChildren
 			uri={uri}
-			code={toolCallSoFar.rawParams.search_replace_blocks ?? toolCallSoFar.rawParams.new_content ?? ''}
+			code={toolCallSoFar.rawParams.search_replace_blocks ?? toolCallSoFar.rawParams.new_content ?? toolCallSoFar.rawParams.content ?? ''}
 			type={'rewrite'} // as it streams, show in rewrite format, don't make a diff editor
 		/>
 		<IconLoading />
@@ -3191,32 +3408,95 @@ const EditToolSoFar = ({ toolCallSoFar, }: { toolCallSoFar: RawToolCallObj }) =>
 }
 
 
+// Live Agent & Debugger Activity Strip shown in Chat when work is actively executing
+// Avoids subscribing to every streamed LLM token; updates only when runningToolName or debugger activity changes.
+const LiveActivityStrip = React.memo(({ threadId, isRunning }: { threadId: string; isRunning: IsRunningType }) => {
+	const accessor = useAccessor()
+	const chatThreadService = accessor.get('IChatThreadService')
+	const debuggerActivityService = accessor.get('IDebuggerActivityService')
+	const [runningToolName, setRunningToolName] = useState<string | undefined>(() => {
+		const s = chatThreadService.streamState[threadId]
+		return s?.isRunning === 'tool' ? s.toolInfo?.toolName : undefined
+	})
+	const [latestDebug, setLatestDebug] = useState<DebuggerActivity | null>(null)
+
+	useEffect(() => {
+		const sync = () => {
+			const s = chatThreadService.streamState[threadId]
+			const next = s?.isRunning === 'tool' ? s.toolInfo?.toolName : undefined
+			setRunningToolName(prev => (prev === next ? prev : next))
+		}
+		sync()
+		const d = chatThreadService.onDidChangeStreamState(({ threadId: changedId }) => {
+			if (changedId === threadId) sync()
+		})
+		return () => d.dispose()
+	}, [chatThreadService, threadId])
+
+	useEffect(() => {
+		if (!debuggerActivityService) return
+		const update = () => {
+			const list = debuggerActivityService.getActivities()
+			const activeOrRecent = list.find(a => a.status === 'running' || (Date.now() - a.startTime < 10_000))
+			setLatestDebug(activeOrRecent ?? null)
+		}
+		update()
+		const d = debuggerActivityService.onDidChangeDebuggerActivity(update)
+		return () => d.dispose()
+	}, [debuggerActivityService])
+
+	if (!isRunning && !latestDebug) return null
+
+	return (
+		<div className='mx-4 mb-1 px-2.5 py-1 rounded border border-void-border-2 bg-void-bg-1 flex items-center justify-between gap-2 text-[11px] text-void-fg-2'>
+			<div className='flex items-center gap-2 min-w-0'>
+				<span className={`w-2 h-2 rounded-full flex-shrink-0 ${isRunning === 'awaiting_user' ? 'bg-yellow-400' : 'bg-blue-400 animate-pulse'}`} />
+				<span className='truncate'>
+					{latestDebug && latestDebug.status === 'running'
+						? `Debugger: ${latestDebug.title} — ${latestDebug.description}`
+						: runningToolName
+							? `Executing: ${getToolDisplayTitles(runningToolName).running}`
+							: isRunning === 'LLM'
+								? 'Model reasoning & streaming response...'
+								: isRunning === 'awaiting_user'
+									? 'Paused — waiting for your approval'
+									: latestDebug
+										? `Debugger: ${latestDebug.title} (${latestDebug.status})`
+										: 'Working...'}
+				</span>
+			</div>
+		</div>
+	)
+})
+
+
 // Task Plan Display for Sidebar
 const TaskPlanSidebarDisplay = () => {
 	const accessor = useAccessor()
 	const chatThreadService = accessor.get('IChatThreadService')
-	const taskPlanService = accessor.get('TaskPlanService')
+	const taskPlanService = accessor.get('ITaskPlanService')
+	const threadsState = useChatThreadsState()
+	const threadId = threadsState.currentThreadId
 	const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null)
+	const [collapsed, setCollapsed] = useState(false)
 
 	useEffect(() => {
-		if (!taskPlanService) return
-
-		// Initial load
-		const thread = chatThreadService.getCurrentThread()
-		if (thread) {
-			setTaskPlan(thread.taskPlan ?? null)
+		const thread = chatThreadService.state.allThreads[threadId]
+		const persisted = thread?.taskPlan ?? null
+		if (persisted && taskPlanService) {
+			taskPlanService.hydratePlan(threadId, persisted)
 		}
+		setTaskPlan(taskPlanService?.getPlan(threadId) ?? persisted)
 
-		// Subscribe to plan changes
-		const disposable = taskPlanService.onDidChangePlan(({ threadId, plan }) => {
-			const currentThread = chatThreadService.getCurrentThread()
-			if (currentThread && currentThread.id === threadId) {
+		if (!taskPlanService) return
+		const disposable = taskPlanService.onDidChangePlan(({ threadId: changedId, plan }) => {
+			if (changedId === threadId) {
 				setTaskPlan(plan)
 			}
 		})
 
 		return () => disposable.dispose()
-	}, [chatThreadService, taskPlanService])
+	}, [chatThreadService, taskPlanService, threadId, threadsState.allThreads[threadId]?.taskPlan])
 
 	if (!taskPlan) return null
 
@@ -3238,30 +3518,33 @@ const TaskPlanSidebarDisplay = () => {
 	const { completed, total, percent } = getPlanProgress(taskPlan)
 
 	return (
-		<div className="border-b border-void-border-2 bg-void-bg-1/50 py-2 px-3">
-			<div className="flex items-center justify-between mb-1">
-				<h3 className={`text-xs font-medium text-void-fg-1 ${statusColors[taskPlan.overallStatus]}`}>
-					{taskPlan.title}
+		<div className="border-b border-void-border-2 bg-void-bg-1/70 py-1.5 px-3 flex-shrink-0">
+			<div
+				className="flex items-center justify-between cursor-pointer select-none"
+				onClick={() => setCollapsed(v => !v)}
+			>
+				<h3 className={`text-xs font-medium truncate ${statusColors[taskPlan.overallStatus]}`}>
+					{collapsed ? '▸' : '▾'} {taskPlan.title}
 				</h3>
-				<span className="text-[10px] text-void-fg-3">{percent}% ({completed}/{total})</span>
+				<span className="text-[10px] text-void-fg-3 flex-shrink-0 ml-2">{percent}% ({completed}/{total})</span>
 			</div>
-			<div className="text-[10px] text-void-fg-3 mb-1">{taskPlan.description}</div>
-			<div className="space-y-0.5 max-h-32 overflow-y-auto">
-				{taskPlan.tasks.map(t => {
-					const icon = statusIcons[t.status]
-					const color = t.status === 'completed' ? 'text-green-500' : t.status === 'failed' ? 'text-red-500' : t.status === 'running' ? 'text-[#0e70c0]' : t.status === 'blocked' ? 'text-orange-500' : 'text-void-fg-3'
-					return (
-						<div key={t.id} className="flex items-start gap-1.5">
-							<span className={`text-[10px] ${color} mt-0.5 flex-shrink-0`}>{icon}</span>
-							<div className="text-[10px] text-void-fg-2 min-w-0">
-								<div className="font-medium truncate">{t.title}</div>
-								<div className="text-void-fg-3 truncate">{t.description}</div>
-								{t.error && <div className="text-[9px] text-red-500 mt-0.5 truncate">{t.error}</div>}
+			{!collapsed && (
+				<div className="mt-1 space-y-0.5 max-h-28 overflow-y-auto">
+					{taskPlan.tasks.map(t => {
+						const icon = statusIcons[t.status]
+						const color = t.status === 'completed' ? 'text-green-500' : t.status === 'failed' ? 'text-red-500' : t.status === 'running' ? 'text-[#0e70c0]' : t.status === 'blocked' ? 'text-orange-500' : 'text-void-fg-3'
+						return (
+							<div key={t.id} className="flex items-start gap-1.5">
+								<span className={`text-[10px] ${color} mt-0.5 flex-shrink-0`}>{icon}</span>
+								<div className="text-[10px] text-void-fg-2 min-w-0">
+									<div className="font-medium truncate">{t.title}</div>
+									{t.error && <div className="text-[9px] text-red-500 truncate">{t.error}</div>}
+								</div>
 							</div>
-						</div>
-					)
-				})}
-			</div>
+						)
+					})}
+				</div>
+			)}
 		</div>
 	)
 }
@@ -3310,17 +3593,37 @@ export const SidebarChat = () => {
 		? getModelCapabilities(chatModelSelection.providerName, chatModelSelection.modelName, settingsState.overridesOfModel).contextWindow
 		: undefined
 
+	const [queuedMessages, setQueuedMessages] = useState<readonly string[]>(() => chatThreadsService.getQueuedMessages(chatThreadsState.currentThreadId))
+	useEffect(() => {
+		const tid = chatThreadsState.currentThreadId
+		setQueuedMessages([...chatThreadsService.getQueuedMessages(tid)])
+		const d = chatThreadsService.onDidChangeQueuedMessages(({ threadId: changedId }) => {
+			if (changedId === tid) {
+				setQueuedMessages([...chatThreadsService.getQueuedMessages(tid)])
+			}
+		})
+		return () => d.dispose()
+	}, [chatThreadsService, chatThreadsState.currentThreadId])
+
 	const sidebarRef = useRef<HTMLDivElement>(null)
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null)
 	const onSubmit = useCallback(async (_forceSubmit?: string) => {
 
 		if (isDisabled && !_forceSubmit) return
-		if (isRunning) return
 
 		const threadId = chatThreadsService.state.currentThreadId
-
-		// send message to LLM
 		const userMessage = _forceSubmit || textAreaRef.current?.value || ''
+		if (!userMessage.trim()) return
+
+		// If the agent is currently running, queue the steering message for automatic dispatch when idle
+		if (isRunning) {
+			chatThreadsService.enqueueUserMessage(threadId, userMessage)
+			textAreaFnsRef.current?.setValue('')
+			setInstructionsAreEmpty(true)
+			setTokenEstimate(0)
+			textAreaRef.current?.focus()
+			return
+		}
 
 		try {
 			await chatThreadsService.addUserMessageAndStreamResponse({ userMessage, threadId })
@@ -3341,12 +3644,33 @@ export const SidebarChat = () => {
 
 	// ----- Remodify Prompt -----
 	const llmMessageService = accessor.get('ILLMMessageService')
+	const convertToLLMMessageService = accessor.get('IConvertToLLMMessageService')
+	const workspaceContextService = accessor.get('IWorkspaceContextService')
 	const [remodifying, setRemodifying] = useState(false)
 	const [remodifyError, setRemodifyError] = useState<string | null>(null)
+	const remodifyReqIdRef = useRef<string | null>(null)
+	const remodifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	const clearRemodifyState = useCallback(() => {
+		if (remodifyTimerRef.current) {
+			clearTimeout(remodifyTimerRef.current)
+			remodifyTimerRef.current = null
+		}
+		remodifyReqIdRef.current = null
+		setRemodifying(false)
+	}, [])
 
 	const handleRemodify = useCallback(async () => {
+		// Clicking while remodifying cancels the in-flight rewrite cleanly
+		if (remodifying) {
+			if (remodifyReqIdRef.current && llmMessageService) {
+				llmMessageService.abort(remodifyReqIdRef.current)
+			}
+			clearRemodifyState()
+			return
+		}
 		const currentText = textAreaRef.current?.value?.trim()
-		if (!currentText || remodifying || !llmMessageService) return
+		if (!currentText || !llmMessageService) return
 		const modelSelection = settingsState.modelSelectionOfFeature['Chat']
 		if (!modelSelection) {
 			setRemodifyError('No chat model selected')
@@ -3354,52 +3678,66 @@ export const SidebarChat = () => {
 		}
 		setRemodifying(true)
 		setRemodifyError(null)
+		const workspaceName = workspaceContextService.getWorkspace().folders[0]?.name
+		const { systemMessage, userMessage } = buildRemodifyPromptRequest(currentText, workspaceName)
+		const { messages, separateSystemMessage } = convertToLLMMessageService.prepareLLMSimpleMessages({
+			simpleMessages: [{ role: 'user', content: userMessage }],
+			systemMessage,
+			modelSelection,
+			featureName: 'Chat',
+		})
 		try {
-			llmMessageService.sendLLMMessage({
+			// Explicitly disable extended thinking/reasoning for prompt rewriting so it responds in ~1-3s instead of hanging on high-effort reasoning.
+			// NVIDIA NIM requires reasoningEffort: 'none' (chat_template_kwargs.enable_thinking = false) to disable thinking.
+			const remodifyReasoningOptions = modelSelection.providerName === 'nvidia'
+				? { reasoningEnabled: true, reasoningEffort: 'none' }
+				: { reasoningEnabled: false }
+			const reqId = llmMessageService.sendLLMMessage({
 				messagesType: 'chatMessages',
-				messages: [{ role: 'user', content: currentText }] as LLMChatMessage[],
-				separateSystemMessage: `SYSTEM INSTRUCTION — READ CAREFULLY:
-
-You are a prompt REWRITING assistant. Your ONLY job is to rewrite the user's prompt to be clearer, more detailed, and more effective for an AI agent to understand and perform well.
-
-ABSOLUTE RULES — YOU MUST FOLLOW ALL OF THESE:
-1. Do NOT answer, respond to, or address the user's prompt in any way.
-2. Do NOT provide information, explanations, code, or solutions related to the prompt content.
-3. Do NOT say "Here is the rewritten prompt" or any preamble.
-4. Do NOT use quotes around the output.
-5. Do NOT add any explanation, commentary, or meta-text.
-6. Return ONLY the rewritten prompt text itself, nothing else.
-7. Do NOT change the user's intent or meaning — only improve clarity, detail, and structure.
-8. If the prompt is very short, expand it with relevant detail and context that would help an AI agent perform better.
-9. Keep the output as just the rewritten prompt, ready to be copied and sent.
-
-The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
+				messages,
+				separateSystemMessage,
 				chatMode: null,
 				modelSelection,
-				modelSelectionOptions: settingsState.optionsOfModelSelection['Chat'][modelSelection.providerName]?.[modelSelection.modelName],
+				modelSelectionOptions: remodifyReasoningOptions,
 				overridesOfModel: settingsState.overridesOfModel,
 				logging: { loggingName: 'Remodify Prompt' },
 				onText: () => { },
 				onFinalMessage: ({ fullText }) => {
-					if (fullText) {
-						textAreaFnsRef.current?.setValue(fullText.trim())
+					const parsed = extractRewrittenPrompt(fullText ?? '')
+					if ('rewritten' in parsed) {
+						textAreaFnsRef.current?.setValue(parsed.rewritten)
 						textAreaRef.current?.focus()
-						setInstructionsAreEmpty(!fullText.trim())
-						setTokenEstimate(estimateTokens(fullText.trim()))
+						setInstructionsAreEmpty(!parsed.rewritten)
+						setTokenEstimate(estimateTokens(parsed.rewritten))
+					} else {
+						setRemodifyError(parsed.error)
 					}
-					setRemodifying(false)
+					clearRemodifyState()
 				},
 				onError: ({ message }) => {
-					setRemodifyError(message)
-					setRemodifying(false)
+					setRemodifyError(message || 'Prompt rewrite failed')
+					clearRemodifyState()
 				},
-				onAbort: () => setRemodifying(false),
+				onAbort: () => clearRemodifyState(),
 			})
+			if (!reqId) {
+				setRemodifyError('Could not start prompt rewrite (check model/provider settings)')
+				clearRemodifyState()
+				return
+			}
+			remodifyReqIdRef.current = reqId
+			remodifyTimerRef.current = setTimeout(() => {
+				if (remodifyReqIdRef.current === reqId) {
+					llmMessageService.abort(reqId)
+					setRemodifyError('Prompt rewrite timed out after 25s — click to retry or try a faster model.')
+					clearRemodifyState()
+				}
+			}, 25_000)
 		} catch (e) {
 			setRemodifyError(e instanceof Error ? e.message : String(e))
-			setRemodifying(false)
+			clearRemodifyState()
 		}
-	}, [llmMessageService, settingsState, textAreaRef, textAreaFnsRef, setInstructionsAreEmpty, setTokenEstimate, remodifying])
+	}, [llmMessageService, convertToLLMMessageService, workspaceContextService, settingsState, textAreaRef, textAreaFnsRef, setInstructionsAreEmpty, setTokenEstimate, remodifying, clearRemodifyState])
 
 	const keybindingString = accessor.get('IKeybindingService').lookupKeybinding(VOID_CTRL_L_ACTION_ID)?.getLabel()
 
@@ -3460,7 +3798,7 @@ The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 
 	// the tool currently being generated
 	const generatingTool = toolIsGenerating ?
-		toolCallSoFar.name === 'edit_file' || toolCallSoFar.name === 'rewrite_file' ? <EditToolSoFar
+		toolCallSoFar.name === 'edit_file' || toolCallSoFar.name === 'rewrite_file' || toolCallSoFar.name === 'write_file' ? <EditToolSoFar
 			key={'curr-streaming-tool'}
 			toolCallSoFar={toolCallSoFar}
 		/>
@@ -3508,19 +3846,77 @@ The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 	</ScrollToBottomContainer>
 
 
+	// Custom slash command autocomplete (/command)
+	const customCommandsService = accessor.get('ICustomCommandsService')
+	const [slashMatches, setSlashMatches] = useState<CustomSlashCommand[]>([])
+	const [slashPrefix, setSlashPrefix] = useState<string | null>(null)
+
 	const onChangeText = useCallback((newStr: string) => {
 		setInstructionsAreEmpty(!newStr)
 		setTokenEstimate(estimateTokens(newStr))
-	}, [setInstructionsAreEmpty, setTokenEstimate])
+		const m = /^\/([a-zA-Z0-9_:-]*)$/.exec(newStr)
+		if (m && customCommandsService) {
+			const prefix = m[1].toLowerCase()
+			setSlashPrefix(prefix)
+			void customCommandsService.listCommands().then(cmds => {
+				setSlashMatches(cmds.filter(c => c.name.includes(prefix)).slice(0, 8))
+			})
+		} else {
+			setSlashPrefix(null)
+			setSlashMatches([])
+		}
+	}, [setInstructionsAreEmpty, setTokenEstimate, customCommandsService])
+
+	const selectSlashCommand = useCallback((cmd: CustomSlashCommand) => {
+		const nextText = `/${cmd.name} `
+		textAreaFnsRef.current?.setValue(nextText)
+		setInstructionsAreEmpty(false)
+		setTokenEstimate(estimateTokens(nextText))
+		setSlashPrefix(null)
+		setSlashMatches([])
+		textAreaRef.current?.focus()
+	}, [])
+
 	const onKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
+		if (e.key === 'Tab' && slashMatches.length > 0 && slashPrefix !== null) {
+			e.preventDefault()
+			selectSlashCommand(slashMatches[0])
+			return
+		}
 		if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
 			onSubmit()
+		} else if (e.key === 'Escape' && slashMatches.length > 0) {
+			setSlashPrefix(null)
+			setSlashMatches([])
 		} else if (e.key === 'Escape' && isRunning) {
 			onAbort()
 		}
-	}, [onSubmit, onAbort, isRunning])
+	}, [onSubmit, onAbort, isRunning, slashMatches, slashPrefix, selectSlashCommand])
 
-	const inputChatArea = <VoidChatArea
+	const slashAutocompleteHTML = slashPrefix !== null && slashMatches.length > 0 ? (
+		<div className='mb-1 rounded border border-void-border-2 bg-void-bg-1 shadow-md overflow-hidden'>
+			<div className='px-2 py-0.5 text-[10px] text-void-fg-4 border-b border-void-border-2'>
+				Custom Commands (Tab or click to insert)
+			</div>
+			{slashMatches.map(cmd => (
+				<button
+					key={cmd.name}
+					type='button'
+					onClick={() => selectSlashCommand(cmd)}
+					className='w-full text-left px-2 py-1 hover:bg-void-bg-3 flex items-center justify-between gap-2 text-xs'
+				>
+					<span className='font-mono text-void-fg-1'>
+						/{cmd.name}{cmd.argumentHint ? <span className='text-void-fg-4 ml-1'>{cmd.argumentHint}</span> : null}
+					</span>
+					<span className='text-[11px] text-void-fg-3 truncate'>{cmd.description}</span>
+				</button>
+			))}
+		</div>
+	) : null
+
+	const inputChatArea = <>
+		{slashAutocompleteHTML}
+		<VoidChatArea
 		featureName='Chat'
 		onSubmit={() => onSubmit()}
 		onAbort={onAbort}
@@ -3539,7 +3935,7 @@ The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 			enableAtToMention
 			enableAttachments
 			className={`min-h-[81px] px-0.5 py-0.5`}
-			placeholder={`@ to mention, ${keybindingString ? `${keybindingString} to add a selection. ` : ''}Enter instructions...`}
+			placeholder={`@ to mention, / for commands, ${keybindingString ? `${keybindingString} to add a selection. ` : ''}Enter instructions...`}
 			onChangeText={onChangeText}
 			onKeyDown={onKeyDown}
 			onFocus={() => { chatThreadsService.setCurrentlyFocusedMessageIdx(undefined) }}
@@ -3549,6 +3945,7 @@ The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 		/>
 
 	</VoidChatArea>
+	</>
 
 
 	const isLandingPage = previousMessages.length === 0
@@ -3556,13 +3953,14 @@ The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 
 	const initiallySuggestedPromptsHTML = <div className='flex flex-col gap-2 w-full text-nowrap text-void-fg-3 select-none'>
 		{[
-			'Summarize my codebase',
-			'How do types work in Rust?',
-			'Create a .voidrules file for me'
+			'Scan this project for security issues, secret leaks, and architecture bottlenecks',
+			'Map the codebase architecture and summarize how the key modules connect',
+			'Inspect git status and diff, then review my uncommitted changes',
+			'Discover and run the test suite and diagnose any failures'
 		].map((text, index) => (
 			<div
 				key={index}
-				className='py-1 px-2 rounded text-sm bg-zinc-700/5 hover:bg-zinc-700/10 dark:bg-zinc-300/5 dark:hover:bg-zinc-300/10 cursor-pointer opacity-80 hover:opacity-100'
+				className='py-1.5 px-2.5 rounded text-xs bg-zinc-700/5 hover:bg-zinc-700/10 dark:bg-zinc-300/5 dark:hover:bg-zinc-300/10 cursor-pointer opacity-85 hover:opacity-100 truncate'
 				onClick={() => onSubmit(text)}
 			>
 				{text}
@@ -3572,7 +3970,37 @@ The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 
 
 
+	const queuedMessagesTray = queuedMessages.length > 0 ? (
+		<div className='mx-4 mb-1.5 rounded border border-void-border-2 bg-void-bg-1 p-1.5 space-y-1'>
+			<div className='flex items-center justify-between text-[10px] text-void-fg-3 px-1'>
+				<span>Queued steering message{queuedMessages.length === 1 ? '' : 's'} ({queuedMessages.length}) — sends automatically when current turn finishes</span>
+				<button
+					type='button'
+					onClick={() => chatThreadsService.clearQueuedMessages(threadId)}
+					className='text-void-fg-4 hover:text-void-fg-1'
+				>
+					Clear
+				</button>
+			</div>
+			{queuedMessages.map((msg, idx) => (
+				<div key={idx} className='flex items-center justify-between gap-2 px-1.5 py-0.5 rounded bg-void-bg-2 text-[11px] text-void-fg-1'>
+					<span className='truncate'>{idx + 1}. {msg}</span>
+					<button
+						type='button'
+						onClick={() => chatThreadsService.removeQueuedMessage(threadId, idx)}
+						className='text-void-fg-4 hover:text-red-400 flex-shrink-0'
+						title='Remove queued message'
+					>
+						<X size={11} />
+					</button>
+				</div>
+			))}
+		</div>
+	) : null
+
 	const threadPageInput = <div key={'input' + chatThreadsState.currentThreadId}>
+		<LiveActivityStrip threadId={threadId} isRunning={isRunning} />
+		{queuedMessagesTray}
 		<div className='px-4'>
 			<CommandBarInChat messages={previousMessages} />
 		</div>
@@ -3582,13 +4010,14 @@ The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 			{!isRunning && (
 				<div className='flex items-center gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>
 					<button
+						type='button'
 						onClick={handleRemodify}
-						disabled={remodifying || !textAreaRef.current?.value?.trim() || !llmMessageService}
-						title={!textAreaRef.current?.value?.trim() ? 'Enter a prompt first to remodify it' : remodifyError || 'Rewrite your prompt to be clearer and more detailed before sending'}
+						disabled={(!remodifying && instructionsAreEmpty) || !llmMessageService}
+						title={remodifying ? 'Click to cancel prompt rewrite' : instructionsAreEmpty ? 'Enter a prompt first to remodify it' : remodifyError || 'Rewrite your prompt to be clearer and more detailed before sending'}
 						className='flex items-center gap-1 px-2 py-1 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 disabled:cursor-not-allowed transition-all'
 					>
 						<Sparkles size={13} className={remodifying ? 'animate-pulse' : ''} />
-						{remodifying ? 'Remodifying...' : !textAreaRef.current?.value?.trim() ? 'Enter prompt to modify' : 'Remodify Prompt'}
+						{remodifying ? 'Remodifying… (Cancel)' : instructionsAreEmpty ? 'Enter prompt to modify' : 'Remodify Prompt'}
 					</button>
 					{remodifyError && (
 						<span className='text-xs text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/30'>{remodifyError}</span>
@@ -3605,13 +4034,14 @@ The user's prompt to rewrite is: "${currentText}"` as LLMChatMessage[],
 			{!isRunning && (
 				<div className='flex items-center gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>
 					<button
+						type='button'
 						onClick={handleRemodify}
-						disabled={remodifying || !textAreaRef.current?.value?.trim() || !llmMessageService}
-						title={!textAreaRef.current?.value?.trim() ? 'Enter a prompt first to remodify it' : remodifyError || 'Rewrite your prompt to be clearer and more detailed before sending'}
+						disabled={(!remodifying && instructionsAreEmpty) || !llmMessageService}
+						title={remodifying ? 'Click to cancel prompt rewrite' : instructionsAreEmpty ? 'Enter a prompt first to remodify it' : remodifyError || 'Rewrite your prompt to be clearer and more detailed before sending'}
 						className='flex items-center gap-1 px-2 py-1 text-xs rounded border border-void-border-2 bg-void-bg-2 text-void-fg-1 hover:bg-void-bg-3 disabled:opacity-50 disabled:cursor-not-allowed transition-all'
 					>
 						<Sparkles size={13} className={remodifying ? 'animate-pulse' : ''} />
-						{remodifying ? 'Remodifying...' : !textAreaRef.current?.value?.trim() ? 'Enter prompt to modify' : 'Remodify Prompt'}
+						{remodifying ? 'Remodifying… (Cancel)' : instructionsAreEmpty ? 'Enter prompt to modify' : 'Remodify Prompt'}
 					</button>
 					{remodifyError && (
 						<span className='text-xs text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/30'>{remodifyError}</span>

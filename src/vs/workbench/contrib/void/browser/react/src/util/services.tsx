@@ -62,6 +62,14 @@ import { IRequestService } from '../../../../../../../platform/request/common/re
 import { IWorkbenchThemeService } from '../../../../../../../workbench/services/themes/common/workbenchThemeService.js'
 import { IPromptsService } from '../../../../../../../workbench/contrib/chat/common/promptSyntax/service/promptsService.js';
 import { IWebSearchService } from '../../../../../../../workbench/contrib/void/common/webSearchTypes.js';
+import { IExecutionObservabilityService, ExecutionSpan } from '../../../../common/executionObservability.js';
+import { ICustomCommandsService } from '../../../customCommandsService.js';
+import { IKodiaWorkflowsService } from '../../../kodiaWorkflowsService.js';
+import { IKodiaHooksMainService } from '../../../../common/kodiaHooks.js';
+import { IKodiaOpsMainService } from '../../../../common/kodiaOpsTypes.js';
+import { IVerificationLedgerService } from '../../../verificationLedgerService.js';
+import { ISoftwareFactoryService } from '../../../softwareFactoryService.js';
+import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
 // normally to do this you'd use a useEffect that calls .onDidChangeState(), but useEffect mounts too late and misses initial state changes
@@ -244,6 +252,13 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IPromptsService: accessor.get(IPromptsService),
 		IWebSearchService: accessor.get(IWebSearchService),
 		IMainProcessService: accessor.get(IMainProcessService),
+		IExecutionObservabilityService: accessor.get(IExecutionObservabilityService),
+		ICustomCommandsService: accessor.get(ICustomCommandsService),
+		IKodiaWorkflowsService: accessor.get(IKodiaWorkflowsService),
+		IKodiaHooksMainService: (() => { try { return accessor.get(IKodiaHooksMainService) } catch { return undefined } })(),
+		IKodiaOpsMainService: (() => { try { return accessor.get(IKodiaOpsMainService) } catch { return undefined } })(),
+		IVerificationLedgerService: accessor.get(IVerificationLedgerService),
+		ISoftwareFactoryService: accessor.get(ISoftwareFactoryService),
 
 	} as const
 	return reactAccessor

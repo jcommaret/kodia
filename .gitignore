@@ -54,3 +54,5 @@ dist
 .v[0-9]*/
 # Local agent validation evidence
 .agent-validation/
+# Local secrets (e.g. NVIDIA_API_KEY for the live provider test)
+/.env

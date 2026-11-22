@@ -12,27 +12,240 @@
  * that keep parallel agents from writing the same file, and the report.
  */
 
-export type SubagentType = 'general' | 'explore' | 'review';
+export type BuiltinSubagentType =
+	| 'general'
+	| 'explore'
+	| 'review'
+	| 'planner'
+	| 'architect'
+	| 'frontend'
+	| 'backend'
+	| 'database'
+	| 'api'
+	| 'security'
+	| 'testing'
+	| 'debugging'
+	| 'git'
+	| 'browser'
+	| 'docs'
+	| 'devops'
+	| 'performance'
+	| 'ui_ux'
+	| 'refactor';
 
-export const SUBAGENT_TYPES: { readonly [T in SubagentType]: { readonly canChangeFiles: boolean; readonly description: string } } = {
-	general: { canChangeFiles: true, description: 'can read, edit and create files and run commands' },
-	explore: { canChangeFiles: false, description: 'read-only: searches and reads the codebase and reports' },
-	review: { canChangeFiles: false, description: 'read-only: reviews code or changes and reports problems' },
+/** Either a built-in specialist role or a workspace/user custom agent name. */
+export type SubagentType = BuiltinSubagentType | (string & {});
+
+export interface SubagentProfile {
+	readonly canChangeFiles: boolean;
+	readonly description: string;
+	readonly guidance: string;
+	/** Optional explicit tool allowlist (in addition to read-only restriction). */
+	readonly allowedTools?: readonly string[];
+	/** Optional preferred model ("provider/model" or model name) when caller omits model. */
+	readonly defaultModel?: string;
+}
+
+export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProfile } = {
+	general: {
+		canChangeFiles: true,
+		description: 'can read, edit and create files and run commands',
+		guidance: 'Implement the requested work end-to-end, verify changes with real builds/tests, and report concrete paths and results.',
+	},
+	explore: {
+		canChangeFiles: false,
+		description: 'read-only: searches and reads the codebase and reports',
+		guidance: 'Locate relevant files, symbols, call paths, and dependencies. Cite exact file paths and line numbers.',
+	},
+	review: {
+		canChangeFiles: false,
+		description: 'read-only: reviews code or changes and reports problems',
+		guidance: 'Audit diffs and source files for correctness bugs, security vulnerabilities, race conditions, missing edge cases, and regressions. Cite file:line and severity.',
+	},
+	planner: {
+		canChangeFiles: false,
+		description: 'read-only: inspects the project and produces structured implementation plans and task breakdowns',
+		guidance: 'Inspect workspace architecture and dependencies first, then produce a concrete step-by-step plan with task dependencies, parallelizable workstreams, risks, and testable acceptance criteria.',
+	},
+	architect: {
+		canChangeFiles: false,
+		description: 'read-only: analyzes system architecture, boundaries, schemas, and technical trade-offs',
+		guidance: 'Evaluate module boundaries, data flows, IPC/API contracts, scalability, and maintainability. Propose clean, idiomatic designs aligned with existing conventions.',
+	},
+	frontend: {
+		canChangeFiles: true,
+		description: 'specialist in UI components, styling, state management, accessibility, and responsive layouts',
+		guidance: 'Implement clean, accessible, responsive frontend code matching the repository design system and tokens. Verify builds and UI behavior.',
+	},
+	backend: {
+		canChangeFiles: true,
+		description: 'specialist in server architecture, services, business logic, auth, and integrations',
+		guidance: 'Implement robust, type-safe backend logic with proper validation, error handling, and security checks. Verify with automated tests.',
+	},
+	database: {
+		canChangeFiles: true,
+		description: 'specialist in schemas, migrations, queries, indexing, and data integrity',
+		guidance: 'Design safe schemas and reversible migrations, prevent SQL injection and N+1 queries, and verify migrations/queries against real state where available.',
+	},
+	api: {
+		canChangeFiles: true,
+		description: 'specialist in REST/GraphQL/RPC contracts, request validation, status codes, and API testing',
+		guidance: 'Implement and verify endpoint contracts, input validation, error payloads, authentication headers, and integration tests.',
+	},
+	security: {
+		canChangeFiles: false,
+		description: 'read-only: audits authentication, authorization, injection vectors, secrets, and dependency risks',
+		guidance: 'Inspect code for OWASP/CWE issues, command/SQL/XSS injection, secret leaks, privilege boundaries, and unsafe defaults. Report concrete evidence and exact remediation steps.',
+	},
+	testing: {
+		canChangeFiles: true,
+		description: 'specialist in unit, integration, and e2e tests, coverage, regression checks, and flaky-test triage',
+		guidance: 'Write thorough, non-brittle tests that exercise real execution paths (never fake assertions), run the test runner, and report exact pass/fail output.',
+	},
+	debugging: {
+		canChangeFiles: true,
+		description: 'specialist in root-cause investigation using logs, stack traces, debugger sessions, and minimal fixes',
+		guidance: 'Reproduce the failure first, inspect runtime state via debugger or targeted runs, fix the root cause (not symptoms), and verify the fix with a regression test.',
+	},
+	git: {
+		canChangeFiles: true,
+		description: 'specialist in safe Git workflows, diffs, branches, conflict inspection, commit context, and PR prep',
+		guidance: 'Never overwrite unrelated user work or run destructive resets. Inspect status/diff carefully and report exact branch/commit state.',
+	},
+	browser: {
+		canChangeFiles: true,
+		description: 'specialist in Playwright browser inspection, DOM/layout verification, console/network diagnostics, and UI repair',
+		guidance: 'Launch or attach to the local app, inspect real DOM/layout/console/network signals, fix defects, reload, and verify cleanly.',
+	},
+	docs: {
+		canChangeFiles: true,
+		description: 'specialist in READMEs, architecture docs, API references, setup guides, and technical decision records',
+		guidance: 'Verify every command, path, and symbol against the actual codebase before documenting it. Keep docs concise, accurate, and grounded in reality.',
+	},
+	devops: {
+		canChangeFiles: true,
+		description: 'specialist in build pipelines, Docker/CI/CD configs, environment setup, and deployment readiness',
+		guidance: 'Configure reproducible builds, CI checks, and deployment manifests safely without exposing secrets. Validate syntax and build steps.',
+	},
+	performance: {
+		canChangeFiles: true,
+		description: 'specialist in profiling, algorithmic complexity, memory leaks, bundle size, and latency optimization',
+		guidance: 'Measure or trace bottlenecks before optimizing, avoid premature complexity, and verify correctness plus measurable improvement.',
+	},
+	ui_ux: {
+		canChangeFiles: true,
+		description: 'specialist in visual hierarchy, spacing, accessibility contrast, empty/loading/error states, and interaction polish',
+		guidance: 'Improve visual clarity, keyboard accessibility, contrast, and responsive layout without breaking existing user workflows.',
+	},
+	refactor: {
+		canChangeFiles: true,
+		description: 'specialist in safe structural refactoring, deduplication, typing improvements, and preserving behavior',
+		guidance: 'Keep behavior identical while improving modularity and clarity. Run typechecks and existing tests to prove zero regressions.',
+	},
 };
 
 // common names models use for the same roles
-const SUBAGENT_TYPE_ALIASES: Readonly<Record<string, SubagentType>> = {
+const SUBAGENT_TYPE_ALIASES: Readonly<Record<string, BuiltinSubagentType>> = {
 	general: 'general', 'general-purpose': 'general', build: 'general', code: 'general', coder: 'general', implement: 'general', test: 'general', tests: 'general', fix: 'general',
 	explore: 'explore', research: 'explore', search: 'explore', investigate: 'explore',
 	review: 'review', reviewer: 'review', 'code-review': 'review',
+	planner: 'planner', plan: 'planner', planning: 'planner',
+	architect: 'architect', architecture: 'architect',
+	frontend: 'frontend', 'front-end': 'frontend', ui: 'frontend',
+	backend: 'backend', 'back-end': 'backend', server: 'backend',
+	database: 'database', db: 'database', sql: 'database',
+	api: 'api',
+	security: 'security', sec: 'security', audit: 'security',
+	testing: 'testing', qa: 'testing', 'test-specialist': 'testing',
+	debugging: 'debugging', debug: 'debugging', debugger: 'debugging',
+	git: 'git', vcs: 'git', scm: 'git',
+	browser: 'browser', playwright: 'browser', e2e: 'browser',
+	docs: 'docs', documentation: 'docs', doc: 'docs',
+	devops: 'devops', deploy: 'devops', deployment: 'devops', ci: 'devops',
+	performance: 'performance', perf: 'performance', optimize: 'performance',
+	ui_ux: 'ui_ux', 'ui-ux': 'ui_ux', ux: 'ui_ux', design: 'ui_ux',
+	refactor: 'refactor', refactoring: 'refactor',
 };
 
+export interface CustomSubagentDefinition extends SubagentProfile {
+	readonly name: string;
+	readonly sourcePath: string;
+}
+
+/**
+ * Parse a custom agent markdown file (.kodia/agents/<name>.md or .claude/agents/<name>.md)
+ * with optional YAML frontmatter:
+ *   name, description, readOnly / canChangeFiles, tools (comma list or YAML array), model.
+ */
+export function parseCustomAgentMarkdown(sourcePath: string, content: string): CustomSubagentDefinition | undefined {
+	const trimmed = content.trim();
+	if (!trimmed) { return undefined; }
+
+	const baseName = sourcePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.md$/i, '') ?? '';
+	let name = baseName.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+	let description = `custom agent from ${baseName}`;
+	let canChangeFiles = true;
+	let allowedTools: string[] | undefined;
+	let defaultModel: string | undefined;
+	let body = trimmed;
+
+	const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(trimmed);
+	if (fmMatch) {
+		const fm = fmMatch[1];
+		body = fmMatch[2].trim();
+		const lines = fm.split(/\r?\n/);
+		for (let i = 0; i < lines.length; i++) {
+			const kv = /^([a-zA-Z0-9_-]+)\s*:\s*(.*)$/.exec(lines[i].trim());
+			if (!kv) { continue; }
+			const key = kv[1].toLowerCase();
+			const val = kv[2].trim().replace(/^["']|["']$/g, '');
+			if (key === 'name' && val) { name = val.toLowerCase().replace(/[^a-z0-9_-]/g, '-'); }
+			else if (key === 'description' && val) { description = val; }
+			else if (key === 'model' && val) { defaultModel = val; }
+			else if (key === 'readonly' || key === 'read_only' || key === 'read-only') { canChangeFiles = val.toLowerCase() !== 'true'; }
+			else if (key === 'canchangefiles' || key === 'can_change_files') { canChangeFiles = val.toLowerCase() !== 'false'; }
+			else if (key === 'tools' || key === 'allowed-tools' || key === 'allowed_tools') {
+				if (val) {
+					allowedTools = val.replace(/^\[|\]$/g, '').split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+				} else {
+					const items: string[] = [];
+					while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) {
+						i++;
+						items.push(lines[i].replace(/^\s*-\s+/, '').trim().replace(/^["']|["']$/g, ''));
+					}
+					if (items.length) { allowedTools = items; }
+				}
+			}
+		}
+	}
+
+	if (!name) { return undefined; }
+	return {
+		name,
+		sourcePath,
+		description,
+		canChangeFiles,
+		guidance: body || description,
+		...(allowedTools?.length ? { allowedTools } : {}),
+		...(defaultModel ? { defaultModel } : {}),
+	};
+}
+
 /** The subagent type a model asked for, or an error listing the valid ones. */
-export function resolveSubagentType(requested: string): { type: SubagentType } | { error: string } {
-	const t = SUBAGENT_TYPE_ALIASES[requested.trim().toLowerCase()];
-	if (t) { return { type: t }; }
-	const valid = (Object.keys(SUBAGENT_TYPES) as SubagentType[]).map(k => `"${k}" (${SUBAGENT_TYPES[k].description})`).join(', ');
-	return { error: `Unknown subagent type "${requested}". Use one of: ${valid}.` };
+export function resolveSubagentType(
+	requested: string,
+	customAgents?: ReadonlyMap<string, CustomSubagentDefinition>,
+): { type: SubagentType; profile: SubagentProfile } | { error: string } {
+	const key = requested.trim().toLowerCase();
+	const custom = customAgents?.get(key);
+	if (custom) { return { type: custom.name, profile: custom }; }
+	const builtin = SUBAGENT_TYPE_ALIASES[key];
+	if (builtin) { return { type: builtin, profile: SUBAGENT_TYPES[builtin] }; }
+	const validBuiltin = (Object.keys(SUBAGENT_TYPES) as BuiltinSubagentType[]).map(k => `"${k}" (${SUBAGENT_TYPES[k].description})`).join(', ');
+	const validCustom = customAgents && customAgents.size > 0
+		? `; custom agents: ${[...customAgents.keys()].map(k => `"${k}"`).join(', ')}`
+		: '';
+	return { error: `Unknown subagent type "${requested}". Use one of: ${validBuiltin}${validCustom}.` };
 }
 
 /** Subagents cannot start subagents: one level of delegation keeps cost and coordination bounded. */
@@ -42,19 +255,34 @@ export const SUBAGENT_TIMEOUT_MS = 30 * 60_000;
 
 /**
  * The tools a subagent of this type is offered and allowed to run.
+ * @param type built-in or custom subagent type
  * @param allTools every tool the parent's mode offers
  * @param needsApproval whether a builtin tool changes something (has an approval type) — read-only agents get none of those
+ * @param profile optional resolved profile (for custom agents with explicit tool allowlists)
  */
-export function subagentToolNames(type: SubagentType, allTools: readonly string[], needsApproval: (toolName: string) => boolean): string[] {
-	return allTools.filter(name => name !== SUBAGENT_TOOL_NAME && (SUBAGENT_TYPES[type].canChangeFiles || !needsApproval(name)));
+export function subagentToolNames(
+	type: SubagentType,
+	allTools: readonly string[],
+	needsApproval: (toolName: string) => boolean,
+	profile?: SubagentProfile,
+): string[] {
+	const resolvedProfile = profile ?? (type in SUBAGENT_TYPES ? SUBAGENT_TYPES[type as BuiltinSubagentType] : SUBAGENT_TYPES.general);
+	const allowSet = resolvedProfile.allowedTools?.length ? new Set(resolvedProfile.allowedTools) : undefined;
+	return allTools.filter(name =>
+		name !== SUBAGENT_TOOL_NAME
+		&& (resolvedProfile.canChangeFiles || !needsApproval(name))
+		&& (!allowSet || allowSet.has(name))
+	);
 }
 
 /** Told to the subagent in its system prompt: its reply is a report to another agent, not a chat with the user. */
-export function subagentRoleText(type: SubagentType, description: string): string {
+export function subagentRoleText(type: SubagentType, description: string, profile?: SubagentProfile): string {
+	const p = profile ?? (type in SUBAGENT_TYPES ? SUBAGENT_TYPES[type as BuiltinSubagentType] : SUBAGENT_TYPES.general);
 	return [
-		`YOU ARE A SUBAGENT ("${description}", type ${type}: ${SUBAGENT_TYPES[type].description}).`,
+		`YOU ARE A SUBAGENT ("${description}", type ${type}: ${p.description}).`,
+		`SPECIALIST GUIDANCE: ${p.guidance}`,
 		'Another agent gave you the task in the user message below; it does not see your tool calls, only your final reply. The user is not watching this conversation, so do not ask questions: decide, and say what you assumed.',
-		SUBAGENT_TYPES[type].canChangeFiles
+		p.canChangeFiles
 			? 'Do the task completely, check your work (read back what you changed, run the relevant tests or build), then finish.'
 			: 'You cannot change files or run commands. Investigate with your tools, then finish.',
 		'Your final reply is your report: what you did or found, with file paths and line numbers, what you verified and how, and anything left undone or uncertain. Other subagents may be working in parallel; if a file is refused to you because one of them is changing it, leave it and mention it in your report.',

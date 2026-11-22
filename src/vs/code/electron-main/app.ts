@@ -222,6 +222,10 @@ import { IMlxMainService } from '../../workbench/contrib/void/common/mlxTypes.js
 import { IVoidSCMService } from '../../workbench/contrib/void/common/voidSCMTypes.js';
 import { KodiaGitMainService } from '../../workbench/contrib/void/electron-main/kodiaGitMainService.js';
 import { IKodiaGitMainService, KODIA_GIT_CHANNEL } from '../../workbench/contrib/void/common/gitService.js';
+import { KodiaHooksMainService } from '../../workbench/contrib/void/electron-main/kodiaHooksMainService.js';
+import { IKodiaHooksMainService, KODIA_HOOKS_CHANNEL } from '../../workbench/contrib/void/common/kodiaHooks.js';
+import { KodiaOpsMainService } from '../../workbench/contrib/void/electron-main/kodiaOpsMainService.js';
+import { IKodiaOpsMainService, KODIA_OPS_CHANNEL } from '../../workbench/contrib/void/common/kodiaOpsTypes.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
 import { IKodiaWebFetchService } from '../../workbench/contrib/void/common/webFetchTypes.js';
 import { KodiaWebFetchMainService } from '../../workbench/contrib/void/electron-main/webFetchMainService.js';
@@ -1374,6 +1378,8 @@ export class CodeApplication extends Disposable {
 		services.set(IVoidUpdateService, new SyncDescriptor(VoidMainUpdateService, undefined, false));
 		services.set(IVoidSCMService, new SyncDescriptor(VoidSCMService, undefined, false));
 		services.set(IKodiaGitMainService, new SyncDescriptor(KodiaGitMainService, undefined, false));
+		services.set(IKodiaHooksMainService, new SyncDescriptor(KodiaHooksMainService, undefined, false));
+		services.set(IKodiaOpsMainService, new SyncDescriptor(KodiaOpsMainService, undefined, false));
 		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
 		services.set(IKodiaWebFetchService, new SyncDescriptor(KodiaWebFetchMainService, undefined, false));
 		services.set(IWebSearchService, new SyncDescriptor(WebSearchMainService, undefined, false));
@@ -1573,6 +1579,14 @@ export class CodeApplication extends Disposable {
 		// Kodia: git for the agent (argv-based, no shell)
 		const kodiaGitChannel = ProxyChannel.fromService(accessor.get(IKodiaGitMainService), disposables);
 		mainProcessElectronServer.registerChannel(KODIA_GIT_CHANNEL, kodiaGitChannel);
+
+		// Kodia: lifecycle hooks (PreToolUse, PostToolUse, SessionStart, Stop, etc.)
+		const kodiaHooksChannel = ProxyChannel.fromService(accessor.get(IKodiaHooksMainService), disposables);
+		mainProcessElectronServer.registerChannel(KODIA_HOOKS_CHANNEL, kodiaHooksChannel);
+
+		// Kodia: native environment, Docker, and SQLite database inspection/query tools
+		const kodiaOpsChannel = ProxyChannel.fromService(accessor.get(IKodiaOpsMainService), disposables);
+		mainProcessElectronServer.registerChannel(KODIA_OPS_CHANNEL, kodiaOpsChannel);
 
 		const mlxChannel = ProxyChannel.fromService(accessor.get(IMlxMainService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-mlx', mlxChannel);

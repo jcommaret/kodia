@@ -104,3 +104,13 @@ import '../common/projectMemoryService.js'
 
 // agent skills: .kodia/skills next to the chat's skill folders
 import '../common/agentSkills.js'
+
+// custom slash commands (.kodia/commands/*.md, .claude/commands/*.md), workflows/scheduler, next-edit prediction, editor AI actions, status bar, verification ledger, software factory, and execution observability
+import './customCommandsService.js'
+import './kodiaWorkflowsService.js'
+import './nextEditPredictionService.js'
+import './kodiaEditorActions.js'
+import './kodiaStatusBarContrib.js'
+import './verificationLedgerService.js'
+import './softwareFactoryService.js'
+import '../common/executionObservability.js'

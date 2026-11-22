@@ -478,7 +478,7 @@ export const isFeatureNameDisabled = (featureName: FeatureName, settingsState: V
 
 
 
-export type ChatMode = 'agent' | 'gather' | 'normal'
+export type ChatMode = 'agent' | 'plan' | 'debug' | 'gather' | 'normal'
 
 
 export type GlobalSettings = {
@@ -517,6 +517,10 @@ export type GlobalSettings = {
 	// Search Cache settings (Phase 3)
 	webSearchCacheEnabled: boolean; // default: false (opt-in)
 	webSearchCacheTTL: number; // default: 3600 seconds (1 hour), max: 86400 (24 hours)
+	// Model Resilience & Routing (Mandate §8 / §21.5)
+	fallbackModels: ModelSelection[];
+	modelRoutingByRole: Record<string, ModelSelection | null>;
+	disabledTools: string[];
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -555,6 +559,10 @@ export const defaultGlobalSettings: GlobalSettings = {
 	// Search Cache settings (Phase 3)
 	webSearchCacheEnabled: false, // opt-in, disabled by default
 	webSearchCacheTTL: 3600, // default TTL in seconds (1 hour)
+	// Model Resilience & Routing
+	fallbackModels: [],
+	modelRoutingByRole: {},
+	disabledTools: [],
 }
 
 export type GlobalSettingName = keyof GlobalSettings

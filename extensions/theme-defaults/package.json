@@ -14,6 +14,24 @@
   "contributes": {
     "themes": [
       {
+        "id": "Kodia Obsidian",
+        "label": "Kodia Obsidian (Dark)",
+        "uiTheme": "vs-dark",
+        "path": "./themes/kodia-obsidian.json"
+      },
+      {
+        "id": "Kodia Midnight",
+        "label": "Kodia Midnight (Navy Dark)",
+        "uiTheme": "vs-dark",
+        "path": "./themes/kodia-midnight.json"
+      },
+      {
+        "id": "Kodia Daylight",
+        "label": "Kodia Daylight (Light)",
+        "uiTheme": "vs",
+        "path": "./themes/kodia-daylight.json"
+      },
+      {
         "id": "Light 2026",
         "label": "%light2026ThemeLabel%",
         "uiTheme": "vs",

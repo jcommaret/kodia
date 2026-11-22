@@ -370,6 +370,22 @@ export class CodeIndex {
 		return k;
 	}
 
+	/** every chunk of one file, in order */
+	chunksOf(filePath: string): IndexedChunk[] {
+		return (this.docsOfFile.get(filePath) ?? []).map(id => this.docs.get(id)!.chunk);
+	}
+
+	/** a hit for a chunk found another way (by meaning): no matched words, its first lines as the snippet */
+	hitFor(chunk: IndexedChunk, score: number): CodeSearchHit {
+		const lines = this.linesOfFile.get(chunk.filePath) ?? [];
+		const snippet: { line: number; text: string }[] = [];
+		for (let i = chunk.startLine + (chunk.kind === 'block' ? 0 : this.leadingCommentLines(lines, chunk)); i <= chunk.endLine && snippet.length < 2; i++) {
+			const text = (lines[i - 1] ?? '').trim();
+			if (text) { snippet.push({ line: i, text: text.slice(0, 200) }); }
+		}
+		return { ...chunk, score, matchedTerms: [], snippet };
+	}
+
 	/** the text of a chunk (capped), e.g. to show it to a reranking model */
 	chunkText(chunk: IndexedChunk, maxChars = 2000): string {
 		const lines = this.linesOfFile.get(chunk.filePath) ?? [];

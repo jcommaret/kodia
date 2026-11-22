@@ -130,6 +130,9 @@ export class WorkspaceCodeIndex {
 		return true;
 	}
 
+	/** "mtimeMs:size" of an indexed file (changes when the file is re-indexed) */
+	signature(file: string): string | undefined { return this.signatureOf.get(file); }
+
 	private bytesOf(file: string): number { return Number(this.signatureOf.get(file)?.split(':')[1] ?? 0); }
 
 	forget(file: string): void {

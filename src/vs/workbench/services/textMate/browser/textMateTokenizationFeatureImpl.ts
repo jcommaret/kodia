@@ -411,7 +411,10 @@ export class TextMateTokenizationFeature extends Disposable implements ITextMate
 			const response = await fetch(this._environmentService.isBuilt
 				? FileAccess.asBrowserUri(`${nodeModulesAsarUnpackedPath}/vscode-oniguruma/release/onig.wasm`).toString(true)
 				: FileAccess.asBrowserUri(`${nodeModulesPath}/vscode-oniguruma/release/onig.wasm`).toString(true));
-			return response;
+			// WebAssembly.instantiateStreaming strictly requires 'application/wasm';
+			// fall back to ArrayBuffer if a custom protocol/proxy omits the header.
+			const contentType = response.headers.get('content-type') ?? '';
+			return contentType.includes('application/wasm') ? response : await response.arrayBuffer();
 		}
 	}
 

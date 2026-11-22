@@ -64,7 +64,7 @@ export class TaskDecompositionService extends Disposable implements ITaskDecompo
 	}
 
 	decomposeRequest(request: string, projectType?: string): TaskPlan {
-		const plan = newTaskPlan(
+		let plan = newTaskPlan(
 			projectType || 'Application',
 			request
 		);
@@ -75,14 +75,14 @@ export class TaskDecompositionService extends Disposable implements ITaskDecompo
 		// Detect project type from keywords
 		const detectedType = this.detectProjectType(lowerRequest);
 		if (projectType === undefined) {
-			plan.title = detectedType.charAt(0).toUpperCase() + detectedType.slice(1);
+			plan = { ...plan, title: detectedType.charAt(0).toUpperCase() + detectedType.slice(1) };
 		}
 
 		// Add standard task categories based on project type
 		const suggestedTasks = this.suggestTasks(lowerRequest, detectedType);
 
 		for (const task of suggestedTasks) {
-			addTask(plan, task);
+			plan = addTask(plan, task);
 		}
 
 		return plan;
@@ -230,37 +230,43 @@ export class TaskDecompositionService extends Disposable implements ITaskDecompo
 
 	private suggestTasks(lowerRequest: string, projectType: string): TaskPlanTask[] {
 		const tasks: TaskPlanTask[] = [];
+		const pushTask = (title: string, description: string, dependencies: string[], assignedAgent?: string, priority?: 'high' | 'medium' | 'low'): TaskPlanTask => {
+			const t = newTask(title, description, dependencies, { assignedAgent, priority });
+			tasks.push(t);
+			return t;
+		};
 
 		// Phase 1: Project setup (always first)
-		tasks.push(newTask('Initialize project structure', 'Create project directory, initialize git, set up configuration files', []));
-		tasks.push(newTask('Install dependencies', 'Install required packages and dependencies', ['Initialize project structure']));
+		const init = pushTask('Initialize project structure', 'Create project directory, initialize git, set up configuration files', [], 'architect', 'high');
+		const install = pushTask('Install dependencies', 'Install required packages and dependencies', [init.id], 'general', 'high');
 
 		// Phase 2: Core implementation based on project type
+		let lastCore: TaskPlanTask;
 		if (projectType.includes('react') || projectType.includes('next') || projectType.includes('vue') || projectType.includes('angular')) {
-			tasks.push(newTask('Create core components', 'Build main UI components and layout', ['Install dependencies']));
-			tasks.push(newTask('Implement routing', 'Set up client-side routing between pages', ['Create core components']));
-			tasks.push(newTask('Connect to backend/API', 'Integrate with backend services or mock API', ['Implement routing']));
+			const core = pushTask('Create core components', 'Build main UI components and layout', [install.id], 'frontend', 'high');
+			const routing = pushTask('Implement routing', 'Set up client-side routing between pages', [core.id], 'frontend', 'medium');
+			lastCore = pushTask('Connect to backend/API', 'Integrate with backend services or API', [routing.id], 'api', 'medium');
 		} else if (projectType.includes('node') || projectType.includes('express') || projectType.includes('api')) {
-			tasks.push(newTask('Create server entry point', 'Set up Express/Node server with middleware', ['Install dependencies']));
-			tasks.push(newTask('Implement API routes', 'Create REST API endpoints', ['Create server entry point']));
-			tasks.push(newTask('Connect database', 'Set up database connection and models', ['Implement API routes']));
+			const entry = pushTask('Create server entry point', 'Set up Express/Node server with middleware', [install.id], 'backend', 'high');
+			const routes = pushTask('Implement API routes', 'Create REST API endpoints', [entry.id], 'api', 'high');
+			lastCore = pushTask('Connect database', 'Set up database connection and models', [routes.id], 'database', 'medium');
 		} else if (projectType.includes('php') || projectType.includes('laravel')) {
-			tasks.push(newTask('Create PHP project structure', 'Set up Laravel or vanilla PHP directory structure', ['Install dependencies']));
-			tasks.push(newTask('Implement controllers and routes', 'Create PHP controllers and web routes', ['Create PHP project structure']));
-			tasks.push(newTask('Connect database', 'Set up MySQL connection and models', ['Implement controllers and routes']));
+			const struct = pushTask('Create PHP project structure', 'Set up Laravel or vanilla PHP directory structure', [install.id], 'backend', 'high');
+			const routes = pushTask('Implement controllers and routes', 'Create PHP controllers and web routes', [struct.id], 'api', 'high');
+			lastCore = pushTask('Connect database', 'Set up database connection and models', [routes.id], 'database', 'medium');
 		} else if (projectType.includes('python')) {
-			tasks.push(newTask('Create Python project structure', 'Set up Python package with requirements', ['Install dependencies']));
-			tasks.push(newTask('Implement core modules', 'Write main application logic', ['Create Python project structure']));
-			tasks.push(newTask('Connect database', 'Set up database models and migrations', ['Implement core modules']));
+			const struct = pushTask('Create Python project structure', 'Set up Python package with requirements', [install.id], 'backend', 'high');
+			const core = pushTask('Implement core modules', 'Write main application logic', [struct.id], 'backend', 'high');
+			lastCore = pushTask('Connect database', 'Set up database models and migrations', [core.id], 'database', 'medium');
 		} else {
-			tasks.push(newTask('Implement core functionality', 'Build the main features of the application', ['Install dependencies']));
-			tasks.push(newTask('Integrate components', 'Connect all components together', ['Implement core functionality']));
+			const core = pushTask('Implement core functionality', 'Build the main features of the application', [install.id], 'general', 'high');
+			lastCore = pushTask('Integrate components', 'Connect all components together', [core.id], 'general', 'medium');
 		}
 
 		// Phase 3: Testing and verification
-		tasks.push(newTask('Write tests', 'Create unit and integration tests', ['Implement core functionality']));
-		tasks.push(newTask('Run tests and fix issues', 'Execute tests and fix any failures', ['Write tests']));
-		tasks.push(newTask('Verify application works', 'Final end-to-end verification', ['Run tests and fix issues']));
+		const writeTests = pushTask('Write tests', 'Create unit and integration tests', [lastCore.id], 'testing', 'high');
+		const runTests = pushTask('Run tests and fix issues', 'Execute tests and fix any failures', [writeTests.id], 'testing', 'high');
+		pushTask('Verify application works', 'Final end-to-end verification', [runTests.id], 'review', 'high');
 
 		return tasks;
 	}

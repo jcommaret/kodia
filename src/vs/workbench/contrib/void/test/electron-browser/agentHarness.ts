@@ -231,6 +231,12 @@ export type HarnessOptions = {
 	storage?: object;
 	/** use the real ProjectMemoryService (.kodia/memory.md in the workspace) for the tools and the system prompt; default: empty memory */
 	realProjectMemory?: boolean;
+	/** optional lifecycle hooks service (IKodiaHooksMainService) */
+	hooks?: object;
+	/** optional execution observability service (IExecutionObservabilityService) */
+	observability?: object;
+	/** optional custom slash commands service (ICustomCommandsService) */
+	customCommands?: object;
 };
 
 /**
@@ -331,6 +337,7 @@ export function createHarness<L extends object>(tmpDir: string, llm: L, store: D
 		{ findAgentSkills: async () => [] } as any,
 	));
 
+	const taskPlanService = store.add(new TaskPlanService());
 	const chat = store.add(new ChatThreadService(
 		(opts.storage ?? store.add(new InMemoryStorageService())) as any,
 		voidModelService as any,
@@ -347,10 +354,13 @@ export function createHarness<L extends object>(tmpDir: string, llm: L, store: D
 		fileService as any,
 		{ truncateAsync: async (text: string) => ({ text }) } as any, // IToolOutputService
 		mcpService as any,
-		store.add(new TaskPlanService()),
+		taskPlanService,
+		opts.hooks as any,
+		opts.observability as any,
+		opts.customCommands as any,
 	));
 
-	return { chat, llm, fileService, tools, projectMemory };
+	return { chat, llm, fileService, tools, projectMemory, taskPlanService, workspace };
 }
 
 /** Run one user turn and wait until the agent loop has fully stopped. */

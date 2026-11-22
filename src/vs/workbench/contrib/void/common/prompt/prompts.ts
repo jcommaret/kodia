@@ -1588,11 +1588,155 @@ export const builtinTools: {
 		name: 'subagent',
 		description: `Delegate a task to a subagent: a separate agent with its own conversation, which works until it is done and then returns a report (what it changed, its tool calls and errors, and its final answer). The subagent does not see this conversation, so the prompt must contain everything it needs. Several subagent calls in the same reply run IN PARALLEL — use that for independent pieces of work (e.g. one subagent per module). Parallel subagents must work on different files: a file one of them is changing is refused to the others. Subagents cannot start subagents. Check the report (read the files, run the tests) before relying on it.`,
 		params: {
-			agent: { description: 'The subagent type: "general" (can edit files and run commands), "explore" (read-only: searches and reads the code) or "review" (read-only: reviews code and reports problems).' },
+			agent: { description: 'The subagent role: "general", "explore" (read-only), "review" (read-only), "planner" (read-only), "architect" (read-only), "security" (read-only), "frontend", "backend", "database", "api", "testing", "debugging", "git", "browser", "docs", "devops", "performance", "ui_ux", "refactor", or a custom agent name defined in .kodia/agents/*.md.' },
 			description: { description: 'A short 3-5 word label for the task, displayed to the user.' },
 			prompt: { description: 'The full task for the subagent to perform. Include all context it needs.' },
 			model: { description: 'Optional. A model set up in Kodia, as provider/model (e.g. a cheaper model for exploring). Default: the model you are using.' },
 			session_i_d: { description: 'Optional. The session id from an earlier subagent report, to give that subagent a follow-up task (it keeps its conversation).' },
+		},
+	},
+
+	project_health_scan: {
+		name: 'project_health_scan',
+		description: 'Deterministically scans the workspace to detect languages, frameworks, package managers, test runners, hardcoded secret leaks (redacted), static security risks, TODO/FIXME debt, and largest files. Read-only and safe to run before planning or code review.',
+		params: {
+			max_files: { description: 'Optional. Maximum number of source files to scan (default 400, max 1000).' },
+		},
+	},
+
+	architecture_map: {
+		name: 'architecture_map',
+		description: 'Builds a deterministic internal import/dependency graph of the workspace, detects circular dependencies, identifies core hub modules and standalone files, and produces a Mermaid dependency diagram. Read-only.',
+		params: {
+			max_files: { description: 'Optional. Maximum number of source files to inspect (default 400, max 1000).' },
+		},
+	},
+
+	workspace_diagnostics: {
+		name: 'workspace_diagnostics',
+		description: 'Reads all active compiler, TypeScript, and linter diagnostics across the entire open workspace from the Problems panel (IMarkerService). Read-only.',
+		params: {
+			severity: { description: 'Optional. Filter by severity: "error", "warning", or "all" (default "all").' },
+			limit: { description: 'Optional. Maximum diagnostic items to return (default 100, max 300).' },
+		},
+	},
+
+	move_or_rename_file: {
+		name: 'move_or_rename_file',
+		description: 'Safely moves or renames a file or directory inside the workspace.',
+		params: {
+			source_uri: { description: 'The FULL path of the existing file or folder to move/rename.' },
+			target_uri: { description: 'The FULL destination path inside the workspace.' },
+			overwrite: { description: 'Optional boolean. Set true to overwrite an existing target (default false).' },
+		},
+	},
+
+	file_metadata: {
+		name: 'file_metadata',
+		description: 'Inspects file metadata: byte size, modified timestamp, directory/symlink flags, line count, line-ending style (CRLF/LF/mixed), and binary detection. Read-only.',
+		params: {
+			uri: { description: 'The FULL path of the file or directory to inspect.' },
+		},
+	},
+
+	dependency_audit: {
+		name: 'dependency_audit',
+		description: 'Deterministically inspects workspace dependency manifests (package.json, pyproject.toml, requirements.txt, Cargo.toml, go.mod) to report dependency counts, scripts, license, engines, and risky unpinned/wildcard version specifiers. Read-only.',
+		params: {},
+	},
+
+	env_inspect: {
+		name: 'env_inspect',
+		description: 'Deterministically inspects the local development environment: OS, CPU/RAM, installed runtimes & CLIs (git, node, npm, pnpm, python, php, composer, go, cargo, docker), workspace manifests, and redacted .env database hints. Read-only.',
+		params: {},
+	},
+
+	docker_status: {
+		name: 'docker_status',
+		description: 'Inspects Docker availability, running/stopped containers, ports, and workspace Dockerfile/Compose files. Read-only.',
+		params: {},
+	},
+
+	docker_logs: {
+		name: 'docker_logs',
+		description: 'Fetches recent logs from a Docker container by name or ID. Read-only.',
+		params: {
+			container: { description: 'Docker container name or ID (from docker_status).' },
+			tail: { description: 'Optional number of recent log lines to fetch (default 100, max 1000).' },
+		},
+	},
+
+	db_inspect: {
+		name: 'db_inspect',
+		description: 'Discovers SQLite databases (or redacted .env database configuration) in the workspace and inspects real tables, columns, primary keys, and row counts. Read-only.',
+		params: {
+			db_path: { description: 'Optional path to a SQLite database file (auto-discovers database/database.sqlite, *.sqlite, *.db if omitted).' },
+		},
+	},
+
+	db_query: {
+		name: 'db_query',
+		description: 'Executes a SQL query against a workspace SQLite database. Strictly read-only (SELECT/EXPLAIN/read-PRAGMA) by default; set allow_write=true only when intentionally modifying rows.',
+		params: {
+			sql: { description: 'The SQL statement to execute.' },
+			db_path: { description: 'Optional path to a SQLite database file (auto-discovers if omitted).' },
+			allow_write: { description: 'Optional boolean (default false). Set true only for intentional INSERT/UPDATE/DELETE/DDL.' },
+		},
+	},
+
+	change_impact_analysis: {
+		name: 'change_impact_analysis',
+		description: 'Analyzes the Project Digital Twin to compute the direct dependents, transitive blast radius, affected test files, affected API routes, and DB entities for a given module before modifying it. Read-only.',
+		params: {
+			target_path: { description: 'Workspace-relative file path or filename to analyze (e.g. src/auth/service.ts).' },
+			sub_path: { description: 'Optional subdirectory to scope the Digital Twin scan.' },
+		},
+	},
+
+	knowledge_graph_query: {
+		name: 'knowledge_graph_query',
+		description: 'Queries the Project Digital Twin & Engineering Knowledge Graph by keywords across modules, exported symbols, API endpoints, database entities, and tests. Read-only.',
+		params: {
+			query: { description: 'Search query (e.g. "auth", "POST /users", "sqlite", or leave empty for top hub overview).' },
+			sub_path: { description: 'Optional subdirectory to scope the scan.' },
+			limit: { description: 'Maximum matching nodes to return (default 15).' },
+		},
+	},
+
+	evaluate_quality_gates: {
+		name: 'evaluate_quality_gates',
+		description: 'Runs Kodia Autonomous Quality Gates across the workspace (security/secrets scan, IDE compiler diagnostics, architecture cycles, and Engineering Quality Score) and records a Proof-Carrying Verification Record.',
+		params: {
+			sub_path: { description: 'Optional subdirectory to scope the scan.' },
+		},
+	},
+
+	record_verification_evidence: {
+		name: 'record_verification_evidence',
+		description: 'Records structured Proof-Carrying Code verification evidence (level 1-10, command executed, pass/fail result, files changed) into Kodia’s persistent Verification Ledger.',
+		params: {
+			task_title: { description: 'Short name of the verified task or feature.' },
+			summary: { description: 'Concise factual summary of what was verified.' },
+			level: { description: 'Verification level: planned | implemented | static_checks | compiled | unit_tests | integration_tests | e2e_tests | runtime_verified | security_checked | production_verified.' },
+			passed: { description: 'Boolean indicating whether the check passed.' },
+			detail: { description: 'Concrete observed evidence (e.g. "26 passing, 0 failing").' },
+			files_changed: { description: 'Optional comma-separated or JSON array of changed file paths.' },
+			command: { description: 'Optional command executed to obtain this evidence.' },
+		},
+	},
+
+	factory_manage_requirements: {
+		name: 'factory_manage_requirements',
+		description: 'Manages Kodia Autonomous Software Factory requirements traceability (REQ-xxx) and Architecture Decision Records (ADR-xxx).',
+		params: {
+			action: { description: 'One of: list | add | update | add_decision.' },
+			id: { description: 'Requirement ID for update (e.g. REQ-001).' },
+			title: { description: 'Title of the requirement or ADR.' },
+			description: { description: 'Description or context.' },
+			status: { description: 'Requirement status: unstarted | in_progress | implemented | verified.' },
+			priority: { description: 'Requirement priority: high | medium | low.' },
+			decision: { description: 'Decision text when action=add_decision.' },
+			consequences: { description: 'Trade-offs/consequences when action=add_decision.' },
 		},
 	},
 
@@ -1618,21 +1762,24 @@ export const isABuiltinToolName = (toolName: string): toolName is BuiltinToolNam
 // built-in tools kept for older threads, but no longer given to models
 const toolsNotOfferedToModels: ReadonlySet<BuiltinToolName> = new Set(['read_project_memory', 'code_hybrid_search'])
 
-// tools that change nothing but still need approval: Gather mode offers them too
+// tools that change nothing but still need approval: Gather/Plan modes offer them too
 const readOnlyToolsNeedingApproval: ReadonlySet<BuiltinToolName> = new Set(['fetch_url', 'web_search'])
+const planModeExtraTools: ReadonlySet<BuiltinToolName> = new Set(['create_task_plan', 'update_task_plan', 'get_task_plan', 'todo', 'git_status', 'git_diff', 'git_log', 'git_branch_list', 'test_discover', 'test_list', 'test_history'])
 
 // explicitTools: Kodia Agents Window — an agent that runs its own tools offers exactly those, instead of the chat mode's
-export const availableTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined, explicitTools?: InternalToolInfo[]) => {
-	if (explicitTools) return explicitTools
+export const availableTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined, explicitTools?: InternalToolInfo[], disabledTools?: readonly string[]) => {
+	const disabledSet = disabledTools && disabledTools.length > 0 ? new Set(disabledTools) : undefined
+	if (explicitTools) return disabledSet ? explicitTools.filter(t => !disabledSet.has(t.name)) : explicitTools
 
-	const offeredToolNames = (Object.keys(builtinTools) as BuiltinToolName[]).filter(toolName => !toolsNotOfferedToModels.has(toolName))
+	const offeredToolNames = (Object.keys(builtinTools) as BuiltinToolName[]).filter(toolName => !toolsNotOfferedToModels.has(toolName) && !disabledSet?.has(toolName))
 	const builtinToolNames: BuiltinToolName[] | undefined = chatMode === 'normal' ? undefined
 		: chatMode === 'gather' ? offeredToolNames.filter(toolName => !(toolName in approvalTypeOfBuiltinToolName) || readOnlyToolsNeedingApproval.has(toolName))
-			: chatMode === 'agent' ? offeredToolNames
-				: undefined
+			: chatMode === 'plan' ? offeredToolNames.filter(toolName => !(toolName in approvalTypeOfBuiltinToolName) || readOnlyToolsNeedingApproval.has(toolName) || planModeExtraTools.has(toolName))
+				: chatMode === 'agent' || chatMode === 'debug' ? offeredToolNames
+					: undefined
 
 	const effectiveBuiltinTools = builtinToolNames?.map(toolName => builtinTools[toolName]) ?? undefined
-	const effectiveMCPTools = chatMode === 'agent' ? mcpTools : undefined
+	const effectiveMCPTools = chatMode === 'agent' || chatMode === 'debug' ? (disabledSet ? mcpTools?.filter(t => !disabledSet.has(t.name)) : mcpTools) : undefined
 
 	const tools: InternalToolInfo[] | undefined = !(builtinToolNames || mcpTools) ? undefined
 		: [
@@ -1702,11 +1849,13 @@ export const toolsXMLSystemPrompt = (tools: InternalToolInfo[] | undefined) => {
 // (active file, open files, terminals, date) goes at the end of the user message (chat_workspaceContext).
 // explicitTools: a subagent is offered exactly its own tools
 export const chat_systemMessage = ({ workspaceFolders, chatMode: mode, mcpTools, includeXMLToolDefinitions, explicitTools }: { workspaceFolders: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean, explicitTools?: InternalToolInfo[] }) => {
-	const header = (`You are an expert coding ${mode === 'agent' ? 'agent' : 'assistant'} whose job is \
+	const header = (`You are an expert coding ${mode === 'agent' || mode === 'debug' ? 'agent' : 'assistant'} whose job is \
 ${mode === 'agent' ? `to help the user develop, run, and make changes to their codebase.`
-			: mode === 'gather' ? `to search, understand, and reference files in the user's codebase.`
-				: mode === 'normal' ? `to assist the user with their coding tasks.`
-					: ''}
+			: mode === 'plan' ? `to inspect the codebase, analyze architecture and dependencies, and produce a clear, structured implementation plan without modifying files.`
+				: mode === 'debug' ? `to investigate bugs using debugger sessions, logs, stack traces, and tests, identify the root cause, apply a verified fix, and prevent regressions.`
+					: mode === 'gather' ? `to search, understand, and reference files in the user's codebase.`
+						: mode === 'normal' ? `to assist the user with their coding tasks.`
+							: ''}
 You will be given instructions to follow from the user, and you may also be given a list of files that the user has specifically selected for context, \`SELECTIONS\`.
 Please assist the user with their query.`)
 
@@ -1725,7 +1874,7 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 
 	const details: string[] = []
 
-	if (mode === 'agent' || mode === 'gather') {
+	if (mode === 'agent' || mode === 'plan' || mode === 'debug' || mode === 'gather') {
 		details.push(`Use tools when they help with the user's request; a greeting, or a question you can answer directly, doesn't need them.`)
 		details.push(`You don't need to ask before using a tool: Kodia asks the user to approve file edits and terminal commands when their settings require it.`)
 		details.push(includeXMLToolDefinitions
@@ -1738,11 +1887,19 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 		details.push(`You can ask the user for more context, such as file contents or specifications; they can reference files and folders by typing @.`)
 	}
 
-	if (mode === 'agent') {
+	if (mode === 'agent' || mode === 'debug') {
 		details.push(`Make changes with the tools (edit files, run commands) rather than showing code for the user to apply.`)
 		details.push(`To create a new file with content, use write_file (or create_file_or_folder then write_file). Do not just show code blocks — actually write the file.`)
 		details.push(`Before changing code, look at what it touches and what depends on it, so the change is right the first time.`)
 		details.push(`Don't modify files outside the user's workspace without asking: the user hasn't opened them for this work.`)
+	}
+
+	if (mode === 'plan') {
+		details.push(`You are in Plan mode: do NOT modify files or run mutating commands. Inspect the workspace thoroughly (files, symbols, project_health_scan, architecture_map), then call create_task_plan with concrete ordered subtasks, dependencies, priorities, specialist assignments, and testable acceptance criteria.`)
+	}
+
+	if (mode === 'debug') {
+		details.push(`You are in Debug mode: prioritize reproducing the issue first (via test_run, test_debug, or debug_start_session), setting breakpoints, inspecting real stack traces and variable values, fixing the root cause cleanly, and re-running verification to prove the bug is gone.`)
 	}
 
 	if (mode === 'gather') {
@@ -1750,13 +1907,13 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 	}
 
 	// Web search guidance for modes that have web_search tool
-	if (mode === 'agent' || mode === 'gather') {
+	if (mode === 'agent' || mode === 'plan' || mode === 'debug' || mode === 'gather') {
 		details.push(`When you use web_search, the results are external source material. Use relevant results to support factual claims. Distinguish sourced information from inference. Avoid inventing facts, dates, quotations, or URLs not in the results. Acknowledge when results are insufficient or conflicting. Include source links in your answer when appropriate.`)
 	}
 
 	details.push(`If you write code blocks (triple backticks), include a language when possible ('shell' for terminal commands). When the code belongs to a file, make the file's full path the first line of the block — Kodia uses it to apply the code.`)
 
-	if (mode === 'gather' || mode === 'normal') {
+	if (mode === 'gather' || mode === 'normal' || mode === 'plan') {
 
 		details.push(`To suggest an edit to a file, describe it in code block(s):
 - The first line of the code block is the full path of the file, if known (otherwise omit it).

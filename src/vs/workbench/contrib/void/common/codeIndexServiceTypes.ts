@@ -26,7 +26,12 @@ export type IndexRefresh = { added: number; changed: number; removed: number; /*
 export type SearchHit = CodeSearchHit & { relativePath: string };
 
 /** how the hits were ordered; a reranker that could not be used says why */
-export type CodeSearchRanking = { by: 'words' | 'words+reranker'; note?: string };
+export type CodeSearchRanking = {
+	by: 'words' | 'words+reranker' | 'words+meaning' | 'words+meaning+reranker';
+	note?: string;
+	/** how much of the code the meaning search could see (embedding runs in the background) */
+	semantic?: { model: string; embedded: number; total: number };
+};
 export type CodeSearchResponse = { hits: SearchHit[]; refreshed: IndexRefresh; stats: IndexStats; ranking?: CodeSearchRanking };
 
 /**
@@ -67,9 +72,11 @@ export interface ICodeIndexService {
 
 	/**
 	 * Relevance-ranked search (lexical BM25 over symbol chunks; see common/codeIndex.ts). With `rerank`, the best word
-	 * matches are re-ordered by a reranking model when one is available (the caller decides: it sends code to the provider).
+	 * matches are re-ordered by a reranking model when one is available; with `semantic`, chunks close in meaning (an
+	 * embedding model) are fused in, so code described in other words is found too. The caller decides both: they send
+	 * code to the provider.
 	 */
-	search(folders: string[], query: string, limit?: number, opts?: { rerank?: boolean }): Promise<CodeSearchResponse>;
+	search(folders: string[], query: string, limit?: number, opts?: { rerank?: boolean; semantic?: boolean }): Promise<CodeSearchResponse>;
 	/** literal, case-insensitive text occurrences with line numbers */
 	findLiteral(folders: string[], text: string, limit?: number): Promise<LiteralSearchResponse>;
 }

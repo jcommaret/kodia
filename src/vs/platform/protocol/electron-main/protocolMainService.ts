@@ -153,10 +153,33 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 			const content = await fs.promises.readFile(path);
 			const responseHeaders = new Headers(headers ?? {});
 
-			// Ensure JavaScript files have the correct Content-Type for ESM import()
+			// Ensure resources served via vscode-file:// carry proper MIME types
+			// (notably text/javascript for ESM import() and application/wasm for WebAssembly.instantiateStreaming)
 			const ext = extname(path).toLowerCase();
-			if (ext === '.js') {
-				responseHeaders.set('content-type', 'text/javascript');
+			const contentTypeByExt: Record<string, string> = {
+				'.js': 'text/javascript',
+				'.mjs': 'text/javascript',
+				'.cjs': 'text/javascript',
+				'.wasm': 'application/wasm',
+				'.css': 'text/css',
+				'.html': 'text/html',
+				'.htm': 'text/html',
+				'.json': 'application/json',
+				'.svg': 'image/svg+xml',
+				'.png': 'image/png',
+				'.jpg': 'image/jpeg',
+				'.jpeg': 'image/jpeg',
+				'.gif': 'image/gif',
+				'.webp': 'image/webp',
+				'.ico': 'image/x-icon',
+				'.woff': 'font/woff',
+				'.woff2': 'font/woff2',
+				'.ttf': 'font/ttf',
+				'.otf': 'font/otf',
+			};
+			const mime = contentTypeByExt[ext];
+			if (mime && !responseHeaders.has('content-type')) {
+				responseHeaders.set('content-type', mime);
 			}
 
 			const uint8Array = new Uint8Array(content);

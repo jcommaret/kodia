@@ -8,7 +8,7 @@ import { DebugConfiguration, DebugSessionInfo, DebugThread, DebugScope, DebugVar
 import { TaskPlan, TaskStatus } from './autonomousTask.js';
 import { GitRepositoryStatus, GitDiffResult, GitCommitLogEntry, GitBranchInfo, GitOperationInProgress, GitTagInfo, GitRemoteInfo, GitWorktreeInfo } from './gitService.js';
 import type { GitResetMode, GitStepResult } from './gitOperations.js';
-import { TestFramework, TestFileInfo, TestRunResultData } from './testServiceTypes.js';
+import { TestFramework, TestFileInfo, TestRunResultData, TestHistoryResult, TestCheckFlakyResult } from './testServiceTypes.js';
 import { BrowserInspectResult, BrowserTabResult } from './browserServiceTypes.js';
 import { SubagentReport } from './subagents.js';
 import { CodeSearchResponse, IndexStats, LiteralSearchResponse } from './codeIndexServiceTypes.js';
@@ -92,6 +92,9 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'test_run_targeted': 'test',
 	'test_rerun_failed': 'test',
 	'test_cancel': 'test',
+	'test_coverage': 'test',
+	'test_history': 'test',
+	'test_check_flaky': 'test',
 	// a fetched URL can carry data out of the workspace, so the user sees it first
 	'fetch_url': 'web pages',
 	'web_search': 'web pages',
@@ -316,6 +319,9 @@ export type BuiltinToolCallParams = {
 	'test_run_targeted': { changed_files: string[] },
 	'test_rerun_failed': {},
 	'test_cancel': { run_id?: string },
+	'test_coverage': { test_files?: string[], test_names?: string[], files?: string[] },
+	'test_history': { test_name?: string, only_problems: boolean, limit: number },
+	'test_check_flaky': { test_files?: string[], test_names?: string[], attempts: number },
 	// Todo list (task tracking within a turn - OpenCode parity)
 	'todo': { todos: { id: string, content: string, status: 'pending' | 'in_progress' | 'completed' }[] },
 	// Subagent delegation (OpenCode parity - roadmap Stage 6)
@@ -514,6 +520,9 @@ export type BuiltinToolResultType = {
 	'test_run_targeted': { results: TestRunResultData },
 	'test_rerun_failed': { results: TestRunResultData },
 	'test_cancel': { cancelled: boolean },
+	'test_coverage': { results: TestRunResultData },
+	'test_history': TestHistoryResult,
+	'test_check_flaky': TestCheckFlakyResult,
 		// Todo list (task tracking within a turn - OpenCode parity)
 		'todo': { done: number, inProgress: number, pending: number, todos: { id: string, content: string, status: string }[] },
 		// Subagent delegation (OpenCode parity - roadmap Stage 6)

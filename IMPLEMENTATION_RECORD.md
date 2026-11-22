@@ -665,6 +665,45 @@ Every check, run one after another on a fresh `npm run transpile-client`:
 - **Full `src` type check does not fit this machine:** 7.9 GB RAM. It ran out of heap at 7–8 GB twice, once alone. In its place is a Void-scoped check with the same compiler options, covering ~5.4k files: the Void code, everything it imports, and all global `.d.ts`. Code outside Void that Void does not import was not type-checked this round.
 - Three old test files appear as deleted in git: `realDAPDebuggerIntegration`, `realDebuggerIntegration`, `testToolService` (common). An earlier round replaced them deliberately: the debugger pair by `test/node/nodeInspectorDebugging.test.ts`, as its header says, and the mock-only test-tool test as described above under roadmap 3. No code imports them.
 
+## 2026-11-22 (t) — Roadmap 3: test history, regressions, flaky tests, coverage
+
+Committed (r)+(s) first, on branch `kodia/agent-engine-roadmap` (commit `d185ffe6`), pushed to `origin` at the user's request. The user's five build-file changes were left out of the commit and are still uncommitted.
+
+**Bug fixed:** `test_run` and `test_run_targeted` accepted only real arrays. A model that sent one file or name as text (every XML tool call does) had it silently dropped, and the **whole suite ran** instead. Now an array, a JSON array in a string, or a single string are all accepted, and `test_run_targeted` with no files is an error, not an empty run. The new agent-loop test fails against the old validator (checked: 0 passing / 1 failing) and passes now.
+
+**New (`common/testHistory.ts`, `common/testCoverage.ts`, wired through `testToolService`, `toolsService`, types, prompts, policy):**
+- **History:** every reported run is recorded per test, kept in workspace storage so it survives a restart, and bounded (20 outcomes per test, 2,000 tests, 50 runs).
+  - Every outcome carries a **fingerprint of the code it ran on**: git HEAD, the uncommitted diff, and untracked files by size and modification time. Kodia's own `.kodia/` files and caches are excluded.
+- **Every run result now flags changes:** REGRESSION (passed last run, fails now), Fixed, and Known flaky.
+- **Flaky detection:** a test is flaky only when it **passed and failed on the same fingerprint**.
+  - A test that fails after an edit and passes after the fix is a fix, not flakiness.
+  - Without git, history never calls a test flaky.
+- **`test_check_flaky`:** reruns the named tests 2–10 times on unchanged code. It reports flaky tests (with their failure messages), tests that fail every time, and tests that pass every time, and warns when the code changed during the check.
+- **`test_history`:** per test, passes, failures and skips, the failing streak, outcome changes, the flaky evidence and the last failure message. It can filter by name or show problems only.
+- **`test_coverage`:** runs the framework's own coverage and parses lcov or Go cover profiles.
+  - Reports line and branch totals, per-file percentages with uncovered line ranges, and focus files.
+  - A focus file that no test loads is reported as not covered.
+  - A missing plugin is named: pytest-cov, @vitest/coverage-v8, or c8 for Mocha.
+  - Cargo, dotnet and PHPUnit refuse with the reason.
+  - Report folders are deleted afterwards.
+- Risk levels: `test_history` is low; `test_coverage` and `test_check_flaky` are medium, like `test_run`.
+
+**Tests (real runners, real git, real disk):**
+- **History:** fixed, then regression across three runs, with a restart in between. The fingerprints keep fail(A), pass(B), fail(A) from counting as flaky.
+- **Flaky test:** a test whose outcome alternates between runs is caught by `test_check_flaky` (2 passes, 1 failure). History then marks it flaky with the evidence, and the next failing run flags it as known flaky.
+- **Coverage with the real `node --test`:** 3 of 7 lines, uncovered 3–6, branches counted, the unloaded focus file reported, nothing left behind.
+- **pytest without pytest-cov:** the missing plugin is named and no coverage is invented.
+- **Agent loop:** a plain-text test file runs only that file, and the coverage and history results reach the model.
+
+**Totals:** Electron **1085 passing / 0 failing / 1 pending** (was 1067); node **56/0**; eslint 0 errors on the 13 changed files; Void-scoped type check clean (exit 0).
+
+**Not done in roadmap 3:**
+- Coverage through a VS Code test extension's own coverage.
+- Debugging a single test.
+- Test generation.
+- A live-model run of the new tools.
+- Real Jest, Vitest, Mocha and Go coverage runs (only their report formats are tested; Go is not installed here).
+
 ## Session report — 2026-11-21: roadmap 1–10 pass complete (mandate format)
 
 1. **Changed**:
@@ -724,7 +763,9 @@ Every check, run one after another on a fresh `npm run transpile-client`:
 | 1–7, 9, 10 | All other roadmap items | **Not inspected this session** | earlier claims in this file have not been re-verified |
 
 | 3 | Test discover/list/run/run-by-name/rerun-failed/targeted/cancel (command runners: node:test, pytest verified; jest/vitest/mocha/go/cargo/dotnet/phpunit by format) | **Integration-tested (real runners) + agent-loop e2e** | was unconstructible in the app and could return another run's results; testCommandRunner.test.ts (7), testTools.test.ts (7) |
-| 3 | Tests via VS Code test-controller extensions; coverage, flaky detection, history, debug-a-test, generation | **Partial / Missing** | controller path fixed but not integration-tested; the rest not implemented |
+| 3 | Test history (kept across restarts), regressions/fixes per run, flaky detection (same code fingerprint), `test_check_flaky` (repeat on unchanged code), `test_history` | **Integration-tested (real node:test runs, real git, restart) + agent-loop e2e** | testHistory.test.ts (7), testTools.test.ts +2 +1 e2e; section (t); no live-model run |
+| 3 | Coverage (`test_coverage`): node --test, Jest, Vitest, pytest (pytest-cov), Mocha (c8), Go; per-file %, uncovered lines, focus files | **Integration-tested for node --test; pytest's missing-plugin path real; Jest/Vitest/Mocha/Go by format only** | testCoverage.test.ts (6), testTools.test.ts +2; Go not installed here; cargo/dotnet/PHPUnit refuse with the reason |
+| 3 | Tests via VS Code test-controller extensions; debug-a-test; test generation | **Partial / Missing** | controller path fixed but not integration-tested (coverage always uses the framework's command); debug-a-test and generation not implemented |
 | 2 | Git for the agent: status/diff/log/branches/show, branch create/switch, stage/unstage, commit, fetch/pull/push, merge, stash/pop | **Integration-tested (real repos) + agent-loop e2e** | was non-functional in the app (DI), shell-injectable and fake-success; gitOperations.test.ts (15), gitAgent.test.ts (2); not launched in the packaged app |
 | 2 | Git: revert, cherry-pick, rebase (non-interactive), continue/abort of a stopped operation, reset (soft/mixed/hard with safeguards), tags, remotes (redacted), worktrees (list/add); status reports which operation is in progress | **Integration-tested (real repos) + agent-loop e2e** | gitOperations.test.ts +10, gitAgent.test.ts +1 (conflict → resolve → continue; hard reset asks approval and is still refused over uncommitted work), gitAutonomyPolicy +1; section (r) |
 | 2 | Git: PR workflows, commit-message generation, tag/branch deletion, worktree removal | **Missing** | deliberately not exposed (deletions) or not implemented |

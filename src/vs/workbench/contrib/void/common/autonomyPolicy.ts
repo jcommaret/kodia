@@ -155,6 +155,9 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'test_run_targeted',
 	'test_rerun_failed',
 	'test_cancel',
+	'test_coverage',
+	'test_history',
+	'test_check_flaky',
 ]);
 
 /**
@@ -317,12 +320,15 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'test_discover':
 		case 'test_list':
 		case 'test_cancel':
+		case 'test_history': // reads recorded results only
 			return 'low';
 
 		// Test operations - execute code (may have side effects via test setup/teardown)
 		case 'test_run':
 		case 'test_run_targeted':
 		case 'test_rerun_failed':
+		case 'test_coverage':
+		case 'test_check_flaky':
 			return 'medium';
 
 		// Destructive / irreversible.

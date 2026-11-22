@@ -1507,6 +1507,33 @@ export const builtinTools: {
 		description: `Re-run tests that failed in the most recent test run. If no previous run exists or no tests failed, returns an empty result.`,
 		params: {},
 	},
+	test_coverage: {
+		name: 'test_coverage',
+		description: `Run tests with coverage and report line/branch coverage per file, with the uncovered line numbers. Use it after adding or changing code to see which lines no test exercises. Uses the framework's own coverage (node --test, Jest, Vitest; pytest needs pytest-cov, Vitest needs @vitest/coverage-v8, Mocha needs c8, Go uses -coverprofile). A missing plugin is reported, not hidden.`,
+		params: {
+			test_files: { description: 'Optional. Test files to run (default: all).' },
+			test_names: { description: 'Optional. Test names to run.' },
+			files: { description: 'Optional. Source files to report coverage for, e.g. the ones you changed (default: every file the report covers). A file no test loaded is reported as not covered.' },
+		},
+	},
+	test_history: {
+		name: 'test_history',
+		description: `Show the recorded outcomes of this project's tests across runs (kept across restarts): per test, how often it passed and failed, whether it is failing now, and whether it is FLAKY — passed and failed on the exact same code (tracked by git). Every test run is recorded automatically; test results also flag regressions (passed last run, fail now).`,
+		params: {
+			test_name: { description: 'Optional. Show only tests whose name or file contains this text.' },
+			only_problems: { description: 'Optional. "true" to show only flaky, failing or unstable tests.' },
+			limit: { description: 'Optional. Maximum tests to show (default 30).' },
+		},
+	},
+	test_check_flaky: {
+		name: 'test_check_flaky',
+		description: `Run the same tests several times in a row without changing code and report which ones are flaky (pass sometimes, fail sometimes) versus failing every time. Use it when a test fails and you suspect flakiness, before changing code. Name the tests or files: the whole suite repeated is slow.`,
+		params: {
+			test_files: { description: 'Optional. Test files to repeat.' },
+			test_names: { description: 'Optional. Test names to repeat.' },
+			attempts: { description: 'Optional. How many times to run them, 2–10 (default 3).' },
+		},
+	},
 	test_cancel: {
 		name: 'test_cancel',
 		description: `Cancel a running test operation. Optionally specify a run ID; if not given, cancels the most recent run.`,

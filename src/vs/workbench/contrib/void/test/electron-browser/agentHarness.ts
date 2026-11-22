@@ -10,6 +10,8 @@
  */
 
 import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
 import { isWindows } from '../../../../../base/common/platform.js';
 import { Event } from '../../../../../base/common/event.js';
@@ -137,6 +139,20 @@ export const noopService: any = new Proxy(function () { }, {
 // ---------- real terminal (stand-in for the integrated-terminal-backed ITerminalToolService) ----------
 
 export type RecordedCommand = { command: string; cwd: string | undefined; exitCode: number | null; timedOut: boolean; ms: number; outputTail: string };
+
+/**
+ * Deletes a temp folder that may hold a git repository: git marks object files read-only on Windows, and Electron's
+ * fs.rmSync then fails with EPERM, so they are made writable first.
+ */
+export function removeRepo(dir: string): void {
+	const makeWritable = (p: string) => {
+		for (const entry of fs.readdirSync(p, { withFileTypes: true })) {
+			const full = path.join(p, entry.name);
+			if (entry.isDirectory()) { makeWritable(full); } else { fs.chmodSync(full, 0o666); }
+		}
+	};
+	if (fs.existsSync(dir)) { makeWritable(dir); fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+}
 
 /**
  * Runs run_command's commands as real processes. It receives exactly the string Kodia's run_command builds

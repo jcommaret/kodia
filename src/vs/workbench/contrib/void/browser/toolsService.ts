@@ -251,6 +251,19 @@ const validateGitPaths = (pathsUnknown: unknown): string[] => {
 	return paths
 }
 
+/**
+ * An optional list as models send it: a real array (native tool calls), a JSON array in a string, or one plain string
+ * (XML tool calls carry every value as text). Undefined when absent or empty.
+ */
+const validateOptionalStrList = (value: unknown): string[] | undefined => {
+	let v = value
+	if (typeof v === 'string' && v.trim().startsWith('[')) {
+		try { v = JSON.parse(v) } catch { /* a single string */ }
+	}
+	const list = (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).map(x => String(x).trim()).filter(x => x.length > 0)
+	return list.length ? list : undefined
+}
+
 // revert / cherry-pick / rebase / continue: a stop on conflicts is a result the model must act on, not a success
 const stringifyGitStep = (what: string, r: GitStepResult): string => {
 	const lines = [r.result]
@@ -1197,15 +1210,24 @@ export class ToolsService implements IToolsService {
 				return {}
 			},
 			test_run: (params: RawToolParamsObj) => {
-				const { test_files: testFilesUnknown, test_names: testNamesUnknown } = params
-				const testFiles = Array.isArray(testFilesUnknown) ? testFilesUnknown.map(String) : undefined
-				const testNames = Array.isArray(testNamesUnknown) ? testNamesUnknown.map(String) : undefined
-				return { test_files: testFiles, test_names: testNames }
+				// strings too: before, a single path or name sent as text was dropped and the whole suite ran instead
+				return { test_files: validateOptionalStrList(params.test_files), test_names: validateOptionalStrList(params.test_names) }
 			},
 			test_run_targeted: (params: RawToolParamsObj) => {
-				const { changed_files: changedFilesUnknown } = params
-				const changedFiles = Array.isArray(changedFilesUnknown) ? changedFilesUnknown.map(String) : []
+				const changedFiles = validateOptionalStrList(params.changed_files)
+				if (!changedFiles) throw new Error(`Invalid LLM output: "changed_files" must list at least one file path. Got: ${JSON.stringify(params.changed_files)}`)
 				return { changed_files: changedFiles }
+			},
+			test_coverage: (params: RawToolParamsObj) => {
+				return { test_files: validateOptionalStrList(params.test_files), test_names: validateOptionalStrList(params.test_names), files: validateOptionalStrList(params.files) }
+			},
+			test_history: (params: RawToolParamsObj) => {
+				return { test_name: validateOptionalStr('test_name', params.test_name) ?? undefined, only_problems: validateBoolean(params.only_problems, { default: false }), limit: validateNumber(params.limit, { default: 30 }) ?? 30 }
+			},
+			test_check_flaky: (params: RawToolParamsObj) => {
+				const attempts = validateNumber(params.attempts, { default: 3 }) ?? 3
+				if (!Number.isInteger(attempts) || attempts < 2 || attempts > 10) throw new Error(`Invalid LLM output: "attempts" must be a whole number from 2 to 10. Got: ${JSON.stringify(params.attempts)}`)
+				return { test_files: validateOptionalStrList(params.test_files), test_names: validateOptionalStrList(params.test_names), attempts }
 			},
 			test_rerun_failed: () => {
 				return {}
@@ -2447,6 +2469,15 @@ export class ToolsService implements IToolsService {
 			test_rerun_failed: async () => {
 				return { result: await this.testToolService.rerunFailedTests({}) }
 			},
+			test_coverage: async ({ test_files, test_names, files }) => {
+				return { result: await this.testToolService.runCoverage({ test_files, test_names, files }) }
+			},
+			test_history: async ({ test_name, only_problems, limit }) => {
+				return { result: await this.testToolService.getHistory({ test_name, only_problems, limit }) }
+			},
+			test_check_flaky: async ({ test_files, test_names, attempts }) => {
+				return { result: await this.testToolService.checkFlaky({ test_files, test_names, attempts }) }
+			},
 			test_cancel: async ({ run_id: runId }) => {
 				return { result: await this.testToolService.cancelTestRun({ run_id: runId }) }
 			},
@@ -2752,6 +2783,19 @@ export class ToolsService implements IToolsService {
 				lines.push(`Test run ${completed ? 'completed' : 'DID NOT COMPLETE'}${results.source === 'command' ? ` (${results.framework}, exit code ${results.exitCode ?? 'none'})` : results.source === 'vscode' ? ' (VS Code test controller)' : ''}`)
 				lines.push(`Results: ${passed} passed, ${failed} failed${errored ? ` (${errored} errored)` : ''}, ${skipped} skipped (${total} total)`)
 				if (results.note) lines.push(`Note: ${results.note}`)
+			}
+			if (results.history) {
+				const h = results.history
+				if (h.newlyFailing.length) lines.push(`REGRESSION — passed in the previous run, fail now: ${h.newlyFailing.join('; ')}`)
+				if (h.fixed.length) lines.push(`Fixed since the previous run: ${h.fixed.join('; ')}`)
+				if (h.knownFlaky.length) lines.push(`Known flaky (has passed and failed on the same code before): ${h.knownFlaky.join('; ')}`)
+			}
+			if (results.coverage) {
+				const c = results.coverage
+				lines.push(`Coverage: lines ${c.linePercent ?? 'n/a'}% (${c.linesHit}/${c.linesFound})${c.branchesFound ? `, branches ${c.branchPercent}% (${c.branchesHit}/${c.branchesFound})` : ''} over ${c.files.length} file(s)`)
+				for (const f of c.files.slice(0, 25)) lines.push(`  ${f.file}: ${f.linePercent ?? 'n/a'}% (${f.linesHit}/${f.linesFound})${f.uncoveredRanges ? ` — uncovered lines ${f.uncoveredRanges}` : ''}`)
+				if (c.files.length > 25) lines.push(`  ... and ${c.files.length - 25} more files`)
+				if (c.notInReport.length) lines.push(`Not loaded by any test (0% coverage): ${c.notInReport.join(', ')}`)
 			}
 			if (results.command) lines.push(`Command: ${results.command}`)
 			if (duration !== undefined) lines.push(`Duration: ${duration}ms`)
@@ -3349,6 +3393,35 @@ export class ToolsService implements IToolsService {
 			},
 			test_cancel: (_params, result) => {
 				return result.cancelled ? 'Test run cancelled.' : 'No test run to cancel.'
+			},
+			test_coverage: (_params, result) => _formatTestResults(result.results),
+			test_history: (_params, result) => {
+				if (result.tracked === 0) return 'No test runs have been recorded for this project yet. Run tests first (test_run).'
+				const lines = [`${result.matched} of ${result.tracked} tracked test(s) match; showing ${result.tests.length}.`]
+				if (!result.fingerprinted) lines.push('Note: runs here were not tied to a code version (no git), so flakiness cannot be told apart from code changes; use test_check_flaky.')
+				for (const t of result.tests) {
+					const tags = [t.flaky ? `FLAKY: ${t.flakyEvidence}` : '', t.failingStreak ? `failing ${t.failingStreak} run(s) in a row` : '', t.flips ? `${t.flips} outcome change(s)` : ''].filter(Boolean).join('; ')
+					lines.push(`- ${t.label}: last ${t.lastState}; ${t.passed} passed / ${t.failed} failed / ${t.skipped} skipped in ${t.runs} run(s)${t.averageDurationMs !== undefined ? `; avg ${t.averageDurationMs}ms` : ''}${tags ? ` — ${tags}` : ''}`)
+					if (t.lastFailureMessage && (t.flaky || t.failingStreak)) lines.push(`    last failure: ${t.lastFailureMessage.split('\n')[0]}`)
+				}
+				if (result.recentRuns.length) {
+					lines.push('Recent runs (newest first):')
+					for (const r of result.recentRuns) lines.push(`  ${new Date(r.at).toISOString()} ${r.framework ?? r.source ?? ''}: ${r.passed} passed, ${r.failed} failed, ${r.skipped} skipped${r.completed ? '' : ' (incomplete)'}`)
+				}
+				return lines.join('\n')
+			},
+			test_check_flaky: (_params, result) => {
+				const v = result.verdict
+				const lines = [`Ran the tests ${result.runs.length} time(s) (${result.runs.map(r => `${r.passed}/${r.total} passed`).join(', ')}).`]
+				if (v.flaky.length) {
+					lines.push(`FLAKY — passed in some attempts and failed in others:`)
+					for (const f of v.flaky) lines.push(`  ${f.label}: passed ${f.passed}×, failed ${f.failed}×${f.messages.length ? ` — ${f.messages.join(' | ')}` : ''}`)
+				} else lines.push('No flaky tests: every test had the same outcome in every attempt.')
+				if (v.consistentlyFailing.length) lines.push(`Failed in every attempt (a real failure, not flakiness): ${v.consistentlyFailing.join('; ')}`)
+				lines.push(`Passed in every attempt: ${v.consistentlyPassing}`)
+				if (v.incomplete.length) lines.push(`Not seen in every attempt: ${v.incomplete.join('; ')}`)
+				if (result.note) lines.push(`Note: ${result.note}`)
+				return lines.join('\n')
 			},
 
 			// Todo list (task tracking within a turn - OpenCode parity)

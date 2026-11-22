@@ -31,11 +31,17 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { StringSHA1 } from '../../../../base/common/hash.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import {
 	TestDiscoverResult, TestListResult, TestRunResult, TestRunParams, TestRunTargetedResult, TestRunTargetedParams,
 	TestRerunFailedResult, TestRerunFailedParams, TestCancelResult, TestCancelParams, TestFramework, TestFileInfo,
-	TestCaseResult, TestRunResultData,
+	TestCaseResult, TestRunResultData, TestCoverageParams, TestCoverageResult, TestHistoryParams, TestHistoryResult,
+	TestCheckFlakyParams, TestCheckFlakyResult,
 } from '../common/testServiceTypes.js';
+import { IGitToolService } from './gitToolService.js';
+import { classifyRepeatedRuns, parseTestHistory, queryTestHistory, recordTestRun, TestHistory } from '../common/testHistory.js';
+import { buildCoverageCommand, FileCoverage, mergeCoverage, missingCoveragePlugin, parseGoCoverProfile, parseLcov, summarizeCoverage } from '../common/testCoverage.js';
 import { ITestService, IMainThreadTestController } from '../../testing/common/testService.js';
 import { TestResultState, TestRunProfileBitset, IncrementalTestCollectionItem } from '../../testing/common/testTypes.js';
 import { ITestResult } from '../../testing/common/testResult.js';
@@ -58,6 +64,9 @@ export interface ITestToolService {
 	runTargetedTests(params: TestRunTargetedParams): Promise<TestRunTargetedResult>;
 	rerunFailedTests(params: TestRerunFailedParams): Promise<TestRerunFailedResult>;
 	cancelTestRun(params: TestCancelParams): Promise<TestCancelResult>;
+	runCoverage(params: TestCoverageParams): Promise<TestCoverageResult>;
+	getHistory(params: TestHistoryParams): Promise<TestHistoryResult>;
+	checkFlaky(params: TestCheckFlakyParams): Promise<TestCheckFlakyResult>;
 	getTestRunStatus(runId: string): TestRunResultData | null;
 	isTestRunRunning(): boolean;
 	readonly onTestRunStart: Event<{ runId: string }>;
@@ -73,6 +82,12 @@ const SOURCE_EXT: Record<CommandFrameworkId, RegExp> = {
 };
 
 type CommandRunScope = { framework: CommandFrameworkId; files: string[]; names: string[] };
+
+/** Workspace-scoped (per project), kept across restarts. */
+export const TEST_HISTORY_STORAGE_KEY = 'kodia.testHistory';
+const MAX_FLAKY_ATTEMPTS = 10;
+/** untracked files hashed into the code fingerprint by size and modification time (beyond this: names only) */
+const MAX_FINGERPRINT_UNTRACKED = 300;
 
 export class TestToolService extends Disposable implements ITestToolService {
 	readonly _serviceBrand: undefined;
@@ -94,6 +109,8 @@ export class TestToolService extends Disposable implements ITestToolService {
 		@ITerminalToolService private readonly terminalToolService: ITerminalToolService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IFileService private readonly fileService: IFileService,
+		@IStorageService private readonly storageService: IStorageService,
+		@IGitToolService private readonly gitToolService: IGitToolService,
 	) {
 		super();
 		this._register(testResultService.onResultsChanged(ev => {
@@ -208,10 +225,11 @@ export class TestToolService extends Disposable implements ITestToolService {
 
 	// ---------------------------------------------------------------- command path
 
-	private async runCommand(opts: { files?: string[]; names?: string[]; scopes?: CommandRunScope[] }): Promise<TestRunResultData> {
+	private async runCommand(opts: { files?: string[]; names?: string[]; scopes?: CommandRunScope[]; coverage?: { focus: string[] } }): Promise<TestRunResultData> {
 		const root = this.workspaceRoot();
 		if (!root) { return this.empty('command', 'No workspace folder is open.'); }
 		const runId = generateUuid();
+		const fingerprint = this.codeFingerprint(); // the code as it is when the run starts
 		let scopes = opts.scopes;
 		if (!scopes) {
 			const frameworks = await detectTestFrameworks(await this.probe(root));
@@ -235,11 +253,19 @@ export class TestToolService extends Disposable implements ITestToolService {
 		let cancelled = false;
 		this.runningCommandRuns.set(runId, () => { cancelled = true; });
 		const started = Date.now();
+		const coverageLists: FileCoverage[][] = [];
 		try {
 			for (const scope of scopes) {
 				if (cancelled) { break; }
 				const reportFile = `.kodia/test-results/${runId.slice(0, 8)}-${scope.framework}.${scope.framework === 'jest' ? 'json' : 'xml'}`;
-				const cmd = buildTestCommand(scope.framework, { files: scope.files, names: scope.names, reportFile });
+				let cmd: ReturnType<typeof buildTestCommand> & { coverageFile?: string; coverageFormat?: 'lcov' | 'go-profile' } = buildTestCommand(scope.framework, { files: scope.files, names: scope.names, reportFile });
+				const coverageDir = `.kodia/coverage/${runId.slice(0, 8)}-${scope.framework}`;
+				if (opts.coverage) {
+					const hasC8 = scope.framework === 'mocha' && (await this.fileService.exists(URI.joinPath(root, 'node_modules', 'c8', 'package.json')).catch(() => false));
+					const cov = buildCoverageCommand(scope.framework, { files: scope.files, names: scope.names, reportFile, coverageDir, hasC8 });
+					if ('unavailable' in cov) { notes.push(`${scope.framework}: no coverage — ${cov.unavailable} Its tests ran without coverage.`); }
+					else { cmd = cov; await this.fileService.createFolder(URI.joinPath(root, coverageDir)).catch(() => { }); }
+				}
 				commands.push(cmd.command);
 				const reportUri = cmd.reportFile ? URI.joinPath(root, cmd.reportFile) : undefined;
 				if (reportUri) { await this.fileService.createFolder(URI.joinPath(reportUri, '..')).catch(() => { }); await this.fileService.del(reportUri).catch(() => { }); }
@@ -269,6 +295,19 @@ export class TestToolService extends Disposable implements ITestToolService {
 				} catch (e) { notes.push(`${scope.framework}: could not read the runner's report (${e instanceof Error ? e.message : String(e)}).`); }
 				finally { if (reportUri) { await this.fileService.del(reportUri).catch(() => { }); } }
 
+				if (opts.coverage && cmd.coverageFile) {
+					const covUri = URI.joinPath(root, cmd.coverageFile);
+					const text = await this.readText(covUri);
+					if (text !== undefined) {
+						const modulePath = cmd.coverageFormat === 'go-profile' ? /^module\s+(\S+)/m.exec(await this.readText(URI.joinPath(root, 'go.mod')) ?? '')?.[1] : undefined;
+						coverageLists.push(cmd.coverageFormat === 'go-profile' ? parseGoCoverProfile(text, root.fsPath, modulePath) : parseLcov(text, root.fsPath));
+					} else {
+						const missing = missingCoveragePlugin(scope.framework, output);
+						notes.push(`${scope.framework}: no coverage report was written${missing ? ` — ${missing}` : ' (see the output).'}`);
+					}
+					await this.fileService.del(URI.joinPath(root, coverageDir), { recursive: true }).catch(() => { });
+				}
+
 				if (parsed.length === 0 && code !== 0 && code !== null) {
 					// the runner itself failed (missing tool, syntax error, bad config): an error, not "0 tests passed"
 					parsed = [{ id: `${scope.framework}::(runner)`, label: `${scope.framework} could not run the tests`, state: 'errored', message: output.trim().slice(-3000) || `exit code ${code}` }];
@@ -282,17 +321,101 @@ export class TestToolService extends Disposable implements ITestToolService {
 		if (cancelled) { completed = false; notes.push('The run was cancelled.'); }
 
 		const data = summarize(runId, results, { source: 'command', completed, duration: Date.now() - started, framework: scopes.map(s => s.framework).join(', '), command: commands.join(' && '), exitCode, outputTail: tails.join('\n').slice(-3000), note: notes.join(' ') || undefined });
+		if (opts.coverage && coverageLists.length) {
+			data.coverage = summarizeCoverage(mergeCoverage(coverageLists), opts.coverage.focus.map(f => this.relative(root, f)));
+		}
 		this.lastCommandScopes = scopes.map(s => {
 			const failed = results.filter(r => (r.state === 'failed' || r.state === 'errored') && !r.id.endsWith('::(runner)'));
 			return { framework: s.framework, files: [...new Set(failed.map(r => r.uri).filter((u): u is string => !!u).map(u => this.relative(root, u)).filter(f => SOURCE_EXT[s.framework].test(f)))], names: [...new Set(failed.map(r => r.label.split(' › ').pop()!))] };
 		}).filter(s => s.names.length > 0);
-		return this.finish(data);
+		return this.finish(data, fingerprint);
 	}
 
-	private finish(data: TestRunResultData): TestRunResultData {
+	/** Every reported run goes into the test history, compared with what came before. */
+	private async finish(data: TestRunResultData, fingerprint?: Promise<string | undefined>): Promise<TestRunResultData> {
+		if (data.testResults.length > 0) {
+			const history = this.loadHistory();
+			data.history = recordTestRun(history, data, Date.now(), await fingerprint);
+			this.saveHistory(history);
+		}
 		this.lastResults = data;
 		this._onTestRunComplete.fire({ runId: data.runId, results: data });
 		return data;
+	}
+
+	// ---------------------------------------------------------------- coverage, history, flaky tests
+
+	async runCoverage(params: TestCoverageParams): Promise<TestCoverageResult> {
+		// coverage always comes from the framework's own command (a test extension's coverage is not read)
+		const results = await this.runCommand({ files: params.test_files, names: params.test_names, coverage: { focus: params.files ?? [] } });
+		if (!results.coverage && results.total > 0) { results.note = `${results.note ? results.note + ' ' : ''}No coverage was collected.`; }
+		return { results };
+	}
+
+	async getHistory(params: TestHistoryParams): Promise<TestHistoryResult> {
+		const history = this.loadHistory();
+		const q = queryTestHistory(history, { nameFilter: params.test_name, onlyProblems: params.only_problems, limit: params.limit });
+		return { ...q, recentRuns: history.runs.slice(-10).reverse(), fingerprinted: history.runs.some(r => !!r.fingerprint) };
+	}
+
+	async checkFlaky(params: TestCheckFlakyParams): Promise<TestCheckFlakyResult> {
+		const attempts = Math.max(2, Math.min(params.attempts ?? 3, MAX_FLAKY_ATTEMPTS));
+		const before = await this.codeFingerprint();
+		const runs: TestRunResultData[] = [];
+		const notes: string[] = [];
+		if (!params.test_files?.length && !params.test_names?.length) { notes.push(`No tests were named, so the whole suite ran ${attempts} times.`); }
+		for (let i = 0; i < attempts; i++) {
+			const { results } = await this.runTests({ test_files: params.test_files, test_names: params.test_names });
+			runs.push(results);
+			if (results.total === 0) { notes.push(results.note ?? 'The run reported no tests.'); break; }
+			if (!results.completed) { notes.push(`Attempt ${i + 1} did not complete${results.note ? ` (${results.note})` : ''}; stopped.`); break; }
+		}
+		const after = await this.codeFingerprint();
+		if (before && after && before !== after) { notes.push('The code changed while the tests were being repeated, so a difference between attempts may come from that change rather than flakiness.'); }
+		if (!before) { notes.push('The project is not a git repository (or git could not read it), so the code could not be fingerprinted; the attempts ran back to back.'); }
+		return {
+			verdict: classifyRepeatedRuns(runs),
+			runs: runs.map(r => ({ runId: r.runId, passed: r.passed, failed: r.failed, total: r.total, completed: r.completed })),
+			note: notes.join(' ') || undefined,
+		};
+	}
+
+	private history: TestHistory | undefined;
+	private loadHistory(): TestHistory {
+		return this.history ??= parseTestHistory(this.storageService.get(TEST_HISTORY_STORAGE_KEY, StorageScope.WORKSPACE));
+	}
+	private saveHistory(history: TestHistory): void {
+		this.storageService.store(TEST_HISTORY_STORAGE_KEY, JSON.stringify(history), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+	}
+
+	/**
+	 * The code a run tests: git HEAD, the uncommitted diff, and the untracked files (by size and modification time).
+	 * Undefined when the workspace is not a git repository; then history never calls a test flaky.
+	 */
+	private async codeFingerprint(): Promise<string | undefined> {
+		try {
+			const git = this.gitToolService, root = await git.workspaceRepositoryRoot();
+			const head = await git.ops.git(root, ['rev-parse', '--verify', '-q', 'HEAD']).catch(() => '(no commits)');
+			const diff = await git.ops.git(root, ['diff', 'HEAD', '--no-ext-diff', '--binary']).catch(() => git.ops.git(root, ['diff', '--cached', '--no-ext-diff', '--binary']).catch(() => ''));
+			const status = await git.ops.git(root, ['status', '--porcelain=v1', '-uall']);
+			const untracked = status.split(/\r?\n/).filter(l => l.startsWith('?? ')).map(l => l.slice(3).replace(/^"|"$/g, ''))
+				// Kodia's own files (reports, coverage) and caches change on every run without changing the code
+				.filter(p => !p.split('/').some(seg => seg === '.kodia' || SKIP_DIRS.has(seg)))
+				.sort();
+			const sha = new StringSHA1();
+			sha.update(head.trim()); sha.update('\0'); sha.update(diff); sha.update('\0');
+			for (const [i, rel] of untracked.entries()) {
+				sha.update(rel);
+				if (i < MAX_FINGERPRINT_UNTRACKED) {
+					const s = await this.fileService.stat(URI.joinPath(URI.file(root), rel)).catch(() => undefined);
+					sha.update(`:${s?.size ?? '-'}:${s?.mtime ?? '-'}`);
+				}
+				sha.update('\n');
+			}
+			return sha.digest();
+		} catch {
+			return undefined;
+		}
 	}
 
 	// ---------------------------------------------------------------- VS Code Testing API path
@@ -342,9 +465,10 @@ export class TestToolService extends Disposable implements ITestToolService {
 
 	private async runVsCode(tests: IncrementalTestCollectionItem[]): Promise<TestRunResultData> {
 		const started = Date.now();
+		const fingerprint = this.codeFingerprint();
 		const result = await this.testService.runTests({ group: TestRunProfileBitset.Run, tests, preserveFocus: true }, CancellationToken.None);
 		this._onTestRunStart.fire({ runId: result.id });
-		if (result.completedAt !== undefined) { return this.finish(this.vscodeResultToData(result, started)); }
+		if (result.completedAt !== undefined) { return this.finish(this.vscodeResultToData(result, started), fingerprint); }
 		const waiter = new DeferredPromise<TestRunResultData>();
 		this.runningVsCodeRuns.set(result.id, { waiter, started });
 		const timer = setTimeout(() => {
@@ -358,7 +482,7 @@ export class TestToolService extends Disposable implements ITestToolService {
 		}, VSCODE_RUN_TIMEOUT_MS);
 		const data = await waiter.p;
 		clearTimeout(timer);
-		return this.finish(data);
+		return this.finish(data, fingerprint);
 	}
 
 	private vscodeResultToData(result: ITestResult, startTime: number | undefined): TestRunResultData {

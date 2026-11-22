@@ -3,6 +3,9 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
+import type { CoverageSummary } from './testCoverage.js';
+import type { RepeatedRunVerdict, TestHistoryAnalysis, TestHistoryRun, TestRunComparison } from './testHistory.js';
+
 /**
  * Information about a discovered test framework/runner.
  */
@@ -150,6 +153,57 @@ export type TestRunResultData = {
 	outputTail?: string;
 	/** why nothing (or not everything) was run or reported, in plain words — never omitted when total is 0 */
 	note?: string;
+	/** test_coverage runs: what the runners' coverage reports say */
+	coverage?: CoverageSummary;
+	/** compared with each test's previous recorded outcome (test history) */
+	history?: TestRunComparison;
+};
+
+/**
+ * Parameters for test_coverage tool.
+ */
+export type TestCoverageParams = {
+	test_files?: string[];
+	test_names?: string[];
+	/** source files to report coverage for (e.g. the files just changed); default: every file in the report */
+	files?: string[];
+};
+
+export type TestCoverageResult = {
+	results: TestRunResultData;
+};
+
+/**
+ * Parameters for test_history tool.
+ */
+export type TestHistoryParams = {
+	test_name?: string;
+	only_problems?: boolean;
+	limit?: number;
+};
+
+export type TestHistoryResult = {
+	tests: TestHistoryAnalysis[];
+	matched: number;
+	tracked: number;
+	recentRuns: TestHistoryRun[];
+	/** whether outcomes carry code fingerprints (git), which flaky detection needs */
+	fingerprinted: boolean;
+};
+
+/**
+ * Parameters for test_check_flaky tool.
+ */
+export type TestCheckFlakyParams = {
+	test_files?: string[];
+	test_names?: string[];
+	attempts?: number;
+};
+
+export type TestCheckFlakyResult = {
+	verdict: RepeatedRunVerdict;
+	runs: { runId: string; passed: number; failed: number; total: number; completed: boolean }[];
+	note?: string;
 };
 
 /**
@@ -162,6 +216,9 @@ export type TestToolCallParams = {
 	'test_run_targeted': TestRunTargetedParams;
 	'test_rerun_failed': TestRerunFailedParams;
 	'test_cancel': TestCancelParams;
+	'test_coverage': TestCoverageParams;
+	'test_history': TestHistoryParams;
+	'test_check_flaky': TestCheckFlakyParams;
 };
 
 /**
@@ -174,4 +231,7 @@ export type TestToolResultType = {
 	'test_run_targeted': TestRunTargetedResult;
 	'test_rerun_failed': TestRerunFailedResult;
 	'test_cancel': TestCancelResult;
+	'test_coverage': TestCoverageResult;
+	'test_history': TestHistoryResult;
+	'test_check_flaky': TestCheckFlakyResult;
 };

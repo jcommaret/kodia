@@ -26,20 +26,9 @@ import { TestContextService } from '../../../../test/common/workbenchTestService
 import { GitToolService } from '../../browser/gitToolService.js';
 import { IKodiaGitMainService, KODIA_GIT_CHANNEL } from '../../common/gitService.js';
 import { KodiaGitMainService } from '../../electron-main/kodiaGitMainService.js';
-import { createHarness, runTurn, ScriptedLLMService, ScriptStep, toolMessages } from './agentHarness.js';
+import { createHarness, removeRepo, runTurn, ScriptedLLMService, ScriptStep, toolMessages } from './agentHarness.js';
 
 const gitRaw = (cwd: string, ...args: string[]) => cp.execFileSync('git', args, { cwd, encoding: 'utf8' });
-
-/** git marks object files read-only on Windows; Electron's fs.rmSync then fails with EPERM. Make them writable first. */
-function removeRepo(dir: string) {
-	const makeWritable = (p: string) => {
-		for (const entry of fs.readdirSync(p, { withFileTypes: true })) {
-			const full = path.join(p, entry.name);
-			if (entry.isDirectory()) { makeWritable(full); } else { fs.chmodSync(full, 0o666); }
-		}
-	};
-	if (fs.existsSync(dir)) { makeWritable(dir); fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
-}
 
 suite('Kodia - git for the agent, end to end (roadmap 2)', function () {
 	this.timeout(90_000);

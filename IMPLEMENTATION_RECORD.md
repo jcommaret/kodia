@@ -826,7 +826,7 @@ The model writes the commit message and the PR text; Kodia supplies exact facts 
 **Not verified:**
 - Jest and Mocha debugging (not installed here; with an empty `skipFiles`, their own internal try/catch could pause before the failure).
 - Vitest.
-- PowerShell 7 (not installed; its Windows argument-passing mode documents cmd.exe as a legacy-quoting exception).
+- ~~PowerShell 7~~: verified afterwards in PowerShell 7.7.0 (`$PSNativeCommandArgumentPassing = Windows`). All 9 cases are correct with the new wrapping; the old wrapping broke the same cases as in 5.1.
 - A live model.
 
 **Next concrete task:** VS Code test-controller coverage (`test_coverage` through a coverage-capable test extension), then the embedding index.
@@ -920,7 +920,7 @@ The model writes the commit message and the PR text; Kodia supplies exact facts 
 | 4 | Kodia debug tools on VS Code's DebugSession + a real DAP adapter (debugpy): breakpoints (incl. conditional), launch inline, stop reporting, stack/scopes/variables/evaluate, step, continue-to-end, console, stop, agent-loop repair | **Integration-tested (real adapter) + agent-loop e2e** | debugTools.test.ts (5, incl. debugpy exception filters); DebugService orchestration shimmed; Xdebug not verified |
 | 4 | JavaScript debugging with Microsoft's js-debug (shipped as built-in `ms-vscode.js-debug` 1.140.1): child-session programs, launch, breakpoints, step, evaluate, logpoints, exception breakpoints (`debug_set_exception_breakpoints`), attach to `--inspect-brk`, agent loop | **Integration-tested (real js-debug DAP server, same version) + agent-loop e2e** | jsDebugTools.test.ts (6); record (v). Extension-hosted js-debug in a running Kodia window, chrome debugging and watch expressions not verified |
 | 3+4 | Debug a failing test (`test_debug`): node --test (js-debug) and pytest (debugpy) stop at the failing assertion, with the user's frame named | **Integration-tested (real runners + debuggers) + agent-loop e2e** | testDebug.test.ts (3) + common (3); record (w). Jest/Mocha planned but not run here; Vitest, Go, Rust, .NET, PHP refused with the reason |
-| 1 | `run_command` on Windows: quoted commands through PowerShell | **Fixed + tested in real PowerShell 5.1** | terminalWrap.test.ts; record (w). PowerShell 7 not verified |
+| 1 | `run_command` on Windows: quoted commands through PowerShell | **Fixed + tested in real PowerShell 5.1 and 7.7** | terminalWrap.test.ts (5.1); PowerShell 7.7 measured with the same 9 cases; record (w) |
 
 **Next concrete task**: weak-model resilience live run (acceptance scenario 9, e.g. `NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b`); then roadmap 4 for real — drive Kodia's debug tools through a DAP adapter (js-debug) rather than raw CDP.
 

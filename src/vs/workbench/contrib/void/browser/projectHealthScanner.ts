@@ -26,7 +26,7 @@ const SKIP_DIRS: ReadonlySet<string> = new Set([
 ]);
 
 const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
-	'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.go', '.rs', '.java', '.cs', '.php',
+	'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.astro', '.py', '.go', '.rs', '.java', '.cs', '.php',
 	'.rb', '.c', '.cpp', '.h', '.hpp', '.sql', '.json', '.yaml', '.yml', '.toml', '.ini',
 	'.env', '.html', '.css', '.scss', '.md', '.sh', '.ps1', '.dockerfile',
 ]);

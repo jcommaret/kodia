@@ -2925,14 +2925,67 @@ const GenericBuiltinToolCard = ({ toolMessage }: { toolMessage: Exclude<ToolMess
 		)
 	} else if (toolMessage.type === 'success') {
 		const outputText = (toolMessage.content ?? '').trim()
-		if (outputText) {
+		const rawResult = toolMessage.result as any
+		let designPreview: React.ReactNode = null
+
+		if (category === 'design' && rawResult && typeof rawResult === 'object') {
+			// Live color swatch bar for palette / tokens
+			const palette = toolMessage.name === 'generate_color_palette' ? rawResult : toolMessage.name === 'generate_design_tokens' ? rawResult.palette : null
+			if (palette?.light && palette?.dark) {
+				const swatches = [
+					{ k: 'Bg', c: palette.light.background },
+					{ k: 'Surface', c: palette.light.surface },
+					{ k: 'Primary', c: palette.light.primary },
+					{ k: 'Accent', c: palette.light.accent },
+					{ k: 'Dark Bg', c: palette.dark.background },
+					{ k: 'Dark Primary', c: palette.dark.primary },
+				]
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-1.5 mb-2'>
+						{swatches.map(s => (
+							<span key={s.k} className='inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-void-bg-2 border border-void-border-2 text-[10px]'>
+								<span className='w-3 h-3 rounded-sm border border-white/15' style={{ backgroundColor: s.c }} />
+								<span>{s.k}</span>
+								<span className='font-mono text-void-fg-3'>{s.c}</span>
+							</span>
+						))}
+					</div>
+				)
+			} else if ((toolMessage.name === 'capture_application_screenshots' || toolMessage.name === 'inspect_responsive_layout') && Array.isArray(rawResult.captures)) {
+				designPreview = (
+					<div className='grid grid-cols-3 gap-1.5 mb-2'>
+						{rawResult.captures.slice(0, 3).map((c: any) => (
+							<div key={c.label} className='p-1 rounded bg-void-bg-2 border border-void-border-2'>
+								<div className='text-[9px] text-void-fg-3 truncate mb-1'>{c.label} ({c.width}×{c.height})</div>
+								{c.dataUrl ? <img src={c.dataUrl} alt={`${c.label} preview`} className='w-full h-16 object-cover object-top rounded' /> : null}
+							</div>
+						))}
+					</div>
+				)
+			} else if (toolMessage.name === 'critique_interface_design' && typeof rawResult.overallScore === 'number') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className='font-bold'>{rawResult.grade}</span>
+						<span>{rawResult.overallScore}/100</span>
+						<span className={rawResult.readyToShip ? 'text-emerald-400' : 'text-amber-400'}>
+							{rawResult.readyToShip ? 'Ready to Ship' : 'Refinement Needed'}
+						</span>
+					</div>
+				)
+			}
+		}
+
+		if (outputText || designPreview) {
 			componentParams.children = (
 				<ToolChildrenWrapper>
-					<CodeChildren className='bg-void-bg-3'>
-						<pre className='font-mono whitespace-pre-wrap text-[11px]'>
-							{outputText.length > 6000 ? `${outputText.slice(0, 6000)}\n...(truncated in card)` : outputText}
-						</pre>
-					</CodeChildren>
+					{designPreview}
+					{outputText && (
+						<CodeChildren className='bg-void-bg-3'>
+							<pre className='font-mono whitespace-pre-wrap text-[11px]'>
+								{outputText.length > 6000 ? `${outputText.slice(0, 6000)}\n...(truncated in card)` : outputText}
+							</pre>
+						</CodeChildren>
+					)}
 				</ToolChildrenWrapper>
 			)
 		}

@@ -74,8 +74,8 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 	},
 	frontend: {
 		canChangeFiles: true,
-		description: 'specialist in UI components, styling, state management, accessibility, and responsive layouts',
-		guidance: 'Implement clean, accessible, responsive frontend code matching the repository design system and tokens. Verify builds and UI behavior.',
+		description: 'specialist in autonomous UI/UX design systems, visual craft, components, imagery, accessibility, and responsive layouts',
+		guidance: 'Use Kodia Design Intelligence tools (inspect_existing_design_system, analyze_product_design_requirements, generate_design_tokens, recommend_typography, discover_icon_library, discover_visual_assets/download_visual_assets) before building. Deliver art-directed, token-driven, mobile-to-desktop responsive UI with real connected functionality, vector icons (never emojis), verified imagery, and browser visual QA verification.',
 	},
 	backend: {
 		canChangeFiles: true,
@@ -114,8 +114,8 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 	},
 	browser: {
 		canChangeFiles: true,
-		description: 'specialist in Playwright browser inspection, DOM/layout verification, console/network diagnostics, and UI repair',
-		guidance: 'Launch or attach to the local app, inspect real DOM/layout/console/network signals, fix defects, reload, and verify cleanly.',
+		description: 'specialist in Playwright browser visual QA, responsive viewport testing, WCAG accessibility, performance, and UI defect repair',
+		guidance: 'Launch or attach to the local app, run capture_application_screenshots, inspect_responsive_layout, inspect_visual_quality, audit_accessibility, audit_frontend_performance, and critique_interface_design, repair defects via repair_visual_defects, reload, and verify with compare_visual_revisions.',
 	},
 	docs: {
 		canChangeFiles: true,
@@ -134,8 +134,8 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 	},
 	ui_ux: {
 		canChangeFiles: true,
-		description: 'specialist in visual hierarchy, spacing, accessibility contrast, empty/loading/error states, and interaction polish',
-		guidance: 'Improve visual clarity, keyboard accessibility, contrast, and responsive layout without breaking existing user workflows.',
+		description: 'specialist in creative direction, visual hierarchy, color & contrast systems, typography, responsive craft, and interface critique',
+		guidance: 'Operate like a world-class product designer and creative director. Use generate_design_brief, generate_visual_direction, generate_color_palette, audit_design_consistency, critique_interface_design, and repair_visual_defects to elevate visual craft, accessibility, imagery, and interaction polish without breaking real user workflows.',
 	},
 	refactor: {
 		canChangeFiles: true,

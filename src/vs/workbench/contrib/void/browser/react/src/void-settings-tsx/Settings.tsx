@@ -28,6 +28,7 @@ import { GeneralSection } from './GeneralSettings.js';
 import { SettingsHomeSection, SettingsNavigateTarget } from './SettingsHomeSection.js';
 import { AppearanceSection, EditorWorkbenchSection } from './AppearanceEditorSettings.js';
 import { OperationsDiagnosticsSection } from './OperationsDiagnosticsSettings.js';
+import { DesignIntelligenceSection } from './DesignIntelligenceSettings.js';
 import { SettingsSearchContext } from './SettingsControls.js';
 
 type SectionId = SettingsNavigateTarget;
@@ -119,6 +120,18 @@ const SECTIONS: readonly NavSectionDef[] = [
 		},
 	},
 	{
+		id: 'design',
+		group: 'Intelligence & Ops',
+		label: 'Design Intelligence & Brand',
+		icon: <Palette size={14} />,
+		keywordsOfGroup: {
+			'Autonomous design defaults': ['design', 'ui', 'ux', 'visual direction', 'creative', 'tokens', 'palette', 'typography', 'animation', 'motion'],
+			'Visual asset discovery & licensing': ['images', 'assets', 'unsplash', 'pexels', 'pixabay', 'openverse', 'wikimedia', 'svg', 'licensing', 'download'],
+			'Visual quality QA, responsive & accessibility checks': ['qa', 'responsive', 'mobile', 'screenshots', 'visual regression', 'wcag', 'accessibility', 'contrast', 'playwright'],
+			'Project brand system & guidelines': ['brand', 'guidelines', 'logo', 'colors', 'fonts', 'design-system.json', 'restrictions'],
+		},
+	},
+	{
 		id: 'instructions',
 		group: 'Intelligence & Ops',
 		label: 'Instructions, Skills & Memory',
@@ -198,6 +211,7 @@ export const Settings = () => {
 			case 'models': return <ModelsSection />;
 			case 'features': return <FeaturesSection />;
 			case 'agent': return <AgentSection />;
+			case 'design': return <DesignIntelligenceSection onRecordChange={recordChange} />;
 			case 'instructions': return <InstructionsSection />;
 			case 'operations': return <OperationsDiagnosticsSection />;
 			case 'general': return <GeneralSection />;

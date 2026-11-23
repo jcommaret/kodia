@@ -18,6 +18,8 @@ import { URI } from '../../../../base/common/uri.js';
 import { EndOfLinePreference } from '../../../../editor/common/model.js';
 import { IMCPService } from '../common/mcpService.js';
 import { fitMemoryToBudget, IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
+import { IDesignIntelligenceService } from './designIntelligenceService.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 
 // the share of the model's context window the project memory may take in the system prompt
 const MEMORY_SHARE_OF_CONTEXT = 0.15
@@ -65,6 +67,7 @@ export class ConvertToLLMMessageService extends Disposable implements IConvertTo
 		@IMCPService private readonly mcpService: IMCPService,
 		@IProjectMemoryService private readonly projectMemoryService: IProjectMemoryService,
 		@IPromptsService private readonly promptsService: IPromptsService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 	) {
 		super()
 	}
@@ -144,6 +147,29 @@ export class ConvertToLLMMessageService extends Disposable implements IConvertTo
 
 		const guidelines = this._getGuidelines()
 		if (guidelines) sections.push(`GUIDELINES (from the user's settings and the project's rules files):\n${guidelines}`)
+
+		// Inject active project Brand System & user Design Intelligence preferences when configured
+		try {
+			const designSettings = this.voidSettingsService.state.globalSettings.designIntelligence;
+			let brandBlock = '';
+			if (this.instantiationService) {
+				try {
+					const designSvc = this.instantiationService.invokeFunction(a => a.get(IDesignIntelligenceService));
+					brandBlock = designSvc.formatBrandGuidelinesForPrompt();
+				} catch { /* minimal harness without DesignIntelligenceService */ }
+			}
+			const prefLines: string[] = [];
+			if (designSettings && designSettings.autoDesignIntelligence) {
+				if (designSettings.preferredStyleDirection && designSettings.preferredStyleDirection !== 'auto') {
+					prefLines.push(`- Preferred Visual Direction: ${designSettings.preferredStyleDirection}`);
+				}
+				prefLines.push(`- Accessibility Target: ${designSettings.accessibilityTarget} | Animation Preference: ${designSettings.animationPreference} | Image Strategy: ${designSettings.imageDownloadPreference}`);
+			}
+			const combinedDesign = [brandBlock, prefLines.length ? `DESIGN INTELLIGENCE PREFERENCES:\n${prefLines.join('\n')}` : ''].filter(Boolean).join('\n\n');
+			if (combinedDesign) {
+				sections.push(combinedDesign);
+			}
+		} catch { /* ignore */ }
 
 		// the agent loads a skill with read_file, which all tool-enabled modes have
 		if (!disableSystemMessage && chatMode !== 'normal') {

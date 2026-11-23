@@ -69,6 +69,8 @@ import { IKodiaHooksMainService } from '../../../../common/kodiaHooks.js';
 import { IKodiaOpsMainService } from '../../../../common/kodiaOpsTypes.js';
 import { IVerificationLedgerService } from '../../../verificationLedgerService.js';
 import { ISoftwareFactoryService } from '../../../softwareFactoryService.js';
+import { IDesignIntelligenceService } from '../../../designIntelligenceService.js';
+import { IDesignAssetMainService } from '../../../../common/designIntelligenceTypes.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -259,6 +261,8 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IKodiaOpsMainService: (() => { try { return accessor.get(IKodiaOpsMainService) } catch { return undefined } })(),
 		IVerificationLedgerService: accessor.get(IVerificationLedgerService),
 		ISoftwareFactoryService: accessor.get(ISoftwareFactoryService),
+		IDesignIntelligenceService: accessor.get(IDesignIntelligenceService),
+		IDesignAssetMainService: (() => { try { return accessor.get(IDesignAssetMainService) } catch { return undefined } })(),
 
 	} as const
 	return reactAccessor

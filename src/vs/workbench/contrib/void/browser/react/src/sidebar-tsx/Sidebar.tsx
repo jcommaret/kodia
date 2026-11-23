@@ -5,7 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAccessor, useChatThreadsState, useIsDark } from '../util/services.js';
-import { Activity, BookOpen, ClipboardList, Factory, History, MessageCircle, Server, Settings, ShieldCheck, Users, Workflow } from 'lucide-react';
+import { Activity, BookOpen, ClipboardList, Factory, History, MessageCircle, Palette, Server, Settings, ShieldCheck, Users, Workflow } from 'lucide-react';
 
 import '../styles.css';
 import { SidebarChat } from './SidebarChat.js';
@@ -18,11 +18,12 @@ import { ChangesCheckpointsPanel } from './ChangesCheckpointsPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { OpsInspectorPanel } from './OpsInspectorPanel.js';
 import { FactoryPanel } from './FactoryPanel.js';
+import { DesignStudioPanel } from './DesignStudioPanel.js';
 import ErrorBoundary from './ErrorBoundary.js';
 import { getPlanProgress } from '../../../../common/autonomousTask.js';
 import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 
-type SidebarTab = 'chat' | 'factory' | 'health' | 'task-plan' | 'agents' | 'changes' | 'ops' | 'workflows' | 'activity' | 'context';
+type SidebarTab = 'chat' | 'design' | 'factory' | 'health' | 'task-plan' | 'agents' | 'changes' | 'ops' | 'workflows' | 'activity' | 'context';
 
 const MemoSidebarChat = React.memo(SidebarChat);
 
@@ -85,6 +86,7 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 
 	const tabs: { id: SidebarTab; label: string; title: string; icon: React.ReactNode; badge?: string; pulse?: boolean }[] = [
 		{ id: 'chat', label: 'Chat', title: 'AI Engineering Chat & Agent Workspace', icon: <MessageCircle size={12} /> },
+		{ id: 'design', label: 'Design', title: 'Autonomous UI/UX Design Studio, Brand System, Assets & Visual QA', icon: <Palette size={12} /> },
 		{ id: 'factory', label: 'Factory', title: 'Autonomous Software Factory, Requirements, Autopilot & Architecture Council', icon: <Factory size={12} /> },
 		{ id: 'health', label: 'Intel', title: 'Project Health, Digital Twin, Change Impact, Proof Gates & Tech Debt', icon: <ShieldCheck size={12} /> },
 		{ id: 'task-plan', label: 'Plan', title: 'Task Plan & Decomposition Board', icon: <ClipboardList size={12} />, badge: planBadge },
@@ -182,6 +184,11 @@ export const Sidebar = ({ className }: { className: string }) => {
 									<MemoSidebarChat />
 								</ErrorBoundary>
 							</div>
+						)}
+						{activePanel === 'design' && (
+							<ErrorBoundary>
+								<DesignStudioPanel onSendPrompt={sendPromptFromCommandCenter} />
+							</ErrorBoundary>
 						)}
 						{activePanel === 'factory' && (
 							<ErrorBoundary>

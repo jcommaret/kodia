@@ -62,6 +62,39 @@ import { collectWorkspaceProjectFiles } from './projectHealthScanner.js'
 import { createVerificationRecord, formatQualityGateEvaluationForLLM, VERIFICATION_LEVEL_ORDER, VerificationLevel } from '../common/verificationLedger.js'
 import { IVerificationLedgerService } from './verificationLedgerService.js'
 import { ISoftwareFactoryService } from '../common/softwareFactory.js'
+import { IDesignIntelligenceService } from './designIntelligenceService.js'
+import {
+	ColorHarmonyStrategy,
+	DEFAULT_DESIGN_INTELLIGENCE_SETTINGS,
+	FrontendFramework,
+	IDesignAssetMainService,
+	ImageProviderName,
+	KODIA_DESIGN_CHANNEL,
+	StylingSystem,
+	VisualDirectionId,
+} from '../common/designIntelligenceTypes.js'
+import {
+	analyzeProductDesignRequirements,
+	auditDesignConsistency,
+	critiqueInterfaceDesign,
+	formatBrowserVisualAuditForLLM,
+	formatColorPaletteForLLM,
+	formatDesignBriefForLLM,
+	formatDesignCritiqueForLLM,
+	formatProductAnalysisForLLM,
+	generateColorPalette,
+	generateComponentVariants,
+	generateDesignBrief,
+	generateDesignTokens,
+	generatePageArchitecture,
+	generateResponsiveLayout,
+	generateVisualDirection,
+	inspectExistingDesignSystem,
+	planVisualDefectRepairs,
+	recommendIconLibrary,
+	recommendUiComponents,
+} from '../common/designIntelligenceEngine.js'
+import { buildTypographyRecommendation } from '../common/designKnowledgeLibrary.js'
 
 
 // tool use for AI
@@ -349,6 +382,11 @@ export class ToolsService implements IToolsService {
 		const browserService = ProxyChannel.toService<IBrowserService>(mainProcessService.getChannel('void-channel-browser'))
 		const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 		const kodiaOpsService = ProxyChannel.toService<IKodiaOpsMainService>(mainProcessService.getChannel(KODIA_OPS_CHANNEL))
+		const designAssetService = ProxyChannel.toService<IDesignAssetMainService>(mainProcessService.getChannel(KODIA_DESIGN_CHANNEL))
+		const getDesignService = (): IDesignIntelligenceService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(IDesignIntelligenceService)) } catch { return undefined }
+		}
+		const getDesignSettings = () => this.voidSettingsService.state.globalSettings.designIntelligence ?? DEFAULT_DESIGN_INTELLIGENCE_SETTINGS
 		const workspaceFolderPaths = () => workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
 
 		const recentPages = new Map<string, WebFetchResult>()
@@ -1394,6 +1432,191 @@ export class ToolsService implements IToolsService {
 				const consequences = params.consequences ? validateStr('consequences', params.consequences).trim() : undefined
 				return { action, id, title, description, status, priority, decision, consequences }
 			},
+
+			// Autonomous UI/UX Design Intelligence, Visual Assets & Browser Visual QA (25 tools)
+			analyze_product_design_requirements: (params: RawToolParamsObj) => {
+				const product_description = validateStr('product_description', params.product_description).trim()
+				if (!product_description) throw new Error('Invalid LLM output: product_description must not be empty.')
+				const product_name = validateOptionalStr('product_name', params.product_name) ?? undefined
+				const product_category = validateOptionalStr('product_category', params.product_category) ?? undefined
+				const target_devices = validateOptionalStrList(params.target_devices)
+				return { product_description, product_name, product_category, target_devices }
+			},
+			generate_design_brief: (params: RawToolParamsObj) => {
+				const product_description = validateStr('product_description', params.product_description).trim()
+				if (!product_description) throw new Error('Invalid LLM output: product_description must not be empty.')
+				const product_name = validateOptionalStr('product_name', params.product_name) ?? undefined
+				const product_category = validateOptionalStr('product_category', params.product_category) ?? undefined
+				const visual_direction = (validateOptionalStr('visual_direction', params.visual_direction) ?? undefined) as VisualDirectionId | 'auto' | undefined
+				return { product_description, product_name, product_category, visual_direction }
+			},
+			generate_visual_direction: (params: RawToolParamsObj) => {
+				const product_description = validateStr('product_description', params.product_description).trim()
+				const product_category = validateOptionalStr('product_category', params.product_category) ?? undefined
+				const requested_direction = (validateOptionalStr('requested_direction', params.requested_direction) ?? undefined) as VisualDirectionId | 'auto' | undefined
+				return { product_description, product_category, requested_direction }
+			},
+			generate_color_palette: (params: RawToolParamsObj) => ({
+				product_description: validateOptionalStr('product_description', params.product_description) ?? undefined,
+				product_category: validateOptionalStr('product_category', params.product_category) ?? undefined,
+				visual_direction: (validateOptionalStr('visual_direction', params.visual_direction) ?? undefined) as VisualDirectionId | undefined,
+				harmony: (validateOptionalStr('harmony', params.harmony) ?? undefined) as ColorHarmonyStrategy | undefined,
+				brand_primary_color: validateOptionalStr('brand_primary_color', params.brand_primary_color) ?? undefined,
+				brand_secondary_color: validateOptionalStr('brand_secondary_color', params.brand_secondary_color) ?? undefined,
+				brand_accent_color: validateOptionalStr('brand_accent_color', params.brand_accent_color) ?? undefined,
+			}),
+			generate_design_tokens: (params: RawToolParamsObj) => ({
+				name: validateOptionalStr('name', params.name) ?? undefined,
+				product_description: validateOptionalStr('product_description', params.product_description) ?? undefined,
+				product_category: validateOptionalStr('product_category', params.product_category) ?? undefined,
+				visual_direction: (validateOptionalStr('visual_direction', params.visual_direction) ?? undefined) as VisualDirectionId | undefined,
+				harmony: (validateOptionalStr('harmony', params.harmony) ?? undefined) as ColorHarmonyStrategy | undefined,
+				brand_primary_color: validateOptionalStr('brand_primary_color', params.brand_primary_color) ?? undefined,
+			}),
+			generate_page_architecture: (params: RawToolParamsObj) => ({
+				product_description: validateStr('product_description', params.product_description).trim(),
+				product_name: validateOptionalStr('product_name', params.product_name) ?? undefined,
+				product_category: validateOptionalStr('product_category', params.product_category) ?? undefined,
+			}),
+			generate_responsive_layout: (params: RawToolParamsObj) => ({
+				product_description: validateOptionalStr('product_description', params.product_description) ?? undefined,
+				product_category: validateOptionalStr('product_category', params.product_category) ?? undefined,
+				max_content_width: validateOptionalStr('max_content_width', params.max_content_width) ?? undefined,
+			}),
+			discover_visual_assets: (params: RawToolParamsObj) => {
+				const query = validateStr('query', params.query).trim()
+				if (!query) throw new Error('Invalid LLM output: query must not be empty.')
+				const purpose = validateOptionalStr('purpose', params.purpose) ?? undefined
+				const rawOrient = validateOptionalStr('orientation', params.orientation)
+				const orientation = (rawOrient === 'landscape' || rawOrient === 'portrait' || rawOrient === 'square') ? rawOrient : undefined
+				const limit = validateNumber(params.limit, { default: 6 }) ?? 6
+				const providers = validateOptionalStrList(params.providers) as ImageProviderName[] | undefined
+				return { query, purpose, orientation, limit, providers }
+			},
+			search_image_providers: (params: RawToolParamsObj) => {
+				const query = validateStr('query', params.query).trim()
+				if (!query) throw new Error('Invalid LLM output: query must not be empty.')
+				const providers = validateOptionalStrList(params.providers) as ImageProviderName[] | undefined
+				const rawOrient = validateOptionalStr('orientation', params.orientation)
+				const orientation = (rawOrient === 'landscape' || rawOrient === 'portrait' || rawOrient === 'square') ? rawOrient : undefined
+				const limit = validateNumber(params.limit, { default: 6 }) ?? 6
+				return { query, providers, orientation, limit }
+			},
+			download_visual_assets: (params: RawToolParamsObj) => {
+				let rawAssets: unknown = params.assets
+				if (typeof rawAssets === 'string') {
+					try { rawAssets = JSON.parse(rawAssets) } catch { throw new Error('Invalid LLM output: assets must be a valid JSON array.') }
+				}
+				if (!Array.isArray(rawAssets) || rawAssets.length === 0) {
+					throw new Error('Invalid LLM output: assets must be a non-empty array of asset descriptors.')
+				}
+				const assets = rawAssets.map((a: any, idx: number) => {
+					if (!a || typeof a !== 'object') throw new Error(`Invalid LLM output: assets[${idx}] must be an object.`)
+					const alt_text = validateStr(`assets[${idx}].alt_text`, a.alt_text ?? a.altText ?? a.svg_subject ?? `Visual asset ${idx + 1}`).trim()
+					return {
+						url: typeof a.url === 'string' && a.url.trim() ? a.url.trim() : undefined,
+						filename: typeof a.filename === 'string' && a.filename.trim() ? a.filename.trim() : undefined,
+						alt_text,
+						provider: typeof a.provider === 'string' ? a.provider as ImageProviderName | 'generated-svg' : undefined,
+						license: typeof a.license === 'string' ? a.license : undefined,
+						attribution: typeof a.attribution === 'string' ? a.attribution : undefined,
+						svg_subject: typeof a.svg_subject === 'string' ? a.svg_subject : undefined,
+						primary_color: typeof a.primary_color === 'string' ? a.primary_color : undefined,
+						secondary_color: typeof a.secondary_color === 'string' ? a.secondary_color : undefined,
+						accent_color: typeof a.accent_color === 'string' ? a.accent_color : undefined,
+						width: typeof a.width === 'number' ? a.width : undefined,
+						height: typeof a.height === 'number' ? a.height : undefined,
+						svg_style: typeof a.svg_style === 'string' ? a.svg_style as any : undefined,
+					}
+				})
+				const target_dir = validateOptionalStr('target_dir', params.target_dir) ?? undefined
+				return { assets, target_dir }
+			},
+			optimize_visual_assets: (params: RawToolParamsObj) => ({
+				target_paths: validateOptionalStrList(params.target_paths),
+				minify_svgs: validateBoolean(params.minify_svgs, { default: true }),
+			}),
+			discover_icon_library: (params: RawToolParamsObj) => ({
+				visual_direction: (validateOptionalStr('visual_direction', params.visual_direction) ?? undefined) as VisualDirectionId | undefined,
+			}),
+			recommend_typography: (params: RawToolParamsObj) => ({
+				visual_direction: (validateOptionalStr('visual_direction', params.visual_direction) ?? undefined) as VisualDirectionId | undefined,
+				product_description: validateOptionalStr('product_description', params.product_description) ?? undefined,
+				heading_font: validateOptionalStr('heading_font', params.heading_font) ?? undefined,
+				body_font: validateOptionalStr('body_font', params.body_font) ?? undefined,
+			}),
+			recommend_ui_components: (params: RawToolParamsObj) => ({
+				product_description: validateStr('product_description', params.product_description).trim(),
+				product_category: validateOptionalStr('product_category', params.product_category) ?? undefined,
+				visual_direction: (validateOptionalStr('visual_direction', params.visual_direction) ?? undefined) as VisualDirectionId | undefined,
+			}),
+			generate_component_variants: (params: RawToolParamsObj) => ({
+				component_type: validateStr('component_type', params.component_type).trim(),
+				framework: (validateOptionalStr('framework', params.framework) ?? undefined) as FrontendFramework | undefined,
+				styling_system: (validateOptionalStr('styling_system', params.styling_system) ?? undefined) as StylingSystem | undefined,
+				visual_direction: (validateOptionalStr('visual_direction', params.visual_direction) ?? undefined) as VisualDirectionId | undefined,
+			}),
+			inspect_existing_design_system: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			audit_design_consistency: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			inspect_responsive_layout: (params: RawToolParamsObj) => {
+				const session_id = validateStr('session_id', params.session_id ?? params.sessionId).trim()
+				const tab_id = validateStr('tab_id', params.tab_id ?? params.tabId).trim()
+				let viewports: Array<{ label: string; width: number; height: number }> | undefined
+				if (params.viewports) {
+					const parsed = typeof params.viewports === 'string' ? JSON.parse(params.viewports) : params.viewports
+					if (Array.isArray(parsed)) {
+						viewports = parsed.filter((v: any) => v && typeof v.width === 'number' && typeof v.height === 'number').map((v: any) => ({ label: String(v.label || `${v.width}x${v.height}`), width: v.width, height: v.height }))
+					}
+				}
+				const full_page = validateBoolean(params.full_page, { default: false })
+				return { session_id, tab_id, viewports, full_page }
+			},
+			capture_application_screenshots: (params: RawToolParamsObj) => {
+				const session_id = validateStr('session_id', params.session_id ?? params.sessionId).trim()
+				const tab_id = validateStr('tab_id', params.tab_id ?? params.tabId).trim()
+				let viewports: Array<{ label: string; width: number; height: number }> | undefined
+				if (params.viewports) {
+					const parsed = typeof params.viewports === 'string' ? JSON.parse(params.viewports) : params.viewports
+					if (Array.isArray(parsed)) {
+						viewports = parsed.filter((v: any) => v && typeof v.width === 'number' && typeof v.height === 'number').map((v: any) => ({ label: String(v.label || `${v.width}x${v.height}`), width: v.width, height: v.height }))
+					}
+				}
+				const full_page = validateBoolean(params.full_page, { default: false })
+				return { session_id, tab_id, viewports, full_page }
+			},
+			inspect_visual_quality: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id ?? params.sessionId).trim(),
+				tab_id: validateStr('tab_id', params.tab_id ?? params.tabId).trim(),
+			}),
+			audit_accessibility: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id ?? params.sessionId).trim(),
+				tab_id: validateStr('tab_id', params.tab_id ?? params.tabId).trim(),
+			}),
+			audit_frontend_performance: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id ?? params.sessionId).trim(),
+				tab_id: validateStr('tab_id', params.tab_id ?? params.tabId).trim(),
+			}),
+			critique_interface_design: (params: RawToolParamsObj) => ({
+				session_id: validateOptionalStr('session_id', params.session_id ?? params.sessionId) ?? undefined,
+				tab_id: validateOptionalStr('tab_id', params.tab_id ?? params.tabId) ?? undefined,
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+				product_description: validateOptionalStr('product_description', params.product_description) ?? undefined,
+			}),
+			repair_visual_defects: (params: RawToolParamsObj) => ({
+				session_id: validateOptionalStr('session_id', params.session_id ?? params.sessionId) ?? undefined,
+				tab_id: validateOptionalStr('tab_id', params.tab_id ?? params.tabId) ?? undefined,
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			compare_visual_revisions: (params: RawToolParamsObj) => ({
+				baseline_path: validateStr('baseline_path', params.baseline_path).trim(),
+				current_path: validateStr('current_path', params.current_path).trim(),
+				diff_output_path: validateOptionalStr('diff_output_path', params.diff_output_path) ?? undefined,
+				pixel_threshold: validateNumber(params.pixel_threshold, { default: 18 }) ?? 18,
+			}),
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -2892,6 +3115,326 @@ export class ToolsService implements IToolsService {
 				}
 			},
 
+			// Autonomous UI/UX Design Intelligence, Visual Assets & Browser Visual QA (25 tools)
+			analyze_product_design_requirements: async ({ product_description, product_name, product_category, target_devices }) => {
+				const ds = getDesignService()
+				const settings = getDesignSettings()
+				const analysis = analyzeProductDesignRequirements({
+					productDescription: product_description,
+					productName: product_name,
+					productCategory: product_category,
+					targetDevices: target_devices,
+					brandProfile: ds?.getBrandProfile(),
+					preferredDirection: settings.preferredStyleDirection,
+					accessibilityTarget: settings.accessibilityTarget,
+				})
+				ds?.recordAnalysis(analysis)
+				return { result: analysis }
+			},
+			generate_design_brief: async ({ product_description, product_name, product_category, visual_direction }) => {
+				const ds = getDesignService()
+				const settings = getDesignSettings()
+				const brief = generateDesignBrief({
+					productDescription: product_description,
+					productName: product_name,
+					productCategory: product_category,
+					requestedDirection: visual_direction ?? settings.preferredStyleDirection,
+					brandProfile: ds?.getBrandProfile(),
+					accessibilityTarget: settings.accessibilityTarget,
+					animationPreference: settings.animationPreference,
+				})
+				ds?.recordBrief(brief)
+				return { result: brief }
+			},
+			generate_visual_direction: async ({ product_description, product_category, requested_direction }) => {
+				const ds = getDesignService()
+				const settings = getDesignSettings()
+				const direction = generateVisualDirection({
+					productDescription: product_description,
+					productCategory: product_category,
+					requestedDirection: requested_direction ?? settings.preferredStyleDirection,
+					brandProfile: ds?.getBrandProfile(),
+				})
+				ds?.recordDirection(direction)
+				return { result: direction }
+			},
+			generate_color_palette: async ({ product_description, product_category, visual_direction, harmony, brand_primary_color, brand_secondary_color, brand_accent_color }) => {
+				const ds = getDesignService()
+				const settings = getDesignSettings()
+				const palette = generateColorPalette({
+					productDescription: product_description,
+					productCategory: product_category,
+					visualDirection: visual_direction ?? (settings.preferredStyleDirection !== 'auto' ? settings.preferredStyleDirection : undefined),
+					harmony,
+					brandPrimaryColor: brand_primary_color,
+					brandSecondaryColor: brand_secondary_color,
+					brandAccentColor: brand_accent_color,
+					brandProfile: ds?.getBrandProfile(),
+					accessibilityTarget: settings.accessibilityTarget,
+				})
+				ds?.recordPalette(palette)
+				return { result: palette }
+			},
+			generate_design_tokens: async ({ name, product_description, product_category, visual_direction, harmony, brand_primary_color }) => {
+				const ds = getDesignService()
+				const settings = getDesignSettings()
+				const tokens = generateDesignTokens({
+					name,
+					productDescription: product_description,
+					productCategory: product_category,
+					visualDirection: visual_direction ?? (settings.preferredStyleDirection !== 'auto' ? settings.preferredStyleDirection : undefined),
+					harmony,
+					brandPrimaryColor: brand_primary_color,
+					brandProfile: ds?.getBrandProfile(),
+					accessibilityTarget: settings.accessibilityTarget,
+					animationPreference: settings.animationPreference,
+				})
+				ds?.recordTokens(tokens)
+				return { result: tokens }
+			},
+			generate_page_architecture: async ({ product_description, product_name, product_category }) => {
+				const ds = getDesignService()
+				const arch = generatePageArchitecture({
+					productDescription: product_description,
+					productName: product_name,
+					productCategory: product_category,
+					brandProfile: ds?.getBrandProfile(),
+				})
+				ds?.recordArchitecture(arch)
+				return { result: arch }
+			},
+			generate_responsive_layout: async ({ product_description, product_category, max_content_width }) => {
+				const layout = generateResponsiveLayout({
+					productDescription: product_description,
+					productCategory: product_category,
+					maxContentWidth: max_content_width,
+				})
+				return { result: layout }
+			},
+			discover_visual_assets: async ({ query, orientation, limit, providers }) => {
+				const ds = getDesignService()
+				const settings = getDesignSettings()
+				const root = workspaceFolderPaths()[0] ?? ''
+				const allowedProviders = providers && providers.length > 0 ? providers : [...settings.approvedImageProviders]
+				const res = await designAssetService.searchImageProviders({
+					query,
+					workspaceRoot: root,
+					providers: allowedProviders,
+					apiKeys: settings.imageProviderApiKeys,
+					orientation,
+					limit,
+					licensePreference: settings.assetLicensePreference,
+				})
+				ds?.recordDiscoveredAssets(res.assets)
+				return { result: res }
+			},
+			search_image_providers: async ({ query, providers, orientation, limit }) => {
+				const ds = getDesignService()
+				const settings = getDesignSettings()
+				const root = workspaceFolderPaths()[0] ?? ''
+				const allowedProviders = providers && providers.length > 0 ? providers : [...settings.approvedImageProviders]
+				const res = await designAssetService.searchImageProviders({
+					query,
+					workspaceRoot: root,
+					providers: allowedProviders,
+					apiKeys: settings.imageProviderApiKeys,
+					orientation,
+					limit,
+					licensePreference: settings.assetLicensePreference,
+				})
+				ds?.recordDiscoveredAssets(res.assets)
+				return { result: res }
+			},
+			download_visual_assets: async ({ assets, target_dir }) => {
+				const ds = getDesignService()
+				const root = workspaceFolderPaths()[0] ?? ''
+				if (!root) throw new Error('An open workspace folder is required to save downloaded visual assets.')
+				const res = await designAssetService.downloadVisualAssets({
+					workspaceRoot: root,
+					targetDir: target_dir,
+					assets: assets.map(a => ({
+						url: a.url,
+						filename: a.filename,
+						altText: a.alt_text,
+						provider: a.provider,
+						license: a.license,
+						attribution: a.attribution,
+						generateSvgFallback: a.svg_subject
+							? {
+								subject: a.svg_subject,
+								primaryColor: a.primary_color,
+								secondaryColor: a.secondary_color,
+								accentColor: a.accent_color,
+								width: a.width,
+								height: a.height,
+								style: a.svg_style,
+							}
+							: undefined,
+					})),
+				})
+				ds?.recordDownloadedAssets(res.downloaded)
+				return { result: res }
+			},
+			optimize_visual_assets: async ({ target_paths, minify_svgs }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				if (!root) throw new Error('An open workspace folder is required to optimize visual assets.')
+				const report = await designAssetService.optimizeVisualAssets({
+					workspaceRoot: root,
+					targetPaths: target_paths,
+					minifySvgs: minify_svgs,
+				})
+				return { result: report }
+			},
+			discover_icon_library: async ({ visual_direction }) => {
+				const rawFiles = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 120 })
+				const files = rawFiles.map(f => ({ path: f.relativePath, content: f.content }))
+				const inspected = inspectExistingDesignSystem(files)
+				const pkgFile = files.find(f => /(?:^|\/)package\.json$/i.test(f.path))
+				let deps: string[] = []
+				if (pkgFile) {
+					try {
+						const parsed = JSON.parse(pkgFile.content) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+						deps = [...Object.keys(parsed.dependencies ?? {}), ...Object.keys(parsed.devDependencies ?? {})]
+					} catch { /* ignore */ }
+				}
+				const ds = getDesignService()
+				const dir = visual_direction ?? ds?.state.latestDirection?.id
+				return { result: recommendIconLibrary({ existingDependencies: deps, framework: inspected.framework, visualDirection: dir }) }
+			},
+			recommend_typography: async ({ visual_direction, product_description, heading_font, body_font }) => {
+				const ds = getDesignService()
+				const direction = visual_direction
+					?? (product_description ? generateVisualDirection({ productDescription: product_description, brandProfile: ds?.getBrandProfile() }).id : ds?.state.latestDirection?.id)
+					?? 'high-end-saas'
+				const bp = ds?.getBrandProfile()
+				return {
+					result: buildTypographyRecommendation(direction, {
+						headingFont: heading_font ?? bp?.headingFont,
+						bodyFont: body_font ?? bp?.bodyFont,
+						monoFont: bp?.monoFont,
+					}),
+				}
+			},
+			recommend_ui_components: async ({ product_description, product_category, visual_direction }) => {
+				const ds = getDesignService()
+				const components = recommendUiComponents({
+					productDescription: product_description,
+					productCategory: product_category,
+					visualDirection: visual_direction ?? ds?.state.latestDirection?.id,
+				})
+				return { result: { components } }
+			},
+			generate_component_variants: async ({ component_type, framework, styling_system, visual_direction }) => {
+				const ds = getDesignService()
+				let fw = framework
+				let styling = styling_system
+				if (!fw || !styling) {
+					const rawFiles = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 100 })
+					const inspected = inspectExistingDesignSystem(rawFiles.map(f => ({ path: f.relativePath, content: f.content })))
+					if (!fw && inspected.framework !== 'unknown') { fw = inspected.framework }
+					if (!styling && inspected.stylingSystem !== 'unknown') { styling = inspected.stylingSystem }
+				}
+				return {
+					result: generateComponentVariants({
+						componentType: component_type,
+						framework: fw,
+						stylingSystem: styling,
+						visualDirection: visual_direction ?? ds?.state.latestDirection?.id,
+					}),
+				}
+			},
+			inspect_existing_design_system: async ({ sub_path }) => {
+				const ds = getDesignService()
+				const rawFiles = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 350, subPath: sub_path })
+				const report = inspectExistingDesignSystem(rawFiles.map(f => ({ path: f.relativePath, content: f.content })))
+				ds?.recordExistingSystem(report)
+				return { result: report }
+			},
+			audit_design_consistency: async ({ sub_path }) => {
+				const ds = getDesignService()
+				const rawFiles = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 350, subPath: sub_path })
+				const report = auditDesignConsistency(rawFiles.map(f => ({ path: f.relativePath, content: f.content })))
+				ds?.recordConsistencyAudit(report)
+				return { result: report }
+			},
+			inspect_responsive_layout: async ({ session_id, tab_id, viewports, full_page }) => {
+				const ds = getDesignService()
+				const res = await browserService.captureMultiViewportAudit(session_id, tab_id, { viewports, fullPage: full_page })
+				ds?.recordMultiViewportAudit(res)
+				return { result: res }
+			},
+			capture_application_screenshots: async ({ session_id, tab_id, viewports, full_page }) => {
+				const ds = getDesignService()
+				const res = await browserService.captureMultiViewportAudit(session_id, tab_id, { viewports, fullPage: full_page })
+				ds?.recordMultiViewportAudit(res)
+				return { result: res }
+			},
+			inspect_visual_quality: async ({ session_id, tab_id }) => {
+				const ds = getDesignService()
+				const audit = await browserService.auditDesignVisuals(session_id, tab_id)
+				ds?.recordVisualAudit(audit)
+				return { result: audit }
+			},
+			audit_accessibility: async ({ session_id, tab_id }) => {
+				const ds = getDesignService()
+				const audit = await browserService.auditDesignVisuals(session_id, tab_id)
+				ds?.recordVisualAudit(audit)
+				return { result: audit }
+			},
+			audit_frontend_performance: async ({ session_id, tab_id }) => {
+				const ds = getDesignService()
+				const audit = await browserService.auditDesignVisuals(session_id, tab_id)
+				ds?.recordVisualAudit(audit)
+				return { result: audit }
+			},
+			critique_interface_design: async ({ session_id, tab_id, sub_path, product_description }) => {
+				const ds = getDesignService()
+				const rawFiles = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 300, subPath: sub_path })
+				const staticAudit = auditDesignConsistency(rawFiles.map(f => ({ path: f.relativePath, content: f.content })))
+				let visualAudit = ds?.state.latestVisualAudit ?? null
+				if (session_id && tab_id) {
+					visualAudit = await browserService.auditDesignVisuals(session_id, tab_id)
+					ds?.recordVisualAudit(visualAudit)
+				}
+				const critique = critiqueInterfaceDesign({
+					staticAudit,
+					visualAudit,
+					multiViewport: ds?.state.latestMultiViewport ?? null,
+					productDescription: product_description,
+				})
+				ds?.recordConsistencyAudit(staticAudit)
+				ds?.recordCritique(critique)
+				return { result: critique }
+			},
+			repair_visual_defects: async ({ session_id, tab_id, sub_path }) => {
+				const ds = getDesignService()
+				const rawFiles = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 300, subPath: sub_path })
+				const staticAudit = auditDesignConsistency(rawFiles.map(f => ({ path: f.relativePath, content: f.content })))
+				let visualAudit = ds?.state.latestVisualAudit ?? null
+				if (session_id && tab_id) {
+					visualAudit = await browserService.auditDesignVisuals(session_id, tab_id)
+					ds?.recordVisualAudit(visualAudit)
+				}
+				const critique = critiqueInterfaceDesign({
+					staticAudit,
+					visualAudit,
+					multiViewport: ds?.state.latestMultiViewport ?? null,
+				})
+				const plan = planVisualDefectRepairs(critique.topPriorities)
+				return { result: plan }
+			},
+			compare_visual_revisions: async ({ baseline_path, current_path, diff_output_path, pixel_threshold }) => {
+				const ds = getDesignService()
+				const cmp = await designAssetService.compareVisualRevisions({
+					baselinePath: baseline_path,
+					currentPath: current_path,
+					diffOutputPath: diff_output_path,
+					pixelThreshold: pixel_threshold,
+				})
+				ds?.recordComparison(cmp)
+				return { result: cmp }
+			},
+
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell }) => {
 				await voidModelService.initializeModel(uri)
@@ -3931,6 +4474,166 @@ export class ToolsService implements IToolsService {
 				}
 				return lines.join('\n');
 			},
+
+			// Autonomous UI/UX Design Intelligence, Visual Assets & Browser Visual QA (25 tools)
+			analyze_product_design_requirements: (_params, result) => formatProductAnalysisForLLM(result),
+			generate_design_brief: (_params, result) => formatDesignBriefForLLM(result),
+			generate_visual_direction: (_params, r) => [
+				`# Visual Direction: ${r.name} (${r.id})`,
+				`Rationale: ${r.rationale}`,
+				`Keywords: ${r.aestheticKeywords.join(', ')}`,
+				`Color Mood: ${r.colorMood}`,
+				`Typography: ${r.typographyCharacter}`,
+				`Layout: ${r.layoutPhilosophy}`,
+				`Surface & Elevation: ${r.surfaceTreatment} | ${r.elevationStrategy} | Radii: ${r.borderRadiusStyle}`,
+				`Motion: ${r.motionCharacter}`,
+				`Use: ${r.visualTreatmentsToUse.join('; ')}`,
+				`Avoid: ${r.visualTreatmentsToAvoid.join('; ')}`,
+			].join('\n'),
+			generate_color_palette: (_params, result) => formatColorPaletteForLLM(result),
+			generate_design_tokens: (_params, r) => [
+				`# Design System Tokens: ${r.name} (${r.visualDirection})`,
+				`Google Fonts: ${r.typography.googleFontsUrl}`,
+				`WCAG Contrast: ${r.palette.allContrastChecksPassAA ? 'ALL 12 CHECKS PASS AA' : 'Review contrast checks'}`,
+				``,
+				`## CSS Custom Properties (ready to paste into global stylesheet)`,
+				'```css',
+				r.cssVariables,
+				'```',
+				``,
+				`## Tailwind Theme Extend`,
+				'```json',
+				r.tailwindExtendSnippet,
+				'```',
+			].join('\n'),
+			generate_page_architecture: (_params, r) => [
+				`# Page Architecture: ${r.productName} (${r.category})`,
+				`Desktop Navigation: ${r.navigationPattern}`,
+				`Mobile Navigation: ${r.mobileNavigationPattern}`,
+				`Shared Shell: ${r.sharedShellComponents.join(', ')}`,
+				``,
+				`## Pages (${r.pages.length})`,
+				...r.pages.map(p => `- **${p.name}** (\`${p.route}\`) [${p.navigationRole}] — ${p.purpose}\n  Sections: ${p.sections.map(s => `${s.name} (${s.layoutPattern})`).join(' -> ')}\n  States: ${p.statesRequired.join(', ')}`),
+				``,
+				`## Connected Functionality`,
+				...r.stateAndDataFlows.map(f => `- ${f}`),
+			].join('\n'),
+			generate_responsive_layout: (_params, r) => [
+				`# Responsive Layout System (max-width: ${r.maxContentWidth})`,
+				`Strategy: ${r.strategy}`,
+				`Breakpoints:\n${r.breakpoints.map(b => `- ${b.name} (>=${b.minWidthPx}px): ${b.columns} cols, padding ${b.containerPadding}, nav: ${b.navigationBehavior}`).join('\n')}`,
+				`Mobile Transformations:\n${r.mobileTransformations.map(m => `- ${m}`).join('\n')}`,
+				`Touch & Safe Area:\n${r.touchAndSafeAreaRules.map(t => `- ${t}`).join('\n')}`,
+				`CSS Foundation:\n\`\`\`css\n${r.cssFoundation}\n\`\`\``,
+			].join('\n'),
+			discover_visual_assets: (_params, r) => [
+				`# Visual Asset Discovery for "${r.query}" (${r.assets.length} result(s))`,
+				`Providers: ${r.providerStatuses.map(s => `${s.provider}=${s.status}(${s.count})${s.message ? ` [${s.message}]` : ''}`).join(', ')}`,
+				...(r.assets.length === 0
+					? [r.fallbackRecommendation ?? 'No assets returned.']
+					: r.assets.map((a, i) => `${i + 1}. [${a.provider}] ${a.title} | ${a.width ?? '?'}x${a.height ?? '?'} | license: ${a.license}\n   url: ${a.url}\n   alt: "${a.altTextSuggestion}"${a.attribution ? `\n   attribution: ${a.attribution}` : ''}`)),
+			].join('\n'),
+			search_image_providers: (_params, r) => [
+				`# Image Provider Search for "${r.query}" (${r.assets.length} result(s))`,
+				`Provider Statuses: ${r.providerStatuses.map(s => `${s.provider}:${s.status}(${s.count})`).join(', ')}`,
+				...r.assets.map((a, i) => `${i + 1}. [${a.provider}] ${a.url} (${a.width ?? '?'}x${a.height ?? '?'}, ${a.license})`),
+				...(r.fallbackRecommendation ? [r.fallbackRecommendation] : []),
+			].join('\n'),
+			download_visual_assets: (_params, r) => {
+				const ok = r.downloaded.filter(d => d.verifiedOnDisk)
+				const failed = r.downloaded.filter(d => !d.verifiedOnDisk)
+				return [
+					`# Visual Assets Downloaded: ${ok.length} verified on disk, ${failed.length} failed`,
+					...ok.map(d => `- [VERIFIED] ${d.relativePath} (${d.mimeType}, ${(d.sizeBytes / 1024).toFixed(1)} KB, ${d.width ?? '?'}x${d.height ?? '?'}, provider=${d.provider}, license=${d.license})`),
+					...failed.map(d => `- [FAILED] ${d.sourceUrl}: ${d.error ?? 'Unknown download error'}`),
+					...(r.attributionManifestPath ? [`Attribution manifest written to: ${r.attributionManifestPath}`] : []),
+				].join('\n')
+			},
+			optimize_visual_assets: (_params, r) => [
+				`# Visual Asset Optimization: scanned ${r.scannedCount}, optimized ${r.optimizedCount}, saved ${r.totalSavedBytes} bytes`,
+				...r.entries.slice(0, 25).map(e => `- [${e.action}] ${e.filePath} (${e.format}, ${e.width ?? '?'}x${e.height ?? '?'}, ${(e.optimizedBytes / 1024).toFixed(1)} KB)${e.recommendation ? ` — ${e.recommendation}` : ''}`),
+				...(r.warnings.length ? [`Warnings:\n${r.warnings.map(w => `- ${w}`).join('\n')}`] : []),
+			].join('\n'),
+			discover_icon_library: (_params, r) => [
+				`# Icon Library Recommendation: ${r.recommendedLibrary} (${r.packageName})`,
+				`Detected existing in project: ${r.detectedExistingLibraries.join(', ') || 'none'} | Reuse existing: ${r.reuseExisting ? 'YES' : 'NO'}`,
+				...(r.installCommand ? [`Install: \`${r.installCommand}\``] : []),
+				`Stroke Width: ${r.strokeWidth} | Sizes: ${Object.entries(r.sizingScale).map(([k, v]) => `${k}=${v}`).join(', ')}`,
+				`Common Slots: ${Object.entries(r.recommendedIconsBySlot).map(([k, v]) => `${k}→${v}`).join(', ')}`,
+				`Accessibility Rules:\n${r.accessibilityRules.map(a => `- ${a}`).join('\n')}`,
+			].join('\n'),
+			recommend_typography: (_params, r) => [
+				`# Typography System: ${r.pairingName}`,
+				`Rationale: ${r.rationale}`,
+				`Google Fonts: ${r.googleFontsUrl}`,
+				`Stacks: display=${r.fontStacks.display} | body=${r.fontStacks.body} | mono=${r.fontStacks.mono}`,
+				`Type Scale:\n${r.scale.map(s => `- ${s.token} (${s.role}): ${s.sizeClamp}, lh=${s.lineHeight}, weight=${s.weight}, tracking=${s.letterSpacing}`).join('\n')}`,
+				`Best Practices:\n${r.bestPractices.map(b => `- ${b}`).join('\n')}`,
+			].join('\n'),
+			recommend_ui_components: (_params, r) => [
+				`# Recommended UI Components (${r.components.length})`,
+				...r.components.map(c => `- **${c.name}** [${c.priority}/${c.category}]: variants=[${c.variants.join(', ')}] | states=[${c.interactiveStates.join(', ')}]\n  Responsive: ${c.responsiveBehavior}\n  A11y: ${c.accessibilityRequirements.join('; ')}`),
+			].join('\n'),
+			generate_component_variants: (_params, r) => [
+				`# Component Variants: ${r.componentType} (${r.framework} / ${r.stylingSystem} / ${r.visualDirection})`,
+				...r.variants.map(v => `- **${v.name}**: ${v.usage} | states: ${v.states.join(', ')}`),
+				``,
+				`Implementation Reference:`,
+				'```tsx',
+				r.implementationSnippet,
+				'```',
+				`Accessibility Checklist: ${r.accessibilityChecklist.join('; ')}`,
+			].join('\n'),
+			inspect_existing_design_system: (_params, r) => [
+				`# Existing Workspace Design System`,
+				r.summary,
+				`Fonts: ${r.detectedFonts.join(', ') || 'none detected'}`,
+				`Animation libraries: ${r.detectedAnimationLibraries.join(', ') || 'none'}`,
+				...(r.tailwindConfigPath ? [`Tailwind config: ${r.tailwindConfigPath}`] : []),
+				...(r.designTokenFiles.length ? [`Token files: ${r.designTokenFiles.join(', ')}`] : []),
+				...(r.sampleCssVariables.length ? [`Sample CSS variables: ${r.sampleCssVariables.slice(0, 16).join(', ')}`] : []),
+			].join('\n'),
+			audit_design_consistency: (_params, r) => [
+				`# Design Consistency Audit: ${r.score}/100`,
+				r.summary,
+				...(r.findings.length ? [`Findings:\n${r.findings.map(f => `- [${f.severity.toUpperCase()}][${f.category}] ${f.title}${f.location ? ` (${f.location})` : ''}: ${f.detail} -> ${f.fixRecommendation}`).join('\n')}`] : ['No consistency defects found.']),
+				...(r.strengths.length ? [`Strengths:\n${r.strengths.map(s => `- ${s}`).join('\n')}`] : []),
+			].join('\n'),
+			inspect_responsive_layout: (_params, r) => [
+				`# Multi-Viewport Responsive Layout Inspection: ${r.url}`,
+				`Overall: ${r.allViewportsClean ? 'ALL VIEWPORTS CLEAN' : 'RESPONSIVE DEFECTS DETECTED'}`,
+				r.summary,
+				...r.captures.map(c => `- **${c.label} (${c.width}x${c.height})**: screenshot=${c.path} | overflow=${c.hasHorizontalOverflow ? 'YES' : 'no'} | layoutIssues=${c.layoutIssueCount} | brokenImages=${c.brokenImageCount} | smallTouchTargets=${c.smallTouchTargetCount}`),
+			].join('\n'),
+			capture_application_screenshots: (_params, r) => [
+				`# Application Screenshots Captured (${r.captures.length} viewports): ${r.url}`,
+				...r.captures.map(c => `- ${c.label} (${c.width}x${c.height}): ${c.path} | overflow=${c.hasHorizontalOverflow ? 'YES' : 'no'} | brokenImages=${c.brokenImageCount}`),
+			].join('\n'),
+			inspect_visual_quality: (_params, r) => formatBrowserVisualAuditForLLM(r),
+			audit_accessibility: (_params, r) => [
+				`# Live WCAG 2.1 Accessibility Audit: ${r.url} (${r.viewport.width}x${r.viewport.height})`,
+				`Contrast Violations: ${r.contrastViolations.length} | Structural Issues: ${r.accessibilityIssues.length} | Missing Alt: ${r.missingAltImages.length} | Small Touch Targets: ${r.smallTouchTargets.length} | Reduced Motion Rule: ${r.pageMetrics.hasReducedMotionMediaRule ? 'yes' : 'no'}`,
+				...r.contrastViolations.map(c => `- [CONTRAST] ${c.selector} ("${c.textSample}"): ${c.ratio}:1 < ${c.required}:1 (${c.foreground} on ${c.background})`),
+				...r.accessibilityIssues.map(a => `- [${a.severity.toUpperCase()}][${a.rule}] ${a.selector}: ${a.detail}`),
+				...r.smallTouchTargets.map(t => `- [TOUCH] ${t.selector} ("${t.label}"): ${t.width}x${t.height}px (<40px)`),
+			].join('\n'),
+			audit_frontend_performance: (_params, r) => [
+				`# Live Frontend Performance Audit: ${r.url}`,
+				`DOM Nodes: ${r.performanceMetrics.domNodeCount} (max depth ${r.performanceMetrics.maxDomDepth})`,
+				`Timings: TTFB=${r.performanceMetrics.ttfbMs ?? '?'}ms, DOMContentLoaded=${r.performanceMetrics.domContentLoadedMs ?? '?'}ms, Load=${r.performanceMetrics.loadCompleteMs ?? '?'}ms`,
+				`Network Payload: ${r.performanceMetrics.resourceCount} resources, ${(r.performanceMetrics.totalTransferBytes / 1024).toFixed(1)} KB total | CLS=${r.performanceMetrics.cumulativeLayoutShift ?? 0}`,
+				...(r.performanceMetrics.largestResources.length ? [`Largest Resources:\n${r.performanceMetrics.largestResources.map(res => `- [${res.type}] ${res.name}: ${(res.bytes / 1024).toFixed(1)} KB (${res.durationMs}ms)`).join('\n')}`] : []),
+			].join('\n'),
+			critique_interface_design: (_params, r) => formatDesignCritiqueForLLM(r),
+			repair_visual_defects: (_params, r) => [
+				`# Visual Defect Repair Plan (${r.totalDefects} defect(s): ${r.criticalCount} critical, ${r.majorCount} major)`,
+				...(r.actions.length === 0
+					? ['No visual defects detected.']
+					: r.actions.map(a => `${a.priority}. [${a.severity.toUpperCase()}] ${a.target} — ${a.rootCause}\n   Fix: ${a.concreteFix}\n   Verify: ${a.verificationStep}`)),
+				``,
+				`Verification Loop:\n${r.recheckSequence.join('\n')}`,
+			].join('\n'),
+			compare_visual_revisions: (_params, r) => r.summary,
 
 			// Notebook operations
 			read_notebook: (params, result) => {

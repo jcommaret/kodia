@@ -171,6 +171,32 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'docker_status',
 	'docker_logs',
 	'db_inspect',
+	// Autonomous UI/UX Design Intelligence & Visual QA
+	'analyze_product_design_requirements',
+	'generate_design_brief',
+	'generate_visual_direction',
+	'generate_color_palette',
+	'generate_design_tokens',
+	'generate_page_architecture',
+	'generate_responsive_layout',
+	'discover_visual_assets',
+	'search_image_providers',
+	'download_visual_assets',
+	'optimize_visual_assets',
+	'discover_icon_library',
+	'recommend_typography',
+	'recommend_ui_components',
+	'generate_component_variants',
+	'inspect_existing_design_system',
+	'audit_design_consistency',
+	'inspect_responsive_layout',
+	'capture_application_screenshots',
+	'inspect_visual_quality',
+	'audit_accessibility',
+	'audit_frontend_performance',
+	'critique_interface_design',
+	'repair_visual_defects',
+	'compare_visual_revisions',
 ]);
 
 /**
@@ -463,6 +489,37 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'browser_check_element':
 		case 'browser_submit_form':
 		case 'browser_download':
+			return 'medium';
+
+		// Autonomous UI/UX Design Intelligence — analysis, generation, inspection & visual QA are low risk
+		case 'analyze_product_design_requirements':
+		case 'generate_design_brief':
+		case 'generate_visual_direction':
+		case 'generate_color_palette':
+		case 'generate_design_tokens':
+		case 'generate_page_architecture':
+		case 'generate_responsive_layout':
+		case 'discover_visual_assets':
+		case 'search_image_providers':
+		case 'discover_icon_library':
+		case 'recommend_typography':
+		case 'recommend_ui_components':
+		case 'generate_component_variants':
+		case 'inspect_existing_design_system':
+		case 'audit_design_consistency':
+		case 'inspect_responsive_layout':
+		case 'capture_application_screenshots':
+		case 'inspect_visual_quality':
+		case 'audit_accessibility':
+		case 'audit_frontend_performance':
+		case 'critique_interface_design':
+		case 'repair_visual_defects':
+		case 'compare_visual_revisions':
+			return 'low';
+
+		// Asset downloads and optimization write files into the workspace
+		case 'download_visual_assets':
+		case 'optimize_visual_assets':
 			return 'medium';
 	}
 	return 'medium';

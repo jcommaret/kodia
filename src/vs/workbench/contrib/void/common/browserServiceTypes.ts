@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import type { BrowserVisualAuditResult, MultiViewportAuditResult } from './designIntelligenceTypes.js';
 
 // ---------------------------------------------------------------------------
 // Browser automation service types
@@ -190,6 +191,10 @@ export interface IBrowserService {
 
 	// --- screenshots ---
 	takeScreenshot(sessionId: string, tabId: string, opts: { type?: ScreenshotType; selector?: string }): Promise<BrowserScreenshotResult>;
+
+	// --- design intelligence visual QA, accessibility, responsive & performance audits ---
+	auditDesignVisuals(sessionId: string, tabId: string): Promise<BrowserVisualAuditResult>;
+	captureMultiViewportAudit(sessionId: string, tabId: string, opts?: { viewports?: ReadonlyArray<{ label: string; width: number; height: number }>; fullPage?: boolean }): Promise<MultiViewportAuditResult>;
 
 	// --- console / network ---
 	getConsoleMessages(sessionId: string, tabId: string, opts: { level?: ConsoleLevel; limit?: number }): Promise<ConsoleMessage[]>;

@@ -24,6 +24,7 @@ export type ToolCategory =
 	| 'web'
 	| 'api'
 	| 'notebook'
+	| 'design'
 	| 'mcp';
 
 export interface ToolDisplayTitles {
@@ -216,6 +217,33 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	evaluate_quality_gates: { done: 'Evaluated quality gates', proposed: 'Evaluate quality gates', running: 'Evaluating quality gates' },
 	record_verification_evidence: { done: 'Recorded verification proof', proposed: 'Record verification proof', running: 'Recording verification proof' },
 	factory_manage_requirements: { done: 'Updated factory requirements', proposed: 'Update factory requirements', running: 'Updating factory requirements' },
+
+	// Autonomous UI/UX Design Intelligence, Assets & Visual QA
+	analyze_product_design_requirements: { done: 'Analyzed product requirements', proposed: 'Analyze product requirements', running: 'Analyzing product requirements' },
+	generate_design_brief: { done: 'Created design brief', proposed: 'Create design brief', running: 'Creating design brief' },
+	generate_visual_direction: { done: 'Selected visual direction', proposed: 'Select visual direction', running: 'Selecting visual direction' },
+	generate_color_palette: { done: 'Generated color palette', proposed: 'Generate color palette', running: 'Generating color palette' },
+	generate_design_tokens: { done: 'Created design tokens', proposed: 'Create design tokens', running: 'Creating design tokens' },
+	generate_page_architecture: { done: 'Planned page architecture', proposed: 'Plan page architecture', running: 'Planning page architecture' },
+	generate_responsive_layout: { done: 'Designed responsive layout', proposed: 'Design responsive layout', running: 'Designing responsive layout' },
+	discover_visual_assets: { done: 'Discovered visual assets', proposed: 'Discover visual assets', running: 'Searching for imagery' },
+	search_image_providers: { done: 'Searched image providers', proposed: 'Search image providers', running: 'Searching image providers' },
+	download_visual_assets: { done: 'Downloaded visual assets', proposed: 'Download visual assets', running: 'Downloading visual assets' },
+	optimize_visual_assets: { done: 'Optimized visual assets', proposed: 'Optimize visual assets', running: 'Optimizing visual assets' },
+	discover_icon_library: { done: 'Selected icon system', proposed: 'Select icon system', running: 'Inspecting icon libraries' },
+	recommend_typography: { done: 'Selected typography system', proposed: 'Select typography system', running: 'Selecting typography pairing' },
+	recommend_ui_components: { done: 'Planned UI components', proposed: 'Plan UI components', running: 'Planning UI components' },
+	generate_component_variants: { done: 'Generated component variants', proposed: 'Generate component variants', running: 'Generating component variants' },
+	inspect_existing_design_system: { done: 'Inspected existing design system', proposed: 'Inspect existing design system', running: 'Inspecting existing design system' },
+	audit_design_consistency: { done: 'Audited design consistency', proposed: 'Audit design consistency', running: 'Auditing design consistency' },
+	inspect_responsive_layout: { done: 'Tested responsive layouts', proposed: 'Test responsive layouts', running: 'Testing responsive layouts' },
+	capture_application_screenshots: { done: 'Captured preview screenshots', proposed: 'Capture preview screenshots', running: 'Rendering previews & capturing screenshots' },
+	inspect_visual_quality: { done: 'Inspected visual quality', proposed: 'Inspect visual quality', running: 'Inspecting visual quality' },
+	audit_accessibility: { done: 'Audited accessibility (WCAG)', proposed: 'Audit accessibility (WCAG)', running: 'Auditing accessibility' },
+	audit_frontend_performance: { done: 'Audited frontend performance', proposed: 'Audit frontend performance', running: 'Auditing frontend performance' },
+	critique_interface_design: { done: 'Critiqued interface design', proposed: 'Critique interface design', running: 'Performing design review' },
+	repair_visual_defects: { done: 'Planned visual defect repairs', proposed: 'Plan visual defect repairs', running: 'Identifying visual defects' },
+	compare_visual_revisions: { done: 'Compared visual revisions', proposed: 'Compare visual revisions', running: 'Comparing visual revisions' },
 };
 
 function humanizeToolName(toolName: string): string {
@@ -238,6 +266,23 @@ export function getToolDisplayTitles(toolName: string): ToolDisplayTitles {
 }
 
 export function getToolCategory(toolName: string): ToolCategory {
+	if (
+		toolName.includes('design_')
+		|| toolName.includes('visual_')
+		|| toolName.includes('color_palette')
+		|| toolName.includes('page_architecture')
+		|| toolName.includes('responsive_layout')
+		|| toolName.includes('image_providers')
+		|| toolName.includes('icon_library')
+		|| toolName.includes('typography')
+		|| toolName.includes('ui_components')
+		|| toolName.includes('component_variants')
+		|| toolName === 'capture_application_screenshots'
+		|| toolName === 'audit_accessibility'
+		|| toolName === 'audit_frontend_performance'
+		|| toolName === 'critique_interface_design'
+		|| toolName === 'repair_visual_defects'
+	) { return 'design'; }
 	if (toolName.startsWith('git_')) { return 'git'; }
 	if (toolName.startsWith('test_')) { return 'test'; }
 	if (toolName.startsWith('debug_')) { return 'debug'; }

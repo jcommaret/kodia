@@ -25,6 +25,7 @@
  */
 
 import { IBrowserService, BrowserLaunchResult, BrowserTabResult, BrowserTabInfo, BrowserInspectResult, BrowserPageInfo, BrowserScreenshotResult, ConsoleMessage, NetworkFailure, DownloadInfo, ScreenshotType, BrowserSessionInfo } from '../common/browserServiceTypes.js';
+import type { BrowserVisualAuditResult, MultiViewportAuditResult, ViewportScreenshotCapture } from '../common/designIntelligenceTypes.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { timeout } from '../../../../base/common/async.js';
 import { tmpdir } from 'os';
@@ -661,6 +662,358 @@ export class KodiaBrowserMainService implements IBrowserService {
 		fs.writeFileSync(filePath, buffer);
 		const dataUrl = `data:image/png;base64,${buffer.toString('base64')}`;
 		return { dataUrl, width, height, type, path: filePath };
+	}
+
+	async auditDesignVisuals(sessionId: string, tabId: string): Promise<BrowserVisualAuditResult> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const raw = await st.page.evaluate(() => {
+			const vw = document.documentElement.clientWidth;
+			const vh = document.documentElement.clientHeight;
+			const scrollWidth = document.documentElement.scrollWidth;
+			const scrollHeight = document.documentElement.scrollHeight;
+
+			const selectorOf = (el: Element): string => {
+				const tag = el.tagName.toLowerCase();
+				const id = el.getAttribute('id');
+				if (id) { return `#${id}`; }
+				const cls = (el.getAttribute('class') || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+				return cls ? `${tag}.${cls}` : tag;
+			};
+
+			const isVisible = (el: Element): boolean => {
+				const r = el.getBoundingClientRect();
+				if (r.width === 0 && r.height === 0) { return false; }
+				for (let cur: Element | null = el; cur; cur = cur.parentElement) {
+					const cs = window.getComputedStyle(cur);
+					if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') { return false; }
+				}
+				return true;
+			};
+
+			const parseRgba = (colorStr: string): [number, number, number, number] | null => {
+				const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,/\s]+([\d.]+))?\s*\)/i.exec(colorStr);
+				if (!m) { return null; }
+				return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] !== undefined ? Number(m[4]) : 1];
+			};
+
+			const luminance = (r: number, g: number, b: number): number => {
+				const f = (c: number) => {
+					const s = c / 255;
+					return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+				};
+				return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+			};
+
+			const contrastRatio = (c1: [number, number, number], c2: [number, number, number]): number => {
+				const l1 = luminance(c1[0], c1[1], c1[2]);
+				const l2 = luminance(c2[0], c2[1], c2[2]);
+				const hi = Math.max(l1, l2);
+				const lo = Math.min(l1, l2);
+				return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+			};
+
+			const resolveEffectiveBg = (el: Element): [number, number, number] => {
+				let cur: Element | null = el;
+				while (cur) {
+					const parsed = parseRgba(window.getComputedStyle(cur).backgroundColor);
+					if (parsed && parsed[3] >= 0.85) {
+						return [parsed[0], parsed[1], parsed[2]];
+					}
+					cur = cur.parentElement;
+				}
+				return [255, 255, 255];
+			};
+
+			// 1. Imagery checks
+			const brokenImages: Array<{ src: string; alt: string; selector: string }> = [];
+			const distortedImages: Array<{ src: string; naturalRatio: number; renderedRatio: number; selector: string }> = [];
+			const missingAltImages: Array<{ src: string; selector: string }> = [];
+			for (const img of Array.from(document.querySelectorAll('img'))) {
+				const src = img.getAttribute('src') || img.currentSrc || '(no src)';
+				const sel = selectorOf(img);
+				if (!img.hasAttribute('alt')) {
+					missingAltImages.push({ src, selector: sel });
+				}
+				if (!isVisible(img)) { continue; }
+				if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) {
+					brokenImages.push({ src, alt: img.getAttribute('alt') || '', selector: sel });
+				} else {
+					const r = img.getBoundingClientRect();
+					if (r.width > 16 && r.height > 16) {
+						const natRatio = img.naturalWidth / img.naturalHeight;
+						const renRatio = r.width / r.height;
+						const cs = window.getComputedStyle(img);
+						const distortion = Math.max(natRatio / renRatio, renRatio / natRatio);
+						if (distortion > 1.38 && cs.objectFit !== 'cover' && cs.objectFit !== 'contain') {
+							distortedImages.push({
+								src,
+								naturalRatio: Math.round(natRatio * 100) / 100,
+								renderedRatio: Math.round(renRatio * 100) / 100,
+								selector: sel,
+							});
+						}
+					}
+				}
+			}
+
+			// 2. WCAG Contrast checks on visible text elements
+			const contrastViolations: Array<{ selector: string; textSample: string; foreground: string; background: string; ratio: number; required: number }> = [];
+			const textNodes = Array.from(document.querySelectorAll('h1, h2, h3, h4, p, a, button, label, li, td, th, span'));
+			for (const el of textNodes.slice(0, 260)) {
+				if (contrastViolations.length >= 20) { break; }
+				if (!isVisible(el)) { continue; }
+				const directText = Array.from(el.childNodes)
+					.filter(n => n.nodeType === 3)
+					.map(n => (n.textContent || '').trim())
+					.join(' ')
+					.trim();
+				if (directText.length < 2) { continue; }
+				const cs = window.getComputedStyle(el);
+				const fg = parseRgba(cs.color);
+				if (!fg || fg[3] < 0.2) { continue; }
+				const bg = resolveEffectiveBg(el);
+				const fontSize = parseFloat(cs.fontSize) || 16;
+				const fontWeight = parseInt(cs.fontWeight, 10) || 400;
+				const isLarge = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700);
+				const required = isLarge ? 3.0 : 4.5;
+				const ratio = contrastRatio([fg[0], fg[1], fg[2]], bg);
+				if (ratio < required) {
+					contrastViolations.push({
+						selector: selectorOf(el),
+						textSample: directText.slice(0, 48),
+						foreground: cs.color,
+						background: `rgb(${bg[0]}, ${bg[1]}, ${bg[2]})`,
+						ratio,
+						required,
+					});
+				}
+			}
+
+			// 3. Structural Accessibility checks
+			const accessibilityIssues: Array<{ rule: string; severity: 'critical' | 'major' | 'minor'; selector: string; detail: string }> = [];
+			if (!document.documentElement.getAttribute('lang')) {
+				accessibilityIssues.push({ rule: 'html-has-lang', severity: 'major', selector: 'html', detail: 'Document <html> element is missing a lang attribute.' });
+			}
+			if (!document.querySelector('main, [role="main"]')) {
+				accessibilityIssues.push({ rule: 'landmark-main', severity: 'minor', selector: 'body', detail: 'Page is missing a <main> landmark.' });
+			}
+			const headingCounts: Record<string, number> = { h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0 };
+			let prevLevel = 0;
+			let headingHierarchyValid = true;
+			for (const h of Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))) {
+				const tag = h.tagName.toLowerCase();
+				headingCounts[tag] = (headingCounts[tag] || 0) + 1;
+				const level = Number(tag.slice(1));
+				if (prevLevel > 0 && level > prevLevel + 1) {
+					headingHierarchyValid = false;
+					if (accessibilityIssues.length < 25) {
+						accessibilityIssues.push({ rule: 'heading-order', severity: 'minor', selector: selectorOf(h), detail: `Heading level skipped from h${prevLevel} to h${level}.` });
+					}
+				}
+				prevLevel = level;
+			}
+			if (headingCounts.h1 === 0) {
+				headingHierarchyValid = false;
+				accessibilityIssues.push({ rule: 'page-has-h1', severity: 'major', selector: 'body', detail: 'Page has no <h1> heading.' });
+			}
+			for (const img of missingAltImages.slice(0, 8)) {
+				accessibilityIssues.push({ rule: 'img-alt', severity: 'major', selector: img.selector, detail: `Image "${img.src}" is missing an alt attribute.` });
+			}
+			for (const input of Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea')).slice(0, 40)) {
+				if (!isVisible(input)) { continue; }
+				const id = input.getAttribute('id');
+				const hasLabel = !!(input.getAttribute('aria-label') || input.getAttribute('aria-labelledby') || input.closest('label') || (id && document.querySelector(`label[for="${CSS.escape(id)}"]`)));
+				if (!hasLabel) {
+					accessibilityIssues.push({ rule: 'form-label', severity: 'major', selector: selectorOf(input), detail: 'Interactive form control has no associated <label> or aria-label.' });
+				}
+			}
+			for (const btn of Array.from(document.querySelectorAll('button, [role="button"], a[href]')).slice(0, 80)) {
+				if (!isVisible(btn)) { continue; }
+				const name = (btn.getAttribute('aria-label') || btn.getAttribute('title') || btn.textContent || '').trim();
+				if (!name) {
+					accessibilityIssues.push({ rule: 'interactive-accessible-name', severity: 'critical', selector: selectorOf(btn), detail: 'Icon-only button or link has no accessible name (add aria-label).' });
+				}
+			}
+
+			// 4. Layout & Touch Target checks
+			const layoutIssues: Array<{ kind: string; selector: string; detail: string }> = [];
+			if (scrollWidth > vw + 1) {
+				layoutIssues.push({ kind: 'horizontal-overflow', selector: 'document', detail: `Page overflows horizontally: scrollWidth=${scrollWidth}px > viewport=${vw}px.` });
+			}
+			const smallTouchTargets: Array<{ selector: string; width: number; height: number; label: string }> = [];
+			const interactives = Array.from(document.querySelectorAll('a[href], button, input:not([type="hidden"]), select, textarea, [role="button"]'));
+			for (const el of interactives.slice(0, 120)) {
+				if (!isVisible(el)) { continue; }
+				const r = el.getBoundingClientRect();
+				if (vw <= 768 && (r.width < 40 || r.height < 40) && smallTouchTargets.length < 15) {
+					smallTouchTargets.push({
+						selector: selectorOf(el),
+						width: Math.round(r.width),
+						height: Math.round(r.height),
+						label: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 40),
+					});
+				}
+			}
+
+			// 5. Typography metrics
+			const fontSet = new Set<string>();
+			for (const el of [document.body, ...Array.from(document.querySelectorAll('h1, h2, h3, p, button'))].slice(0, 40)) {
+				if (!el) { continue; }
+				const fam = window.getComputedStyle(el).fontFamily.split(',')[0].replace(/['"]/g, '').trim();
+				if (fam) { fontSet.add(fam); }
+			}
+			const bodySize = document.body ? parseFloat(window.getComputedStyle(document.body).fontSize) : null;
+			const h1El = document.querySelector('h1');
+			const h1Size = h1El ? parseFloat(window.getComputedStyle(h1El).fontSize) : null;
+			const loadedFontCount = (document as any).fonts ? Array.from((document as any).fonts).filter((f: any) => f.status === 'loaded').length : 0;
+
+			// Reduced motion stylesheet check
+			let hasReducedMotionMediaRule = false;
+			try {
+				for (const sheet of Array.from(document.styleSheets)) {
+					let rules: CSSRuleList | undefined;
+					try { rules = sheet.cssRules; } catch { continue; }
+					if (!rules) { continue; }
+					for (const rule of Array.from(rules)) {
+						if (rule.cssText && rule.cssText.includes('prefers-reduced-motion')) {
+							hasReducedMotionMediaRule = true;
+							break;
+						}
+					}
+					if (hasReducedMotionMediaRule) { break; }
+				}
+			} catch { /* cross-origin stylesheets */ }
+
+			// 6. Performance metrics
+			const allNodes = document.querySelectorAll('*');
+			let maxDomDepth = 0;
+			for (let i = 0; i < Math.min(allNodes.length, 400); i++) {
+				let depth = 0;
+				let cur: Element | null = allNodes[i];
+				while (cur && depth < 64) { depth++; cur = cur.parentElement; }
+				if (depth > maxDomDepth) { maxDomDepth = depth; }
+			}
+			const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+			const resEntries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+			let totalTransferBytes = 0;
+			const largestResources = resEntries
+				.map(r => {
+					const bytes = r.transferSize || r.encodedBodySize || 0;
+					totalTransferBytes += bytes;
+					return { name: r.name.slice(-80), type: r.initiatorType || 'other', bytes, durationMs: Math.round(r.duration) };
+				})
+				.sort((a, b) => b.bytes - a.bytes)
+				.slice(0, 6);
+
+			const clsEntries = performance.getEntriesByType('layout-shift') as Array<{ value?: number; hadRecentInput?: boolean }>;
+			const cls = clsEntries.reduce((sum, e) => sum + (e.hadRecentInput ? 0 : (e.value || 0)), 0);
+
+			return {
+				url: location.href,
+				title: document.title,
+				viewport: { width: vw, height: vh },
+				brokenImages,
+				distortedImages,
+				missingAltImages,
+				contrastViolations,
+				accessibilityIssues,
+				layoutIssues,
+				smallTouchTargets,
+				typographyMetrics: {
+					fontFamilies: Array.from(fontSet),
+					loadedFontCount,
+					bodyFontSizePx: bodySize ? Math.round(bodySize * 10) / 10 : null,
+					h1FontSizePx: h1Size ? Math.round(h1Size * 10) / 10 : null,
+					headingHierarchyValid,
+					headingCounts,
+				},
+				performanceMetrics: {
+					domNodeCount: allNodes.length,
+					maxDomDepth,
+					ttfbMs: navEntry ? Math.round(navEntry.responseStart - navEntry.requestStart) : null,
+					domContentLoadedMs: navEntry ? Math.round(navEntry.domContentLoadedEventEnd) : null,
+					loadCompleteMs: navEntry ? Math.round(navEntry.loadEventEnd) : null,
+					resourceCount: resEntries.length,
+					totalTransferBytes,
+					largestResources,
+					cumulativeLayoutShift: Math.round(cls * 1000) / 1000,
+				},
+				pageMetrics: {
+					scrollWidth,
+					scrollHeight,
+					hasHorizontalOverflow: scrollWidth > vw + 1,
+					visibleTextLength: (document.body?.innerText || '').trim().length,
+					interactiveElementCount: interactives.length,
+					hasReducedMotionMediaRule,
+				},
+			};
+		});
+
+		const consoleErrors = st.consoleMessages.filter(m => m.level === 'error').length;
+		return {
+			...raw,
+			loadError: st.loadError,
+			consoleErrors,
+			networkFailures: st.networkFailures.length,
+		};
+	}
+
+	async captureMultiViewportAudit(
+		sessionId: string,
+		tabId: string,
+		opts?: { viewports?: ReadonlyArray<{ label: string; width: number; height: number }>; fullPage?: boolean },
+	): Promise<MultiViewportAuditResult> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const originalViewport = st.page.viewportSize() ?? { width: 1280, height: 800 };
+		const viewports = opts?.viewports && opts.viewports.length > 0
+			? opts.viewports
+			: [
+				{ label: 'mobile', width: 375, height: 812 },
+				{ label: 'tablet', width: 768, height: 1024 },
+				{ label: 'desktop', width: 1440, height: 900 },
+			];
+
+		const captures: ViewportScreenshotCapture[] = [];
+		try {
+			for (const vp of viewports) {
+				await st.page.setViewportSize({ width: vp.width, height: vp.height });
+				await timeout(120);
+				const [audit, shot] = await Promise.all([
+					this.auditDesignVisuals(sessionId, tabId),
+					this.takeScreenshot(sessionId, tabId, { type: opts?.fullPage ? 'fullpage' : 'viewport' }),
+				]);
+				captures.push({
+					label: vp.label,
+					width: vp.width,
+					height: vp.height,
+					path: shot.path,
+					dataUrl: shot.dataUrl,
+					hasHorizontalOverflow: audit.pageMetrics.hasHorizontalOverflow,
+					layoutIssueCount: audit.layoutIssues.length,
+					brokenImageCount: audit.brokenImages.length,
+					smallTouchTargetCount: audit.smallTouchTargets.length,
+					audit,
+				});
+			}
+		} finally {
+			await st.page.setViewportSize(originalViewport).catch(() => { });
+		}
+
+		const allViewportsClean = captures.every(c => !c.hasHorizontalOverflow && c.layoutIssueCount === 0 && c.brokenImageCount === 0);
+		const summary = captures
+			.map(c => `${c.label} (${c.width}x${c.height}): ${c.hasHorizontalOverflow ? 'OVERFLOW' : 'ok'}, ${c.layoutIssueCount} layout issue(s), ${c.brokenImageCount} broken img, ${c.smallTouchTargetCount} small touch target(s)`)
+			.join(' | ');
+
+		return {
+			url: st.url,
+			title: st.title,
+			capturedAt: new Date().toISOString(),
+			captures,
+			allViewportsClean,
+			summary,
+		};
 	}
 
 	async getConsoleMessages(sessionId: string, tabId: string, opts: { level?: 'debug' | 'info' | 'warning' | 'error'; limit?: number }): Promise<ConsoleMessage[]> {

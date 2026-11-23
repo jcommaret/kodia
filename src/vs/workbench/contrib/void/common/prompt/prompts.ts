@@ -1740,6 +1740,265 @@ export const builtinTools: {
 		},
 	},
 
+	// --- Autonomous UI/UX Design Intelligence, Visual Assets & Browser Visual QA (25 tools) ---
+
+	analyze_product_design_requirements: {
+		name: 'analyze_product_design_requirements',
+		description: 'Autonomously analyzes any digital product idea (website, e-commerce, SaaS, dashboard, mobile app, desktop app, game, or specialized UI) to infer product domain, target users, primary goals, user journeys, information architecture, required pages, core components, interactive functionality, imagery needs, responsive targets, and accessibility/performance requirements.',
+		params: {
+			product_description: { description: 'The product idea, user request, or scope description.' },
+			product_name: { description: 'Optional brand or product name.' },
+			product_category: { description: 'Optional explicit category (e.g. fashion_store, saas_application, financial_dashboard, restaurant_website, browser_game).' },
+			target_devices: { description: 'Optional JSON array or comma-separated list of target devices.' },
+		},
+	},
+
+	generate_design_brief: {
+		name: 'generate_design_brief',
+		description: 'Generates an executive creative & UX design brief unifying product goals, visual direction, layout strategy, imagery direction, motion discipline, functional integrity plan, quality benchmarks, and anti-patterns to avoid.',
+		params: {
+			product_description: { description: 'The product description or user request.' },
+			product_name: { description: 'Optional brand/product name.' },
+			product_category: { description: 'Optional product category.' },
+			visual_direction: { description: 'Optional visual direction ID (or "auto").' },
+		},
+	},
+
+	generate_visual_direction: {
+		name: 'generate_visual_direction',
+		description: 'Selects and details an art-directed visual style (e.g. luxury-editorial, sophisticated-fashion, high-end-saas, modern-enterprise, swiss-editorial, dark-premium, financial-authority, gaming-immersive) with explicit restraint guardrails on what visual treatments to use and avoid.',
+		params: {
+			product_description: { description: 'Product description and tone cues.' },
+			product_category: { description: 'Optional product category.' },
+			requested_direction: { description: 'Optional specific direction ID or "auto".' },
+		},
+	},
+
+	generate_color_palette: {
+		name: 'generate_color_palette',
+		description: 'Generates WCAG 2.1 AA/AAA verified light and dark color palettes using real color harmony math (monochromatic, neutral-accent, complementary, analogous, split-complementary, triadic, warm-editorial, cool-technical, dark-premium), including semantic status colors, surfaces, borders, and contrast ratio verification.',
+		params: {
+			product_description: { description: 'Optional product description for automatic palette selection.' },
+			product_category: { description: 'Optional product category.' },
+			visual_direction: { description: 'Optional visual direction ID.' },
+			harmony: { description: 'Optional color harmony strategy.' },
+			brand_primary_color: { description: 'Optional brand primary hex color (e.g. #1E3A5F).' },
+			brand_secondary_color: { description: 'Optional brand secondary hex color.' },
+			brand_accent_color: { description: 'Optional brand accent hex color.' },
+		},
+	},
+
+	generate_design_tokens: {
+		name: 'generate_design_tokens',
+		description: 'Generates a complete production design token system (CSS custom properties for light + dark themes, typography scale, spacing, radii, elevation shadows, motion durations/easing with prefers-reduced-motion, breakpoints, Tailwind extend snippet, and W3C JSON tokens).',
+		params: {
+			name: { description: 'Optional design system name.' },
+			product_description: { description: 'Optional product description.' },
+			product_category: { description: 'Optional product category.' },
+			visual_direction: { description: 'Optional visual direction ID.' },
+			harmony: { description: 'Optional color harmony strategy.' },
+			brand_primary_color: { description: 'Optional primary brand hex color.' },
+		},
+	},
+
+	generate_page_architecture: {
+		name: 'generate_page_architecture',
+		description: 'Designs the complete page/screen sitemap, route structure, desktop & mobile navigation patterns, section blueprints, required UI states (default/loading/empty/error/filtered), and real interactive data flows.',
+		params: {
+			product_description: { description: 'Product description or request.' },
+			product_name: { description: 'Optional product name.' },
+			product_category: { description: 'Optional product category.' },
+		},
+	},
+
+	generate_responsive_layout: {
+		name: 'generate_responsive_layout',
+		description: 'Produces a mobile-first responsive engineering specification (320px small mobile through 2560px ultrawide), CSS Grid/Flexbox/Container Query foundation CSS, deliberate mobile transformations, 44px touch-target rules, safe-area insets, and overflow prevention rules.',
+		params: {
+			product_description: { description: 'Optional product description.' },
+			product_category: { description: 'Optional product category.' },
+			max_content_width: { description: 'Optional max container width (e.g. 1280px or 1600px).' },
+		},
+	},
+
+	discover_visual_assets: {
+		name: 'discover_visual_assets',
+		description: 'Proactively discovers legitimate, verified visual assets (local workspace imagery, Openverse CC imagery, Wikimedia Commons, and configured Unsplash/Pexels/Pixabay providers) matching the desired subject and orientation. Returns verified URLs, dimensions, licenses, attribution, and alt-text suggestions.',
+		params: {
+			query: { description: 'Descriptive visual search query (e.g. "minimalist luxury fashion coat studio editorial").' },
+			purpose: { description: 'Optional slot purpose (e.g. hero-banner, product-card, interior-photo).' },
+			orientation: { description: 'Optional orientation: landscape | portrait | square.' },
+			limit: { description: 'Optional maximum results per provider (default 6).' },
+			providers: { description: 'Optional JSON array or comma-separated list of providers: local, openverse, wikimedia, unsplash, pexels, pixabay.' },
+		},
+	},
+
+	search_image_providers: {
+		name: 'search_image_providers',
+		description: 'Queries approved external and local image providers directly and returns raw provider statuses, verified image URLs, dimensions, and licensing metadata.',
+		params: {
+			query: { description: 'Search query string.' },
+			providers: { description: 'Optional JSON array or comma-separated list of providers.' },
+			orientation: { description: 'Optional orientation: landscape | portrait | square.' },
+			limit: { description: 'Optional max results per provider (default 6).' },
+		},
+	},
+
+	download_visual_assets: {
+		name: 'download_visual_assets',
+		description: 'Downloads verified visual asset URLs into the workspace (or generates original bespoke SVG artwork when requested/offline), verifies image bytes and dimensions on disk, and writes an ASSETS_ATTRIBUTION.json license manifest.',
+		params: {
+			assets: { description: 'JSON array of asset objects: [{ url?, filename?, alt_text, provider?, license?, attribution?, svg_subject?, primary_color?, secondary_color?, accent_color?, width?, height?, svg_style? }].' },
+			target_dir: { description: 'Optional workspace-relative target folder (default "public/images").' },
+		},
+	},
+
+	optimize_visual_assets: {
+		name: 'optimize_visual_assets',
+		description: 'Inspects workspace images on disk, safely minifies SVGs, flags oversized images (>350KB or >2400px), verifies files exist, and generates responsive width/height/lazy-loading markup hints.',
+		params: {
+			target_paths: { description: 'Optional JSON array or comma-separated workspace-relative paths to optimize (defaults to all discovered workspace image directories).' },
+			minify_svgs: { description: 'Optional boolean (default true) to safely minify SVG assets.' },
+		},
+	},
+
+	discover_icon_library: {
+		name: 'discover_icon_library',
+		description: 'Inspects the workspace package.json to detect existing installed icon libraries (Lucide, Heroicons, Phosphor, Tabler, Material Symbols, React Icons, Font Awesome) so Kodia reuses the project icon system cleanly instead of installing duplicates, and provides icon sizing & accessibility guidance.',
+		params: {
+			visual_direction: { description: 'Optional visual direction ID for icon style pairing.' },
+		},
+	},
+
+	recommend_typography: {
+		name: 'recommend_typography',
+		description: 'Recommends a cohesive font pairing (display + body + monospace), Google Fonts import URL, CSS font stacks, fluid clamp() modular type scale, weights, line heights, and typography best practices.',
+		params: {
+			visual_direction: { description: 'Optional visual direction ID.' },
+			product_description: { description: 'Optional product description if visual_direction is omitted.' },
+			heading_font: { description: 'Optional custom heading font override.' },
+			body_font: { description: 'Optional custom body font override.' },
+		},
+	},
+
+	recommend_ui_components: {
+		name: 'recommend_ui_components',
+		description: 'Recommends the structured UI component vocabulary (cards, buttons, navigation, forms, tables, drawers, feedback states) tailored to the product category and visual direction, including required interactive states and responsive behaviors.',
+		params: {
+			product_description: { description: 'Product description or scope.' },
+			product_category: { description: 'Optional product category.' },
+			visual_direction: { description: 'Optional visual direction ID.' },
+		},
+	},
+
+	generate_component_variants: {
+		name: 'generate_component_variants',
+		description: 'Generates production-ready, accessible component variants (e.g. button, card, product-card, dashboard-card) matched to the project framework, styling system, and visual direction.',
+		params: {
+			component_type: { description: 'Component type (e.g. "button", "card", "product-card", "dashboard-card").' },
+			framework: { description: 'Optional framework (react, nextjs, vue, svelte, html-css-js); auto-detected from workspace if omitted.' },
+			styling_system: { description: 'Optional styling system (tailwind, css-modules, vanilla-css, scss); auto-detected if omitted.' },
+			visual_direction: { description: 'Optional visual direction ID.' },
+		},
+	},
+
+	inspect_existing_design_system: {
+		name: 'inspect_existing_design_system',
+		description: 'Statically inspects the open workspace to detect the existing frontend framework, styling system (Tailwind/CSS Modules/Vanilla CSS/SCSS), icon libraries, animation libraries, fonts, CSS custom properties, color palette, dark-theme support, and reduced-motion rules.',
+		params: {
+			sub_path: { description: 'Optional workspace subdirectory to inspect.' },
+		},
+	},
+
+	audit_design_consistency: {
+		name: 'audit_design_consistency',
+		description: 'Audits workspace UI source files for color sprawl, CSS token adoption, missing responsive rules, missing prefers-reduced-motion, removed focus outlines, missing img alt attributes, placeholder images, lorem ipsum copy, and emoji-as-UI-icons.',
+		params: {
+			sub_path: { description: 'Optional workspace subdirectory to audit.' },
+		},
+	},
+
+	inspect_responsive_layout: {
+		name: 'inspect_responsive_layout',
+		description: 'Tests a live rendered page in Chromium across mobile (375x812), tablet (768x1024), and desktop (1440x900) viewports, capturing screenshots and measuring horizontal overflow, layout defects, broken images, and undersized mobile touch targets.',
+		params: {
+			session_id: { description: 'Browser session ID from browser_launch.' },
+			tab_id: { description: 'Browser tab ID from browser_new_tab.' },
+			viewports: { description: 'Optional JSON array of { label, width, height } viewports.' },
+			full_page: { description: 'Optional boolean to capture full-page screenshots (default false).' },
+		},
+	},
+
+	capture_application_screenshots: {
+		name: 'capture_application_screenshots',
+		description: 'Renders the live application across representative viewports (mobile, tablet, desktop), saves real PNG screenshots to disk, records them in Kodia revision history, and returns layout & asset verification summaries.',
+		params: {
+			session_id: { description: 'Browser session ID from browser_launch.' },
+			tab_id: { description: 'Browser tab ID from browser_new_tab.' },
+			viewports: { description: 'Optional JSON array of { label, width, height } viewports.' },
+			full_page: { description: 'Optional boolean to capture full-page screenshots (default false).' },
+		},
+	},
+
+	inspect_visual_quality: {
+		name: 'inspect_visual_quality',
+		description: 'Performs a comprehensive live DOM & computed-style visual QA inspection in Chromium: checks broken images, distorted aspect ratios, typography scale & font loading, WCAG contrast violations, layout issues, console errors, and network failures.',
+		params: {
+			session_id: { description: 'Browser session ID from browser_launch.' },
+			tab_id: { description: 'Browser tab ID from browser_new_tab.' },
+		},
+	},
+
+	audit_accessibility: {
+		name: 'audit_accessibility',
+		description: 'Runs a live WCAG 2.1 accessibility audit on the rendered browser page: measures computed text/background color contrast, missing alt text, unlabeled form controls, missing accessible names on icon buttons, heading hierarchy, landmarks, lang attribute, touch target sizes, and prefers-reduced-motion.',
+		params: {
+			session_id: { description: 'Browser session ID from browser_launch.' },
+			tab_id: { description: 'Browser tab ID from browser_new_tab.' },
+		},
+	},
+
+	audit_frontend_performance: {
+		name: 'audit_frontend_performance',
+		description: 'Measures real rendered frontend performance in Chromium: DOM node count & max depth, TTFB, DOMContentLoaded, Load time, resource count, total transfer size, largest resources, and Cumulative Layout Shift (CLS).',
+		params: {
+			session_id: { description: 'Browser session ID from browser_launch.' },
+			tab_id: { description: 'Browser tab ID from browser_new_tab.' },
+		},
+	},
+
+	critique_interface_design: {
+		name: 'critique_interface_design',
+		description: 'Performs an internal professional design critique combining static design consistency auditing with live Chromium visual/responsive/accessibility/performance metrics, producing a 0-100 multi-dimension score, grade (A+ to F), ship readiness verdict, and prioritized defects.',
+		params: {
+			session_id: { description: 'Optional browser session ID for live rendered critique.' },
+			tab_id: { description: 'Optional browser tab ID for live rendered critique.' },
+			sub_path: { description: 'Optional workspace subdirectory for static audit.' },
+			product_description: { description: 'Optional product context description.' },
+		},
+	},
+
+	repair_visual_defects: {
+		name: 'repair_visual_defects',
+		description: 'Diagnoses detected static and live visual/responsive/accessibility defects and outputs a prioritized root-cause repair plan with concrete fixes and a post-edit browser verification sequence.',
+		params: {
+			session_id: { description: 'Optional browser session ID.' },
+			tab_id: { description: 'Optional browser tab ID.' },
+			sub_path: { description: 'Optional workspace subdirectory.' },
+		},
+	},
+
+	compare_visual_revisions: {
+		name: 'compare_visual_revisions',
+		description: 'Performs pixel-by-pixel PNG visual regression comparison between a baseline screenshot and a revised screenshot, reporting changed pixel count, diff percentage, changed bounding region, and saving a highlighted diff PNG to disk.',
+		params: {
+			baseline_path: { description: 'Absolute file path to the baseline PNG screenshot.' },
+			current_path: { description: 'Absolute file path to the revised PNG screenshot.' },
+			diff_output_path: { description: 'Optional absolute file path where the highlighted visual diff PNG should be written.' },
+			pixel_threshold: { description: 'Optional per-channel tolerance 0-255 (default 18).' },
+		},
+	},
+
 	// go_to_definition
 	// go_to_usages
 
@@ -1763,7 +2022,7 @@ export const isABuiltinToolName = (toolName: string): toolName is BuiltinToolNam
 const toolsNotOfferedToModels: ReadonlySet<BuiltinToolName> = new Set(['read_project_memory', 'code_hybrid_search'])
 
 // tools that change nothing but still need approval: Gather/Plan modes offer them too
-const readOnlyToolsNeedingApproval: ReadonlySet<BuiltinToolName> = new Set(['fetch_url', 'web_search'])
+const readOnlyToolsNeedingApproval: ReadonlySet<BuiltinToolName> = new Set(['fetch_url', 'web_search', 'discover_visual_assets', 'search_image_providers'])
 const planModeExtraTools: ReadonlySet<BuiltinToolName> = new Set(['create_task_plan', 'update_task_plan', 'get_task_plan', 'todo', 'git_status', 'git_diff', 'git_log', 'git_branch_list', 'test_discover', 'test_list', 'test_history'])
 
 // explicitTools: Kodia Agents Window — an agent that runs its own tools offers exactly those, instead of the chat mode's
@@ -1892,6 +2151,14 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 		details.push(`To create a new file with content, use write_file (or create_file_or_folder then write_file). Do not just show code blocks — actually write the file.`)
 		details.push(`Before changing code, look at what it touches and what depends on it, so the change is right the first time.`)
 		details.push(`Don't modify files outside the user's workspace without asking: the user hasn't opened them for this work.`)
+	}
+
+	if (mode === 'agent' || mode === 'plan') {
+		details.push(`AUTONOMOUS UI/UX DESIGN & FRONTEND ENGINEERING DEFAULT: Whenever building or redesigning a website, e-commerce store, web app, dashboard, mobile/desktop UI, game, or frontend component, automatically deliver world-class, art-directed, production-grade design without waiting for the user to specify colors, typography, cards, imagery, or responsiveness:
+- Before coding UI: inspect an existing repo with inspect_existing_design_system + discover_icon_library, and plan new products with analyze_product_design_requirements, generate_design_brief, generate_design_tokens (or generate_color_palette + recommend_typography), and generate_page_architecture / generate_responsive_layout.
+- Visual assets & icons: proactively discover and download verified imagery with discover_visual_assets + download_visual_assets (or generate bespoke SVG artwork when offline/appropriate) and use clean vector icons from one coherent icon library. Never ship broken image URLs, generic placeholder boxes, lorem ipsum, or emoji substitutes for UI icons.
+- Real functionality & responsiveness: wire every search, filter, sort, cart, form validation, navigation, and modal control to real state/logic. Engineer responsive mobile (375px), tablet (768px), and desktop (1440px+) layouts with WCAG AA contrast, :focus-visible rings, and prefers-reduced-motion.
+- Visual QA loop before finishing: render the app in the browser (browser_launch + browser_navigate) and verify with inspect_responsive_layout, inspect_visual_quality, audit_accessibility, and critique_interface_design. If defects are found, plan fixes with repair_visual_defects, repair the code, reload, verify with compare_visual_revisions, and never claim an asset or screen is verified unless the tool actually succeeded.`)
 	}
 
 	if (mode === 'plan') {

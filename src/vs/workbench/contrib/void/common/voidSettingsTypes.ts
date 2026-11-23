@@ -9,6 +9,7 @@ import { listableProviderNames } from './providerModels.js';
 import { ToolApprovalType } from './toolsServiceTypes.js';
 import { AutonomyMode, defaultAutonomyMode } from './autonomyPolicy.js';
 import { InstructionsFramework } from './instructionsFrameworks.js';
+import { DEFAULT_DESIGN_INTELLIGENCE_SETTINGS, DesignIntelligenceSettings } from './designIntelligenceTypes.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
 
@@ -521,6 +522,8 @@ export type GlobalSettings = {
 	fallbackModels: ModelSelection[];
 	modelRoutingByRole: Record<string, ModelSelection | null>;
 	disabledTools: string[];
+	// Autonomous UI/UX Design Intelligence & Creative Direction Engine
+	designIntelligence: DesignIntelligenceSettings;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -563,6 +566,8 @@ export const defaultGlobalSettings: GlobalSettings = {
 	fallbackModels: [],
 	modelRoutingByRole: {},
 	disabledTools: [],
+	// Autonomous UI/UX Design Intelligence & Creative Direction Engine
+	designIntelligence: DEFAULT_DESIGN_INTELLIGENCE_SETTINGS,
 }
 
 export type GlobalSettingName = keyof GlobalSettings

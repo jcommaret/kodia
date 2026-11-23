@@ -17,6 +17,34 @@ import { DbInspectReport, DbQueryReport, DockerLogsReport, DockerStatusReport, E
 import { ChangeImpactReport, DigitalTwinNode } from './digitalTwin.js';
 import { QualityGateEvaluation, VerificationLevel, VerificationRecord } from './verificationLedger.js';
 import { ArchitectureDecisionRecord, ProjectRequirement } from './softwareFactory.js';
+import type {
+	AssetOptimizationReport,
+	BrowserVisualAuditResult,
+	ColorHarmonyStrategy,
+	ColorPaletteSpec,
+	ComponentRecommendation,
+	ComponentVariantSpec,
+	DesignBrief,
+	DesignConsistencyAuditReport,
+	DesignCritiqueReport,
+	DesignTokensSpec,
+	DownloadedVisualAsset,
+	ExistingDesignSystemReport,
+	FrontendFramework,
+	IconLibraryRecommendation,
+	ImageProviderName,
+	MultiViewportAuditResult,
+	PageArchitectureSpec,
+	ProductDesignAnalysis,
+	ResponsiveLayoutSpec,
+	StylingSystem,
+	TypographyRecommendation,
+	VisualAssetSearchResult,
+	VisualDirectionId,
+	VisualDirectionSpec,
+	VisualRepairPlan,
+	VisualRevisionComparison,
+} from './designIntelligenceTypes.js';
 
 
 
@@ -189,6 +217,16 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'execute_notebook_cell': 'terminal',
 	'execute_notebook': 'terminal',
 	'select_notebook_kernel': 'edits',
+	// Autonomous UI/UX Design Intelligence & Visual QA tools
+	'discover_visual_assets': 'web pages',
+	'search_image_providers': 'web pages',
+	'download_visual_assets': 'edits',
+	'optimize_visual_assets': 'edits',
+	'inspect_responsive_layout': 'browser',
+	'capture_application_screenshots': 'browser',
+	'inspect_visual_quality': 'browser',
+	'audit_accessibility': 'browser',
+	'audit_frontend_performance': 'browser',
 }
 
 
@@ -397,6 +435,32 @@ export type BuiltinToolCallParams = {
 	'evaluate_quality_gates': { sub_path?: string },
 	'record_verification_evidence': { task_title: string, summary: string, level: VerificationLevel, passed: boolean, detail: string, files_changed?: string[], command?: string },
 	'factory_manage_requirements': { action: 'list' | 'add' | 'update' | 'add_decision', id?: string, title?: string, description?: string, status?: 'unstarted' | 'in_progress' | 'implemented' | 'verified', priority?: 'high' | 'medium' | 'low', decision?: string, consequences?: string },
+	// Autonomous UI/UX Design Intelligence, Asset Discovery & Visual QA (25 tools)
+	'analyze_product_design_requirements': { product_description: string, product_name?: string, product_category?: string, target_devices?: string[] },
+	'generate_design_brief': { product_description: string, product_name?: string, product_category?: string, visual_direction?: VisualDirectionId | 'auto' },
+	'generate_visual_direction': { product_description: string, product_category?: string, requested_direction?: VisualDirectionId | 'auto' },
+	'generate_color_palette': { product_description?: string, product_category?: string, visual_direction?: VisualDirectionId, harmony?: ColorHarmonyStrategy, brand_primary_color?: string, brand_secondary_color?: string, brand_accent_color?: string },
+	'generate_design_tokens': { name?: string, product_description?: string, product_category?: string, visual_direction?: VisualDirectionId, harmony?: ColorHarmonyStrategy, brand_primary_color?: string },
+	'generate_page_architecture': { product_description: string, product_name?: string, product_category?: string },
+	'generate_responsive_layout': { product_description?: string, product_category?: string, max_content_width?: string },
+	'discover_visual_assets': { query: string, purpose?: string, orientation?: 'landscape' | 'portrait' | 'square', limit?: number, providers?: ImageProviderName[] },
+	'search_image_providers': { query: string, providers?: ImageProviderName[], orientation?: 'landscape' | 'portrait' | 'square', limit?: number },
+	'download_visual_assets': { assets: Array<{ url?: string, filename?: string, alt_text: string, provider?: ImageProviderName | 'generated-svg', license?: string, attribution?: string, svg_subject?: string, primary_color?: string, secondary_color?: string, accent_color?: string, width?: number, height?: number, svg_style?: 'abstract' | 'editorial' | 'product-backdrop' | 'mesh-gradient' | 'geometric' }>, target_dir?: string },
+	'optimize_visual_assets': { target_paths?: string[], minify_svgs?: boolean },
+	'discover_icon_library': { visual_direction?: VisualDirectionId },
+	'recommend_typography': { visual_direction?: VisualDirectionId, product_description?: string, heading_font?: string, body_font?: string },
+	'recommend_ui_components': { product_description: string, product_category?: string, visual_direction?: VisualDirectionId },
+	'generate_component_variants': { component_type: string, framework?: FrontendFramework, styling_system?: StylingSystem, visual_direction?: VisualDirectionId },
+	'inspect_existing_design_system': { sub_path?: string },
+	'audit_design_consistency': { sub_path?: string },
+	'inspect_responsive_layout': { session_id: string, tab_id: string, viewports?: Array<{ label: string, width: number, height: number }>, full_page?: boolean },
+	'capture_application_screenshots': { session_id: string, tab_id: string, viewports?: Array<{ label: string, width: number, height: number }>, full_page?: boolean },
+	'inspect_visual_quality': { session_id: string, tab_id: string },
+	'audit_accessibility': { session_id: string, tab_id: string },
+	'audit_frontend_performance': { session_id: string, tab_id: string },
+	'critique_interface_design': { session_id?: string, tab_id?: string, sub_path?: string, product_description?: string },
+	'repair_visual_defects': { session_id?: string, tab_id?: string, sub_path?: string },
+	'compare_visual_revisions': { baseline_path: string, current_path: string, diff_output_path?: string, pixel_threshold?: number },
 }
 
 // RESULT OF TOOL CALL
@@ -591,6 +655,32 @@ export type BuiltinToolResultType = {
 	'evaluate_quality_gates': { evaluation: QualityGateEvaluation, record: VerificationRecord },
 	'record_verification_evidence': VerificationRecord,
 	'factory_manage_requirements': { message: string, requirements?: readonly ProjectRequirement[], decisions?: readonly ArchitectureDecisionRecord[] },
+	// Autonomous UI/UX Design Intelligence, Asset Discovery & Visual QA (25 tools)
+	'analyze_product_design_requirements': ProductDesignAnalysis,
+	'generate_design_brief': DesignBrief,
+	'generate_visual_direction': VisualDirectionSpec,
+	'generate_color_palette': ColorPaletteSpec,
+	'generate_design_tokens': DesignTokensSpec,
+	'generate_page_architecture': PageArchitectureSpec,
+	'generate_responsive_layout': ResponsiveLayoutSpec,
+	'discover_visual_assets': VisualAssetSearchResult,
+	'search_image_providers': VisualAssetSearchResult,
+	'download_visual_assets': { downloaded: DownloadedVisualAsset[], attributionManifestPath?: string },
+	'optimize_visual_assets': AssetOptimizationReport,
+	'discover_icon_library': IconLibraryRecommendation,
+	'recommend_typography': TypographyRecommendation,
+	'recommend_ui_components': { components: ComponentRecommendation[] },
+	'generate_component_variants': ComponentVariantSpec,
+	'inspect_existing_design_system': ExistingDesignSystemReport,
+	'audit_design_consistency': DesignConsistencyAuditReport,
+	'inspect_responsive_layout': MultiViewportAuditResult,
+	'capture_application_screenshots': MultiViewportAuditResult,
+	'inspect_visual_quality': BrowserVisualAuditResult,
+	'audit_accessibility': BrowserVisualAuditResult,
+	'audit_frontend_performance': BrowserVisualAuditResult,
+	'critique_interface_design': DesignCritiqueReport,
+	'repair_visual_defects': VisualRepairPlan,
+	'compare_visual_revisions': VisualRevisionComparison,
 }
 
 

@@ -335,6 +335,7 @@ export function createHarness<L extends object>(tmpDir: string, llm: L, store: D
 		mcpService as any,
 		(projectMemory ?? { getMemory: () => '', whenReady: Promise.resolve() }) as any,
 		{ findAgentSkills: async () => [] } as any,
+		DUMMY as any, // IInstantiationService
 	));
 
 	const taskPlanService = store.add(new TaskPlanService());

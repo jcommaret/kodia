@@ -25,6 +25,7 @@ export type ToolCategory =
 	| 'api'
 	| 'notebook'
 	| 'design'
+	| 'ai'
 	| 'mcp';
 
 export interface ToolDisplayTitles {
@@ -244,6 +245,28 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	critique_interface_design: { done: 'Critiqued interface design', proposed: 'Critique interface design', running: 'Performing design review' },
 	repair_visual_defects: { done: 'Planned visual defect repairs', proposed: 'Plan visual defect repairs', running: 'Identifying visual defects' },
 	compare_visual_revisions: { done: 'Compared visual revisions', proposed: 'Compare visual revisions', running: 'Comparing visual revisions' },
+
+	// Universal AI Engineering Engine & Unified Orchestrator
+	ai_orchestrate_project: { done: 'Orchestrated dual-engine plan', proposed: 'Orchestrate project engines', running: 'Routing Universal & AI engines' },
+	ai_design_architecture: { done: 'Designed AI architecture', proposed: 'Design AI architecture', running: 'Designing AI architecture' },
+	ai_probe_compute_hardware: { done: 'Probed compute & GPUs', proposed: 'Probe compute hardware', running: 'Probing CPUs, GPUs & AI runtimes' },
+	ai_recommend_training_strategy: { done: 'Planned training strategy', proposed: 'Recommend training strategy', running: 'Planning model training strategy' },
+	ai_profile_dataset: { done: 'Profiled dataset', proposed: 'Profile dataset', running: 'Profiling dataset schema & quality' },
+	ai_rag_build_index: { done: 'Built hybrid RAG index', proposed: 'Build hybrid RAG index', running: 'Ingesting & indexing RAG knowledge' },
+	ai_rag_query: { done: 'Queried RAG knowledge', proposed: 'Query RAG index', running: 'Retrieving grounded RAG context' },
+	ai_rag_evaluate: { done: 'Evaluated RAG retrieval', proposed: 'Evaluate RAG retrieval', running: 'Running RAG retrieval benchmarks' },
+	ai_experiment_manage: { done: 'Updated AI experiments', proposed: 'Manage AI experiments', running: 'Tracking AI experiment run' },
+	ai_model_registry: { done: 'Updated model registry', proposed: 'Manage model registry', running: 'Updating model registry' },
+	ai_evaluate_system: { done: 'Evaluated AI system', proposed: 'Evaluate AI system', running: 'Running quantitative AI evaluation' },
+	ai_audit_security: { done: 'Audited AI security', proposed: 'Audit AI security', running: 'Scanning AI security & governance' },
+	ai_estimate_performance_cost: { done: 'Estimated AI cost & latency', proposed: 'Estimate AI cost & latency', running: 'Estimating AI latency & cost' },
+	ai_create_workflow: { done: 'Compiled AI workflow', proposed: 'Create AI workflow', running: 'Compiling executable AI workflow' },
+	ai_run_workflow: { done: 'Executed AI workflow', proposed: 'Run AI workflow', running: 'Executing AI workflow steps' },
+	ai_research_analyze: { done: 'Synthesized AI research', proposed: 'Analyze AI research', running: 'Analyzing AI research methods' },
+	ai_discover_capabilities: { done: 'Explored AI capabilities', proposed: 'Discover AI capabilities', running: 'Searching future AI capabilities' },
+	ai_scaffold_product_factory: { done: 'Generated AI Product Factory blueprint', proposed: 'Scaffold AI Product Factory', running: 'Planning 9-phase AI Product Factory' },
+	ai_diagnose_failure: { done: 'Diagnosed AI failure', proposed: 'Diagnose AI failure', running: 'Investigating AI failure root cause' },
+	ai_check_provider_capabilities: { done: 'Checked AI provider matrix', proposed: 'Check AI providers', running: 'Inspecting BYOK & local model capabilities' },
 };
 
 function humanizeToolName(toolName: string): string {
@@ -266,6 +289,7 @@ export function getToolDisplayTitles(toolName: string): ToolDisplayTitles {
 }
 
 export function getToolCategory(toolName: string): ToolCategory {
+	if (toolName.startsWith('ai_')) { return 'ai'; }
 	if (
 		toolName.includes('design_')
 		|| toolName.includes('visual_')

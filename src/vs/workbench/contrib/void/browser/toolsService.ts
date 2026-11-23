@@ -95,6 +95,33 @@ import {
 	recommendUiComponents,
 } from '../common/designIntelligenceEngine.js'
 import { buildTypographyRecommendation } from '../common/designKnowledgeLibrary.js'
+import { IAIEngineeringService } from './aiEngineeringService.js'
+import {
+	AICapabilityCatalogueEntry,
+	AIEvaluationTaskType,
+	DEFAULT_AI_ENGINE_SETTINGS,
+	IKodiaAIEngineMainService,
+	KODIA_AI_ENGINE_CHANNEL,
+	ModelRegistryStage,
+	ProviderCapabilitySummary,
+} from '../common/aiEngineeringTypes.js'
+import {
+	analyzeAIResearchTopic,
+	auditAISecurityWorkspace,
+	compileNaturalLanguageWorkflow,
+	designAIArchitecture,
+	diagnoseAIFailure,
+	discoverAICapabilities,
+	estimateAIPerformanceAndCost,
+	formatAIArchitectureForLLM,
+	formatEngineRoutingForLLM,
+	formatFactoryBlueprintForLLM,
+	generateOneCommandFactoryBlueprint,
+	recommendTrainingStrategy,
+	routeEngineeringRequest,
+} from '../common/aiEngineeringKnowledge.js'
+import { getModelCapabilities } from '../common/modelCapabilities.js'
+import { localProviderNames, providerNames } from '../common/voidSettingsTypes.js'
 
 
 // tool use for AI
@@ -383,10 +410,15 @@ export class ToolsService implements IToolsService {
 		const codeIndexService = ProxyChannel.toService<ICodeIndexService>(mainProcessService.getChannel('void-channel-code-index'))
 		const kodiaOpsService = ProxyChannel.toService<IKodiaOpsMainService>(mainProcessService.getChannel(KODIA_OPS_CHANNEL))
 		const designAssetService = ProxyChannel.toService<IDesignAssetMainService>(mainProcessService.getChannel(KODIA_DESIGN_CHANNEL))
+		const aiEngineMainService = ProxyChannel.toService<IKodiaAIEngineMainService>(mainProcessService.getChannel(KODIA_AI_ENGINE_CHANNEL))
 		const getDesignService = (): IDesignIntelligenceService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IDesignIntelligenceService)) } catch { return undefined }
 		}
+		const getAIEngineService = (): IAIEngineeringService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(IAIEngineeringService)) } catch { return undefined }
+		}
 		const getDesignSettings = () => this.voidSettingsService.state.globalSettings.designIntelligence ?? DEFAULT_DESIGN_INTELLIGENCE_SETTINGS
+		const getAISettings = () => this.voidSettingsService.state.globalSettings.aiEngine ?? DEFAULT_AI_ENGINE_SETTINGS
 		const workspaceFolderPaths = () => workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
 
 		const recentPages = new Map<string, WebFetchResult>()
@@ -1617,6 +1649,174 @@ export class ToolsService implements IToolsService {
 				diff_output_path: validateOptionalStr('diff_output_path', params.diff_output_path) ?? undefined,
 				pixel_threshold: validateNumber(params.pixel_threshold, { default: 18 }) ?? 18,
 			}),
+
+			// Universal AI Engineering Engine & Unified Two-Engine Orchestrator (20 tools)
+			ai_orchestrate_project: (params: RawToolParamsObj) => {
+				const request = validateStr('request', params.request).trim()
+				if (!request) throw new Error('Invalid LLM output: request must not be empty.')
+				return { request }
+			},
+			ai_design_architecture: (params: RawToolParamsObj) => {
+				const project_title = validateStr('project_title', params.project_title).trim()
+				const requirements = validateStr('requirements', params.requirements).trim()
+				const cpRaw = validateOptionalStr('compute_preference', params.compute_preference)
+				const compute_preference = (cpRaw === 'auto' || cpRaw === 'local-first' || cpRaw === 'hybrid' || cpRaw === 'cloud-first') ? cpRaw : undefined
+				return { project_title, requirements, compute_preference }
+			},
+			ai_probe_compute_hardware: () => ({}),
+			ai_recommend_training_strategy: (params: RawToolParamsObj) => ({
+				task_type: validateStr('task_type', params.task_type).trim(),
+				dataset_rows: validateNumber(params.dataset_rows, { default: 1000 }) ?? 1000,
+				model_size_billions: validateNumber(params.model_size_billions, { default: null }) ?? undefined,
+				deployment_target: validateOptionalStr('deployment_target', params.deployment_target) ?? undefined,
+			}),
+			ai_profile_dataset: (params: RawToolParamsObj) => ({
+				dataset_path: validateStr('dataset_path', params.dataset_path).trim(),
+				max_rows: validateNumber(params.max_rows, { default: 5000 }) ?? 5000,
+			}),
+			ai_rag_build_index: (params: RawToolParamsObj) => ({
+				index_name: validateStr('index_name', params.index_name).trim(),
+				source_paths: validateOptionalStrList(params.source_paths),
+				chunk_size: validateNumber(params.chunk_size, { default: null }) ?? undefined,
+				chunk_overlap: validateNumber(params.chunk_overlap, { default: null }) ?? undefined,
+				max_files: validateNumber(params.max_files, { default: 150 }) ?? 150,
+			}),
+			ai_rag_query: (params: RawToolParamsObj) => ({
+				index_name: validateStr('index_name', params.index_name).trim(),
+				query: validateStr('query', params.query).trim(),
+				top_k: validateNumber(params.top_k, { default: null }) ?? undefined,
+				source_filter: validateOptionalStr('source_filter', params.source_filter) ?? undefined,
+			}),
+			ai_rag_evaluate: (params: RawToolParamsObj) => {
+				const index_name = validateStr('index_name', params.index_name).trim()
+				const top_k = validateNumber(params.top_k, { default: 5 }) ?? 5
+				let rawCases: unknown = params.cases
+				if (typeof rawCases === 'string') {
+					try { rawCases = JSON.parse(rawCases) } catch { throw new Error('Invalid LLM output: cases must be a valid JSON array.') }
+				}
+				if (!Array.isArray(rawCases) || rawCases.length === 0) {
+					throw new Error('Invalid LLM output: cases must be a non-empty array.')
+				}
+				const cases = rawCases.map((c: any) => ({
+					query: validateStr('case.query', c?.query).trim(),
+					expected_sources: Array.isArray(c?.expected_sources) ? c.expected_sources.map(String) : Array.isArray(c?.expectedSources) ? c.expectedSources.map(String) : [],
+					expected_terms: Array.isArray(c?.expected_terms) ? c.expected_terms.map(String) : Array.isArray(c?.expectedTerms) ? c.expectedTerms.map(String) : undefined,
+				}))
+				return { index_name, top_k, cases }
+			},
+			ai_experiment_manage: (params: RawToolParamsObj) => {
+				const rawAction = validateStr('action', params.action).trim()
+				const action = (rawAction === 'create' || rawAction === 'log' || rawAction === 'compare') ? rawAction : 'list'
+				const parseObj = <T>(v: unknown): Record<string, T> | undefined => {
+					if (!v) return undefined
+					if (typeof v === 'string') { try { const p = JSON.parse(v); return typeof p === 'object' && p ? p : undefined } catch { return undefined } }
+					return typeof v === 'object' ? v as Record<string, T> : undefined
+				}
+				const rawStatus = validateOptionalStr('status', params.status)
+				const status = (rawStatus === 'running' || rawStatus === 'completed' || rawStatus === 'failed') ? rawStatus : undefined
+				return {
+					action,
+					id: validateOptionalStr('id', params.id) ?? undefined,
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					discipline: validateOptionalStr('discipline', params.discipline) ?? undefined,
+					model_ref: validateOptionalStr('model_ref', params.model_ref) ?? undefined,
+					dataset_ref: validateOptionalStr('dataset_ref', params.dataset_ref) ?? undefined,
+					status,
+					hyperparameters: parseObj<string | number | boolean>(params.hyperparameters),
+					metrics: parseObj<number>(params.metrics),
+					artifacts: validateOptionalStrList(params.artifacts),
+					notes: validateOptionalStr('notes', params.notes) ?? undefined,
+					metric_key: validateOptionalStr('metric_key', params.metric_key) ?? undefined,
+				}
+			},
+			ai_model_registry: (params: RawToolParamsObj) => {
+				const rawAction = validateStr('action', params.action).trim()
+				const action = (rawAction === 'register' || rawAction === 'promote' || rawAction === 'inspect') ? rawAction : 'list'
+				const rawStage = validateOptionalStr('stage', params.stage)
+				const stage = (rawStage === 'experimental' || rawStage === 'staging' || rawStage === 'canary' || rawStage === 'production' || rawStage === 'archived') ? rawStage as ModelRegistryStage : undefined
+				let metrics: Record<string, number> | undefined
+				if (params.metrics) {
+					const m = typeof params.metrics === 'string' ? (() => { try { return JSON.parse(params.metrics) } catch { return undefined } })() : params.metrics
+					if (m && typeof m === 'object') { metrics = m as Record<string, number> }
+				}
+				return {
+					action,
+					id: validateOptionalStr('id', params.id) ?? undefined,
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					version: validateOptionalStr('version', params.version) ?? undefined,
+					framework: validateOptionalStr('framework', params.framework) ?? undefined,
+					task_type: validateOptionalStr('task_type', params.task_type) ?? undefined,
+					stage,
+					artifact_path: validateOptionalStr('artifact_path', params.artifact_path) ?? undefined,
+					dataset_ref: validateOptionalStr('dataset_ref', params.dataset_ref) ?? undefined,
+					experiment_id: validateOptionalStr('experiment_id', params.experiment_id) ?? undefined,
+					quantization: validateOptionalStr('quantization', params.quantization) ?? undefined,
+					metrics,
+					notes: validateOptionalStr('notes', params.notes) ?? undefined,
+				}
+			},
+			ai_evaluate_system: (params: RawToolParamsObj) => {
+				const name = validateStr('name', params.name).trim()
+				const rawTask = validateStr('task_type', params.task_type).trim()
+				const task_type: AIEvaluationTaskType = (rawTask === 'classification' || rawTask === 'regression' || rawTask === 'agent' || rawTask === 'rag' || rawTask === 'generation') ? rawTask : 'classification'
+				let rawRecs: unknown = params.records
+				if (typeof rawRecs === 'string') {
+					try { rawRecs = JSON.parse(rawRecs) } catch { throw new Error('Invalid LLM output: records must be a valid JSON array.') }
+				}
+				if (!Array.isArray(rawRecs)) throw new Error('Invalid LLM output: records must be an array.')
+				const min_pass_score = typeof params.min_pass_score === 'number' ? params.min_pass_score
+					: typeof params.min_pass_score === 'string' && !Number.isNaN(Number(params.min_pass_score)) ? Number(params.min_pass_score) : undefined
+				return { name, task_type, records: rawRecs as Array<Record<string, unknown>>, min_pass_score }
+			},
+			ai_audit_security: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			ai_estimate_performance_cost: (params: RawToolParamsObj) => ({
+				workload_name: validateStr('workload_name', params.workload_name).trim(),
+				monthly_requests: validateNumber(params.monthly_requests, { default: 10000 }) ?? 10000,
+				avg_input_tokens: validateNumber(params.avg_input_tokens, { default: 1200 }) ?? 1200,
+				avg_output_tokens: validateNumber(params.avg_output_tokens, { default: 400 }) ?? 400,
+			}),
+			ai_create_workflow: (params: RawToolParamsObj) => {
+				const rawTrig = validateOptionalStr('trigger', params.trigger)
+				const trigger = (rawTrig === 'manual' || rawTrig === 'schedule' || rawTrig === 'webhook' || rawTrig === 'event') ? rawTrig : undefined
+				return {
+					name: validateStr('name', params.name).trim(),
+					instruction: validateStr('instruction', params.instruction).trim(),
+					trigger,
+				}
+			},
+			ai_run_workflow: (params: RawToolParamsObj) => ({
+				workflow_id: validateStr('workflow_id', params.workflow_id).trim(),
+				input_context: validateOptionalStr('input_context', params.input_context) ?? undefined,
+				approve_human_gates: validateBoolean(params.approve_human_gates, { default: false }),
+			}),
+			ai_research_analyze: (params: RawToolParamsObj) => ({
+				topic: validateStr('topic', params.topic).trim(),
+			}),
+			ai_discover_capabilities: (params: RawToolParamsObj) => {
+				const rawCat = validateOptionalStr('category', params.category)
+				const validCats = new Set(['discipline', 'framework', 'model-family', 'protocol', 'evaluation', 'infrastructure', 'emerging'])
+				return {
+					query: validateOptionalStr('query', params.query) ?? undefined,
+					category: rawCat && validCats.has(rawCat) ? rawCat as AICapabilityCatalogueEntry['category'] : undefined,
+				}
+			},
+			ai_scaffold_product_factory: (params: RawToolParamsObj) => {
+				const cpRaw = validateOptionalStr('compute_preference', params.compute_preference)
+				const compute_preference = (cpRaw === 'auto' || cpRaw === 'local-first' || cpRaw === 'hybrid' || cpRaw === 'cloud-first') ? cpRaw : undefined
+				return {
+					objective: validateStr('objective', params.objective).trim(),
+					project_title: validateOptionalStr('project_title', params.project_title) ?? undefined,
+					compute_preference,
+				}
+			},
+			ai_diagnose_failure: (params: RawToolParamsObj) => ({
+				error_summary: validateStr('error_summary', params.error_summary).trim(),
+				logs: validateOptionalStr('logs', params.logs) ?? undefined,
+				component: validateOptionalStr('component', params.component) ?? undefined,
+			}),
+			ai_check_provider_capabilities: () => ({}),
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -3435,6 +3635,230 @@ export class ToolsService implements IToolsService {
 				return { result: cmp }
 			},
 
+			// Universal AI Engineering Engine & Unified Two-Engine Orchestrator (20 tools)
+			ai_orchestrate_project: async ({ request }) => {
+				const routing = routeEngineeringRequest(request)
+				getAIEngineService()?.recordRouting(routing)
+				return { result: routing }
+			},
+			ai_design_architecture: async ({ project_title, requirements, compute_preference }) => {
+				const aiSvc = getAIEngineService()
+				const settings = getAISettings()
+				const arch = designAIArchitecture({
+					projectTitle: project_title,
+					requirements,
+					hardware: aiSvc?.state.latestHardware,
+					computePreference: compute_preference ?? settings.computePreference,
+				})
+				aiSvc?.recordArchitecture(arch)
+				return { result: arch }
+			},
+			ai_probe_compute_hardware: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const hw = await aiEngineMainService.probeComputeHardware(root)
+				getAIEngineService()?.recordHardware(hw)
+				return { result: hw }
+			},
+			ai_recommend_training_strategy: async ({ task_type, dataset_rows, model_size_billions, deployment_target }) => {
+				const aiSvc = getAIEngineService()
+				let hw = aiSvc?.state.latestHardware ?? null
+				if (!hw) {
+					try {
+						hw = await aiEngineMainService.probeComputeHardware(workspaceFolderPaths()[0] ?? '')
+						aiSvc?.recordHardware(hw)
+					} catch { /* fallback to cpu-only assumption */ }
+				}
+				return {
+					result: recommendTrainingStrategy({
+						taskType: task_type,
+						datasetRows: dataset_rows,
+						modelSizeBillions: model_size_billions,
+						deploymentTarget: deployment_target,
+						hardware: hw,
+					}),
+				}
+			},
+			ai_profile_dataset: async ({ dataset_path, max_rows }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await aiEngineMainService.profileDataset(root, dataset_path, { maxRows: max_rows })
+				getAIEngineService()?.recordDatasetProfile(report)
+				return { result: report }
+			},
+			ai_rag_build_index: async ({ index_name, source_paths, chunk_size, chunk_overlap, max_files }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const settings = getAISettings()
+				const summary = await aiEngineMainService.buildRagIndex(root, {
+					indexName: index_name,
+					sourcePaths: source_paths,
+					chunkSize: chunk_size ?? settings.defaultRagChunkSize,
+					chunkOverlap: chunk_overlap ?? settings.defaultRagChunkOverlap,
+					maxFiles: max_files,
+				})
+				const all = await aiEngineMainService.listRagIndexes(root)
+				getAIEngineService()?.recordRagIndexes(all)
+				return { result: summary }
+			},
+			ai_rag_query: async ({ index_name, query, top_k, source_filter }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const settings = getAISettings()
+				const res = await aiEngineMainService.queryRagIndex(root, {
+					indexName: index_name,
+					query,
+					topK: top_k ?? settings.defaultRagTopK,
+					sourceFilter: source_filter,
+				})
+				return { result: res }
+			},
+			ai_rag_evaluate: async ({ index_name, top_k, cases }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await aiEngineMainService.evaluateRagIndex(root, {
+					indexName: index_name,
+					topK: top_k,
+					cases: cases.map(c => ({ query: c.query, expectedSources: c.expected_sources, expectedTerms: c.expected_terms })),
+				})
+				getAIEngineService()?.recordRagEval(report)
+				return { result: report }
+			},
+			ai_experiment_manage: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await aiEngineMainService.manageExperiments(root, {
+					action: p.action,
+					id: p.id,
+					name: p.name,
+					discipline: p.discipline,
+					modelRef: p.model_ref,
+					datasetRef: p.dataset_ref,
+					status: p.status,
+					hyperparameters: p.hyperparameters,
+					metrics: p.metrics,
+					artifacts: p.artifacts,
+					notes: p.notes,
+					metricKey: p.metric_key,
+				})
+				getAIEngineService()?.recordExperiments(res.experiments)
+				return { result: res }
+			},
+			ai_model_registry: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await aiEngineMainService.manageModelRegistry(root, {
+					action: p.action,
+					id: p.id,
+					name: p.name,
+					version: p.version,
+					framework: p.framework,
+					taskType: p.task_type,
+					stage: p.stage,
+					artifactPath: p.artifact_path,
+					datasetRef: p.dataset_ref,
+					experimentId: p.experiment_id,
+					quantization: p.quantization,
+					metrics: p.metrics,
+					notes: p.notes,
+				})
+				getAIEngineService()?.recordModels(res.models)
+				return { result: res }
+			},
+			ai_evaluate_system: async ({ name, task_type, records, min_pass_score }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await aiEngineMainService.runAIModelEvaluation(root, {
+					name,
+					taskType: task_type,
+					records,
+					minPassScore: min_pass_score,
+				})
+				const all = await aiEngineMainService.listEvaluations(root)
+				getAIEngineService()?.recordEvaluations(all)
+				return { result: report }
+			},
+			ai_audit_security: async ({ sub_path }) => {
+				const rawFiles = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 350, subPath: sub_path })
+				const audit = auditAISecurityWorkspace(rawFiles.map(f => ({ path: f.relativePath, content: f.content })))
+				getAIEngineService()?.recordSecurityAudit(audit)
+				return { result: audit }
+			},
+			ai_estimate_performance_cost: async ({ workload_name, monthly_requests, avg_input_tokens, avg_output_tokens }) => ({
+				result: estimateAIPerformanceAndCost({
+					workloadName: workload_name,
+					monthlyRequests: monthly_requests,
+					avgInputTokens: avg_input_tokens,
+					avgOutputTokens: avg_output_tokens,
+				}),
+			}),
+			ai_create_workflow: async ({ name, instruction, trigger }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const wf = compileNaturalLanguageWorkflow({ name, instruction, trigger })
+				const saved = await aiEngineMainService.saveWorkflow(root, wf)
+				const all = await aiEngineMainService.listWorkflows(root)
+				getAIEngineService()?.recordWorkflows(all)
+				return { result: saved }
+			},
+			ai_run_workflow: async ({ workflow_id, input_context, approve_human_gates }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const run = await aiEngineMainService.executeWorkflow(root, {
+					workflowId: workflow_id,
+					inputContext: input_context,
+					approveHumanGates: approve_human_gates,
+				})
+				getAIEngineService()?.recordWorkflowRun(run)
+				return { result: run }
+			},
+			ai_research_analyze: async ({ topic }) => ({
+				result: analyzeAIResearchTopic(topic),
+			}),
+			ai_discover_capabilities: async ({ query, category }) => ({
+				result: { entries: discoverAICapabilities(query, category) },
+			}),
+			ai_scaffold_product_factory: async ({ objective, project_title, compute_preference }) => {
+				const aiSvc = getAIEngineService()
+				const settings = getAISettings()
+				const bp = generateOneCommandFactoryBlueprint({
+					objective,
+					projectTitle: project_title,
+					hardware: aiSvc?.state.latestHardware,
+					computePreference: compute_preference ?? settings.computePreference,
+				})
+				aiSvc?.recordFactoryBlueprint(bp)
+				return { result: bp }
+			},
+			ai_diagnose_failure: async ({ error_summary, logs, component }) => ({
+				result: diagnoseAIFailure({ errorSummary: error_summary, logs, component }),
+			}),
+			ai_check_provider_capabilities: async () => {
+				const state = this.voidSettingsService.state
+				const localSet = new Set<string>(localProviderNames)
+				const providers: ProviderCapabilitySummary[] = providerNames.map(pName => {
+					const ps = state.settingsOfProvider[pName]
+					const activeModels = (ps?.models ?? []).filter(m => !m.isHidden)
+					const configured = !!(ps?._didFillInProviderSettings && activeModels.length > 0)
+					let supportsToolCalling = false
+					let supportsVision = false
+					let supportsReasoning = false
+					for (const m of activeModels.slice(0, 8)) {
+						const caps = getModelCapabilities(pName, m.modelName, state.overridesOfModel)
+						if (caps.specialToolFormat) { supportsToolCalling = true }
+						if (caps.supportsVision) { supportsVision = true }
+						if (caps.reasoningCapabilities && caps.reasoningCapabilities.supportsReasoning) { supportsReasoning = true }
+					}
+					return {
+						providerName: pName,
+						configured,
+						isLocal: localSet.has(pName),
+						modelCount: activeModels.length,
+						sampleModels: activeModels.slice(0, 5).map(m => m.modelName),
+						supportsToolCalling,
+						supportsVision,
+						supportsReasoning,
+					}
+				})
+				return {
+					result: {
+						providers,
+						configuredCount: providers.filter(p => p.configured).length,
+						localConfiguredCount: providers.filter(p => p.configured && p.isLocal).length,
+					},
+				}
+			},
+
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell }) => {
 				await voidModelService.initializeModel(uri)
@@ -4634,6 +5058,107 @@ export class ToolsService implements IToolsService {
 				`Verification Loop:\n${r.recheckSequence.join('\n')}`,
 			].join('\n'),
 			compare_visual_revisions: (_params, r) => r.summary,
+
+			// Universal AI Engineering Engine & Unified Two-Engine Orchestrator (20 tools)
+			ai_orchestrate_project: (_params, r) => formatEngineRoutingForLLM(r),
+			ai_design_architecture: (_params, r) => formatAIArchitectureForLLM(r),
+			ai_probe_compute_hardware: (_params, r) => [
+				`# Compute Hardware & AI Runtimes`,
+				r.summary,
+				`Runtimes: ${r.runtimes.filter(rt => rt.available).map(rt => `${rt.name}${rt.version ? ` (${rt.version})` : ''}`).join(', ') || 'none'}`,
+				`Missing: ${r.runtimes.filter(rt => !rt.available).map(rt => rt.name).join(', ') || 'none'}`,
+			].join('\n'),
+			ai_recommend_training_strategy: (_params, r) => [
+				`# Model Training Strategy: ${r.recommendedApproach} (${r.precision})`,
+				`Task: ${r.taskType} | Rows: ${r.datasetRows} | Compute Tier: ${r.computeTier} | Est. VRAM: ${r.estimatedVramGb} GB`,
+				`Stack: ${r.frameworkStack.join(', ')}`,
+				`Hyperparameters: ${JSON.stringify(r.hyperparameters)}`,
+				`Rationale: ${r.rationale}`,
+				`Reproducibility:\n${r.reproducibilityChecklist.map(c => `- ${c}`).join('\n')}`,
+			].join('\n'),
+			ai_profile_dataset: (_params, r) => r.error
+				? `Dataset profiling error: ${r.error}`
+				: [
+					`# Dataset Profile: ${r.datasetPath} (${r.format})`,
+					`Rows: ${r.rowCount} | Columns: ${r.columnCount} | Duplicates: ${r.duplicateRowCount} | Quality Score: ${r.qualityScore}/100 | SHA-256: ${r.sha256Fingerprint}`,
+					`Schema:\n${r.columns.slice(0, 20).map(c => `- ${c.name} [${c.inferredType}]: missing=${(c.missingRate * 100).toFixed(1)}%, unique=${c.uniqueCount}${c.numericStats ? `, min=${c.numericStats.min}, max=${c.numericStats.max}, mean=${c.numericStats.mean}` : ''}`).join('\n')}`,
+					...(r.piiWarnings.length ? [`PII Warnings:\n${r.piiWarnings.map(w => `- ${w}`).join('\n')}`] : []),
+					...(r.qualityWarnings.length ? [`Quality Warnings:\n${r.qualityWarnings.map(w => `- ${w}`).join('\n')}`] : []),
+					`Cleaning Recommendations:\n${r.cleaningRecommendations.map(c => `- ${c}`).join('\n')}`,
+				].join('\n'),
+			ai_rag_build_index: (_params, r) => `Built hybrid RAG index "${r.indexName}" (${r.indexPath}): ${r.documentCount} document(s), ${r.chunkCount} chunk(s), ~${r.totalTokensEstimate} tokens (strategy=${r.strategy}, chunkSize=${r.chunkSize}, overlap=${r.chunkOverlap}).`,
+			ai_rag_query: (_params, r) => r.error
+				? `RAG query error: ${r.error}`
+				: [
+					`# Hybrid RAG Retrieval ("${r.indexName}") — ${r.results.length} result(s) from ${r.totalChunksSearched} chunks in ${r.latencyMs}ms`,
+					r.groundedContextBlock,
+				].join('\n\n'),
+			ai_rag_evaluate: (_params, r) => r.error
+				? `RAG evaluation error: ${r.error}`
+				: [
+					`# RAG Retrieval Evaluation ("${r.indexName}", topK=${r.topK}) — ${r.passed ? 'PASSED' : 'NEEDS IMPROVEMENT'}`,
+					`Cases: ${r.totalCases} | HitRate@K: ${r.hitRateAtK} | Precision@K: ${r.meanPrecisionAtK} | Recall@K: ${r.meanRecallAtK} | MRR: ${r.mrr} | Groundedness: ${r.meanGroundedness}`,
+				].join('\n'),
+			ai_experiment_manage: (_params, r) => [
+				r.message,
+				...r.experiments.slice(0, 12).map(e => `- [${e.id}][${e.status}] ${e.name} (${e.modelRef}): metrics=${JSON.stringify(e.metrics)}`),
+			].join('\n'),
+			ai_model_registry: (_params, r) => [
+				r.message,
+				...r.models.slice(0, 12).map(m => `- [${m.id}][${m.stage}] ${m.name} v${m.version} (${m.framework}/${m.taskType}) artifact=${m.artifactPath ? `${m.artifactPath} (${m.artifactVerifiedOnDisk ? 'verified' : 'missing'})` : 'none'} metrics=${JSON.stringify(m.metrics)}`),
+			].join('\n'),
+			ai_evaluate_system: (_params, r) => r.error
+				? `AI evaluation error: ${r.error}`
+				: [
+					`# AI Evaluation (${r.id}): ${r.name} [${r.taskType}] — ${r.passed ? 'PASSED' : 'FAILED'}`,
+					`${r.thresholdSummary} | Samples: ${r.sampleCount}`,
+					`Metrics: ${JSON.stringify(r.metrics)}`,
+					...r.details,
+				].join('\n'),
+			ai_audit_security: (_params, r) => [
+				`# AI Security & Governance Audit: ${r.score}/100`,
+				r.summary,
+				...(r.findings.length ? [`Findings:\n${r.findings.slice(0, 15).map(f => `- [${f.severity.toUpperCase()}][${f.category}] ${f.title}${f.file ? ` (${f.file}:${f.line ?? 1})` : ''} -> ${f.remediation}`).join('\n')}`] : ['No AI security vulnerabilities detected.']),
+				...(r.protectionsDetected.length ? [`Protections Detected: ${r.protectionsDetected.join(', ')}`] : []),
+				...(r.highImpactNotices.length ? [`High-Impact Domain Oversight:\n${r.highImpactNotices.map(n => `- ${n}`).join('\n')}`] : []),
+			].join('\n'),
+			ai_estimate_performance_cost: (_params, r) => [
+				`# AI Performance & Cost Estimate: ${r.workloadName}`,
+				`Volume: ${r.monthlyRequests.toLocaleString()} req/mo (~${(r.estimatedMonthlyTokens / 1_000_000).toFixed(2)}M tokens/mo)`,
+				...r.tiers.map(t => `- **${t.tier}**: \$${t.estimatedMonthlyCostUsd}/mo | p50=${t.estimatedLatencyP50Ms}ms, p95=${t.estimatedLatencyP95Ms}ms — ${t.notes}`),
+				`Optimizations:\n${r.optimizations.map(o => `- ${o}`).join('\n')}`,
+			].join('\n'),
+			ai_create_workflow: (_params, r) => [
+				`Created executable AI workflow **${r.name}** (${r.id}, trigger=${r.trigger}, ${r.steps.length} steps):`,
+				...r.steps.map(s => `- [${s.id}][${s.kind}] ${s.name}${s.requiresApproval ? ' (HITL APPROVAL GATE)' : ''}: ${s.description}`),
+			].join('\n'),
+			ai_run_workflow: (_params, r) => [
+				r.summary,
+				...r.stepTraces.map(t => `- [${t.stepId}][${t.status}] ${t.name} (${t.durationMs}ms): ${t.output}`),
+			].join('\n'),
+			ai_research_analyze: (_params, r) => [
+				`# AI Research & Experiment Synthesis: ${r.topic}`,
+				`Disciplines: ${r.disciplines.join(', ')}`,
+				`Approaches:\n${r.establishedApproaches.map(a => `- **${a.method}**: ${a.strengths} | Limits: ${a.limitations}`).join('\n')}`,
+				`Hypotheses:\n${r.hypotheses.map(h => `- ${h}`).join('\n')}`,
+				`Experiment Plan: Baseline="${r.experimentDesign.baseline}" | Metrics: ${r.experimentDesign.primaryMetrics.join(', ')}`,
+				`Note: ${r.epistemicNote}`,
+			].join('\n'),
+			ai_discover_capabilities: (_params, r) => [
+				`# Kodia Future AI Capability Catalogue (${r.entries.length} match(es))`,
+				...r.entries.map(e => `- **${e.name}** [${e.category}/${e.maturity}/${e.integrationStatus}]: ${e.summary}\n  Why: ${e.whyItMatters} | Security: ${e.securityImplications}`),
+			].join('\n'),
+			ai_scaffold_product_factory: (_params, r) => formatFactoryBlueprintForLLM(r),
+			ai_diagnose_failure: (_params, r) => [
+				`# AI Failure Diagnosis [${r.category}] (${r.severity.toUpperCase()})`,
+				`Likely Root Causes:\n${r.likelyRootCauses.map(c => `- ${c}`).join('\n')}`,
+				`Concrete Repairs:\n${r.concreteRepairs.map(c => `- ${c}`).join('\n')}`,
+				`Verification:\n${r.verificationSteps.map(v => `- ${v}`).join('\n')}`,
+			].join('\n'),
+			ai_check_provider_capabilities: (_params, r) => [
+				`# Kodia Model-Agnostic Provider Matrix (${r.configuredCount} configured, ${r.localConfiguredCount} local)`,
+				...r.providers.filter(p => p.configured || p.isLocal).map(p => `- **${p.providerName}** [${p.isLocal ? 'local' : 'cloud'}] ${p.configured ? 'CONFIGURED' : 'not configured'}: ${p.modelCount} model(s), tools=${p.supportsToolCalling}, vision=${p.supportsVision}, reasoning=${p.supportsReasoning}${p.sampleModels.length ? ` (${p.sampleModels.join(', ')})` : ''}`),
+			].join('\n'),
 
 			// Notebook operations
 			read_notebook: (params, result) => {

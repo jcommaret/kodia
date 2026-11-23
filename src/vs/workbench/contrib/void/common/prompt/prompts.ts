@@ -1588,7 +1588,7 @@ export const builtinTools: {
 		name: 'subagent',
 		description: `Delegate a task to a subagent: a separate agent with its own conversation, which works until it is done and then returns a report (what it changed, its tool calls and errors, and its final answer). The subagent does not see this conversation, so the prompt must contain everything it needs. Several subagent calls in the same reply run IN PARALLEL — use that for independent pieces of work (e.g. one subagent per module). Parallel subagents must work on different files: a file one of them is changing is refused to the others. Subagents cannot start subagents. Check the report (read the files, run the tests) before relying on it.`,
 		params: {
-			agent: { description: 'The subagent role: "general", "explore" (read-only), "review" (read-only), "planner" (read-only), "architect" (read-only), "security" (read-only), "frontend", "backend", "database", "api", "testing", "debugging", "git", "browser", "docs", "devops", "performance", "ui_ux", "refactor", or a custom agent name defined in .kodia/agents/*.md.' },
+			agent: { description: 'The subagent role: "general", "explore" (read-only), "review" (read-only), "planner" (read-only), "architect" (read-only), "security" (read-only), "frontend", "backend", "database", "api", "testing", "debugging", "git", "browser", "docs", "devops", "performance", "ui_ux", "refactor", AI specialists ("ai_architect", "ml_engineer", "llm_engineer", "rag_engineer", "agentic_engineer", "data_engineer", "cv_engineer", "speech_audio", "mlops", "ai_security", "ai_eval", "ai_research", "robotics_iot"), or a custom agent name defined in .kodia/agents/*.md.' },
 			description: { description: 'A short 3-5 word label for the task, displayed to the user.' },
 			prompt: { description: 'The full task for the subagent to perform. Include all context it needs.' },
 			model: { description: 'Optional. A model set up in Kodia, as provider/model (e.g. a cheaper model for exploring). Default: the model you are using.' },
@@ -1999,6 +1999,217 @@ export const builtinTools: {
 		},
 	},
 
+	// --- Universal AI Engineering Engine & Unified Two-Engine Orchestrator (20 tools) ---
+
+	ai_orchestrate_project: {
+		name: 'ai_orchestrate_project',
+		description: 'Unified Two-Engine Orchestrator: analyzes any product or engineering request, decides whether it requires universal_only (ordinary software — never forces AI), ai_only, or dual_engine_unified, detects AI disciplines, selects mixed-language stack, assigns specialist teams, and flags high-impact governance requirements.',
+		params: {
+			request: { description: 'The user product idea or engineering requirement.' },
+		},
+	},
+
+	ai_design_architecture: {
+		name: 'ai_design_architecture',
+		description: 'Designs and compares complete AI & full-stack architectures (recommended + alternatives) with mixed-language stack trade-offs, latency/cost estimates, data/inference flows, security controls, evaluation strategy, risks, and a Mermaid diagram.',
+		params: {
+			project_title: { description: 'Name of the AI system or product.' },
+			requirements: { description: 'Detailed functional, AI, and nonfunctional requirements.' },
+			compute_preference: { description: 'Optional: auto | local-first | hybrid | cloud-first.' },
+		},
+	},
+
+	ai_probe_compute_hardware: {
+		name: 'ai_probe_compute_hardware',
+		description: 'Probes real host compute hardware and AI runtimes: CPU cores/model, RAM, NVIDIA CUDA GPUs (via nvidia-smi), Apple Silicon Metal/MPS, Python/Node/Go/Cargo/Docker/kubectl/Ollama, and installed Python AI packages (torch, transformers, sklearn, cv2, onnxruntime, fastapi, mlflow, etc.).',
+		params: {},
+	},
+
+	ai_recommend_training_strategy: {
+		name: 'ai_recommend_training_strategy',
+		description: 'Recommends an appropriate model adaptation/training strategy (prompt+RAG, classical ML CPU, QLoRA, LoRA, distillation+quantization, or cloud offload) grounded in real detected hardware, dataset size, model size, and deployment target.',
+		params: {
+			task_type: { description: 'Task description (e.g. "tabular churn classification", "LLM support QA", "object detection edge").' },
+			dataset_rows: { description: 'Number of samples/rows in the training dataset.' },
+			model_size_billions: { description: 'Optional model parameter count in billions (e.g. 7, 8, 70).' },
+			deployment_target: { description: 'Optional target (e.g. "cloud API", "local GPU", "edge Jetson", "CPU server").' },
+		},
+	},
+
+	ai_profile_dataset: {
+		name: 'ai_profile_dataset',
+		description: 'Profiles a real dataset file or folder in the workspace (CSV, TSV, JSON, JSONL, image/text folder): computes row/column counts, inferred types, missing rates, duplicates, numeric min/max/mean, class imbalance, PII warnings, SHA-256 lineage fingerprint, and quality score.',
+		params: {
+			dataset_path: { description: 'Workspace-relative or full path to the dataset file or directory.' },
+			max_rows: { description: 'Optional maximum rows to scan (default 5000).' },
+		},
+	},
+
+	ai_rag_build_index: {
+		name: 'ai_rag_build_index',
+		description: 'Ingests workspace documents (Markdown, text, code, JSON, CSV, HTML), chunks them with heading/line provenance and overlap, and persists a hybrid BM25 + semantic vector RAG index in .kodia/ai/rag/<index_name>.json.',
+		params: {
+			index_name: { description: 'Stable identifier for the RAG index (e.g. "company-docs").' },
+			source_paths: { description: 'Optional JSON array or comma-separated workspace-relative paths/folders to ingest (defaults to workspace root).' },
+			chunk_size: { description: 'Optional characters per chunk (default 800).' },
+			chunk_overlap: { description: 'Optional overlap characters between chunks (default 120).' },
+			max_files: { description: 'Optional max files to ingest (default 150).' },
+		},
+	},
+
+	ai_rag_query: {
+		name: 'ai_rag_query',
+		description: 'Queries a persisted Kodia hybrid BM25 + semantic RAG index and returns ranked grounded chunks with exact file:line citations and a ready-to-use grounded context block.',
+		params: {
+			index_name: { description: 'RAG index name created by ai_rag_build_index.' },
+			query: { description: 'Natural-language or keyword retrieval query.' },
+			top_k: { description: 'Optional number of top chunks to return (default 5).' },
+			source_filter: { description: 'Optional path substring filter (e.g. for tenant/folder isolation).' },
+		},
+	},
+
+	ai_rag_evaluate: {
+		name: 'ai_rag_evaluate',
+		description: 'Runs automated retrieval evaluation against a persisted RAG index, measuring HitRate@K, Precision@K, Recall@K, MRR, and Grounded Term Coverage over golden Q&A test cases.',
+		params: {
+			index_name: { description: 'RAG index name to evaluate.' },
+			top_k: { description: 'Optional top-K cutoff (default 5).' },
+			cases: { description: 'JSON array of test cases: [{ query, expected_sources: [...], expected_terms?: [...] }].' },
+		},
+	},
+
+	ai_experiment_manage: {
+		name: 'ai_experiment_manage',
+		description: 'Tracks reproducible AI/ML experiments in .kodia/ai/experiments.json: create runs, log hyperparameters/metrics/artifacts, list runs, and compare runs to identify the best model.',
+		params: {
+			action: { description: 'One of: list | create | log | compare.' },
+			id: { description: 'Experiment ID (e.g. EXP-001) when action=log.' },
+			name: { description: 'Experiment name when action=create.' },
+			discipline: { description: 'Optional AI discipline (e.g. machine_learning, rag_knowledge, computer_vision).' },
+			model_ref: { description: 'Optional model identifier.' },
+			dataset_ref: { description: 'Optional dataset path or SHA-256 fingerprint.' },
+			status: { description: 'Optional status: running | completed | failed.' },
+			hyperparameters: { description: 'Optional JSON object of hyperparameters.' },
+			metrics: { description: 'Optional JSON object of numeric metrics (e.g. {"f1": 0.91, "latency_ms": 42}).' },
+			artifacts: { description: 'Optional JSON array or comma-separated artifact paths.' },
+			notes: { description: 'Optional experiment notes.' },
+			metric_key: { description: 'Optional metric key to rank by when action=compare.' },
+		},
+	},
+
+	ai_model_registry: {
+		name: 'ai_model_registry',
+		description: 'Manages Kodia’s persistent Model Registry (.kodia/ai/model-registry.json): register versioned models, verify artifact files on disk, promote lifecycle stages (experimental -> staging -> canary -> production -> archived), and inspect registered models.',
+		params: {
+			action: { description: 'One of: list | register | promote | inspect.' },
+			id: { description: 'Model ID (e.g. MDL-001) for promote/inspect.' },
+			name: { description: 'Model name when registering.' },
+			version: { description: 'Semantic version (e.g. 1.0.0).' },
+			framework: { description: 'Framework (e.g. pytorch, sklearn, onnx, vllm, custom).' },
+			task_type: { description: 'Task type (e.g. classification, rag, detection, agent).' },
+			stage: { description: 'Stage: experimental | staging | canary | production | archived.' },
+			artifact_path: { description: 'Optional workspace-relative path to model weights/artifact (verified on disk).' },
+			dataset_ref: { description: 'Optional dataset reference/fingerprint.' },
+			experiment_id: { description: 'Optional source experiment ID.' },
+			quantization: { description: 'Optional quantization format (e.g. fp16, int8, nf4, gguf-q4_k_m).' },
+			metrics: { description: 'Optional JSON object of evaluation metrics.' },
+			notes: { description: 'Optional release notes.' },
+		},
+	},
+
+	ai_evaluate_system: {
+		name: 'ai_evaluate_system',
+		description: 'Runs a real quantitative AI evaluation harness over prediction/ground-truth records and persists the scorecard to .kodia/ai/evaluations.json. Computes exact Classification (Accuracy/Precision/Recall/Macro-F1), Regression (MAE/RMSE/R²), Agent (Completion Rate/Tool Accuracy/Avg Steps), or Generation/RAG scores.',
+		params: {
+			name: { description: 'Evaluation suite name.' },
+			task_type: { description: 'One of: classification | regression | agent | rag | generation.' },
+			records: { description: 'JSON array of evaluation records (e.g. [{"expected":"pos","predicted":"pos"}] or [{"completed":true,"tool_accuracy":1,"steps":4}]).' },
+			min_pass_score: { description: 'Optional minimum primary metric threshold to pass (default 0.75).' },
+		},
+	},
+
+	ai_audit_security: {
+		name: 'ai_audit_security',
+		description: 'Audits workspace source code for AI security and governance risks: prompt injection concatenation, unsafe pickle/yaml/torch.load deserialization, eval()/exec() on LLM output, hardcoded AI API keys, secret logging, and high-impact domain oversight flags.',
+		params: {
+			sub_path: { description: 'Optional workspace subdirectory to scope the scan.' },
+		},
+	},
+
+	ai_estimate_performance_cost: {
+		name: 'ai_estimate_performance_cost',
+		description: 'Estimates monthly token volume, p50/p95 latency, and monthly cost across Local SLM, Fast Hosted, and Flagship Reasoning model tiers with concrete optimization recommendations.',
+		params: {
+			workload_name: { description: 'Name of the AI workload.' },
+			monthly_requests: { description: 'Expected monthly request volume.' },
+			avg_input_tokens: { description: 'Optional average input tokens per request (default 1200).' },
+			avg_output_tokens: { description: 'Optional average output tokens per request (default 400).' },
+		},
+	},
+
+	ai_create_workflow: {
+		name: 'ai_create_workflow',
+		description: 'Compiles a natural-language AI automation requirement into a structured, inspectable, versioned multi-step workflow (with ingestion, RAG, reasoning, Human-in-the-Loop approval gates, retries, and evaluation) and saves it to .kodia/ai/workflows.json.',
+		params: {
+			name: { description: 'Workflow name.' },
+			instruction: { description: 'Natural-language description of what the automation workflow should do.' },
+			trigger: { description: 'Optional trigger type: manual | schedule | webhook | event.' },
+		},
+	},
+
+	ai_run_workflow: {
+		name: 'ai_run_workflow',
+		description: 'Executes a saved AI workflow with checkpointed step traces, pausing cleanly at Human-in-the-Loop approval gates unless approve_human_gates=true, and records run history in .kodia/ai/workflow-runs.json.',
+		params: {
+			workflow_id: { description: 'Workflow ID returned by ai_create_workflow.' },
+			input_context: { description: 'Optional input payload or context string.' },
+			approve_human_gates: { description: 'Optional boolean (default false) indicating whether human approval gates have been authorized.' },
+		},
+	},
+
+	ai_research_analyze: {
+		name: 'ai_research_analyze',
+		description: 'Synthesizes an AI research & experiment brief comparing deterministic baselines, hybrid/PEFT methods, and verifier-guided approaches, separating established patterns from testable hypotheses and defining controlled ablation plans.',
+		params: {
+			topic: { description: 'AI research question, algorithm, or engineering problem.' },
+		},
+	},
+
+	ai_discover_capabilities: {
+		name: 'ai_discover_capabilities',
+		description: 'Queries Kodia’s Future Capability Discovery Catalogue for production and emerging AI disciplines, frameworks, protocols (MCP/ACP), model families (SSMs, World Models, VLA, Neuro-Symbolic), maturity levels, dependencies, and security implications.',
+		params: {
+			query: { description: 'Optional keyword filter (e.g. "rag", "edge", "robotics", "emerging", "reasoning").' },
+			category: { description: 'Optional category: discipline | framework | model-family | protocol | evaluation | infrastructure | emerging.' },
+		},
+	},
+
+	ai_scaffold_product_factory: {
+		name: 'ai_scaffold_product_factory',
+		description: 'One-Command Kodia AI Product Factory: generates a complete 9-phase dual-engine delivery blueprint (Universal Software + AI Engineering Engine) with shared API/DB/Model contracts, specialist assignments, production checklist, and explicit limitations.',
+		params: {
+			objective: { description: 'Complete high-level product or AI system requirement.' },
+			project_title: { description: 'Optional short project title.' },
+			compute_preference: { description: 'Optional: auto | local-first | hybrid | cloud-first.' },
+		},
+	},
+
+	ai_diagnose_failure: {
+		name: 'ai_diagnose_failure',
+		description: 'Investigates AI system failures (CUDA OOM, NaN loss divergence, RAG low recall/hallucination, agent tool loops, 429 rate limits, dataset corruption) and outputs concrete root causes, diagnostic steps, repairs, and verification checks.',
+		params: {
+			error_summary: { description: 'Concise description of the observed AI failure or error message.' },
+			logs: { description: 'Optional log tail or stack trace excerpt.' },
+			component: { description: 'Optional failing component name (e.g. training, rag, agent, inference).' },
+		},
+	},
+
+	ai_check_provider_capabilities: {
+		name: 'ai_check_provider_capabilities',
+		description: 'Inspects all configured BYOK cloud and local AI providers in Kodia (OpenAI, Anthropic, Gemini, NVIDIA, OpenRouter, Ollama, LM Studio, vLLM, MLX, etc.), reporting real availability, model counts, and tool-calling/vision/reasoning capabilities.',
+		params: {},
+	},
+
 	// go_to_definition
 	// go_to_usages
 
@@ -2154,6 +2365,10 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 	}
 
 	if (mode === 'agent' || mode === 'plan') {
+		details.push(`TWO-ENGINE UNIFIED ORCHESTRATION (Universal Software Engine + AI Engineering Engine):
+- Do NOT force AI into ordinary non-AI software requests. When a request is pure software engineering (websites, CRUD apps, utilities, games, APIs without AI), keep it clean and use Kodia's Universal Software Engineering Engine & Design Intelligence directly.
+- When a request involves AI systems, chatbots, RAG, ML/DL models, computer vision, speech/audio, autonomous agents, workflows, or full-stack AI products, coordinate both engines via ai_orchestrate_project / ai_scaffold_product_factory, probe real hardware (ai_probe_compute_hardware), profile datasets (ai_profile_dataset), build/evaluate RAG (ai_rag_build_index, ai_rag_query, ai_rag_evaluate), track experiments/models (ai_experiment_manage, ai_model_registry), run quantitative evaluations (ai_evaluate_system) and AI security audits (ai_audit_security), and delegate independent workstreams to AI specialists (ai_architect, ml_engineer, llm_engineer, rag_engineer, agentic_engineer, data_engineer, cv_engineer, mlops, ai_security, ai_eval).
+- Never claim a model was trained, evaluated, deployed, or verified on hardware unless the real operation actually ran and produced verifiable artifacts. Always clearly note required external API keys or unverified cloud services.`)
 		details.push(`AUTONOMOUS UI/UX DESIGN & FRONTEND ENGINEERING DEFAULT: Whenever building or redesigning a website, e-commerce store, web app, dashboard, mobile/desktop UI, game, or frontend component, automatically deliver world-class, art-directed, production-grade design without waiting for the user to specify colors, typography, cards, imagery, or responsiveness:
 - Before coding UI: inspect an existing repo with inspect_existing_design_system + discover_icon_library, and plan new products with analyze_product_design_requirements, generate_design_brief, generate_design_tokens (or generate_color_palette + recommend_typography), and generate_page_architecture / generate_responsive_layout.
 - Visual assets & icons: proactively discover and download verified imagery with discover_visual_assets + download_visual_assets (or generate bespoke SVG artwork when offline/appropriate) and use clean vector icons from one coherent icon library. Never ship broken image URLs, generic placeholder boxes, lorem ipsum, or emoji substitutes for UI icons.

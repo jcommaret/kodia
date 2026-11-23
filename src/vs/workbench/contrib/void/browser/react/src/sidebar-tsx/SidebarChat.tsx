@@ -2973,6 +2973,33 @@ const GenericBuiltinToolCard = ({ toolMessage }: { toolMessage: Exclude<ToolMess
 					</div>
 				)
 			}
+		} else if (category === 'ai' && rawResult && typeof rawResult === 'object') {
+			if (toolMessage.name === 'ai_orchestrate_project' && typeof rawResult.engineMode === 'string') {
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className='font-semibold'>{rawResult.engineMode}</span>
+						<span className='text-void-fg-3'>{Array.isArray(rawResult.detectedDisciplines) && rawResult.detectedDisciplines.length ? rawResult.detectedDisciplines.join(', ') : 'Pure Universal Software'}</span>
+					</div>
+				)
+			} else if ((toolMessage.name === 'ai_evaluate_system' || toolMessage.name === 'ai_rag_evaluate') && typeof rawResult.passed === 'boolean') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className={rawResult.passed ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
+							{rawResult.passed ? 'EVAL PASSED' : 'EVAL NEEDS IMPROVEMENT'}
+						</span>
+						<span className='font-mono text-[10px] text-void-fg-3'>
+							{toolMessage.name === 'ai_rag_evaluate' ? `Recall@K=${rawResult.meanRecallAtK} · MRR=${rawResult.mrr}` : JSON.stringify(rawResult.metrics)}
+						</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'ai_audit_security' && typeof rawResult.score === 'number') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className='font-semibold'>AI Security: {rawResult.score}/100</span>
+						<span className='text-void-fg-3'>{rawResult.criticalCount} critical · {rawResult.highCount} high</span>
+					</div>
+				)
+			}
 		}
 
 		if (outputText || designPreview) {

@@ -7,6 +7,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import {
 	BookOpen,
 	Bot,
+	Brain,
 	Cpu,
 	Home,
 	Palette,
@@ -29,6 +30,7 @@ import { SettingsHomeSection, SettingsNavigateTarget } from './SettingsHomeSecti
 import { AppearanceSection, EditorWorkbenchSection } from './AppearanceEditorSettings.js';
 import { OperationsDiagnosticsSection } from './OperationsDiagnosticsSettings.js';
 import { DesignIntelligenceSection } from './DesignIntelligenceSettings.js';
+import { AIEngineSettingsSection } from './AIEngineSettings.js';
 import { SettingsSearchContext } from './SettingsControls.js';
 
 type SectionId = SettingsNavigateTarget;
@@ -117,6 +119,17 @@ const SECTIONS: readonly NavSectionDef[] = [
 			'Lifecycle hooks': ['hooks', 'pretooluse', 'posttooluse', 'guard', 'automation', 'workflows', '.kodia/hooks.json', 'claude'],
 			'Tool policy': ['tool', 'tools', 'disable', 'enable', 'allow', 'deny', 'block', 'policy', 'permissions'],
 			'MCP servers': ['mcp', 'model context protocol', 'plugins', 'extensions', 'integrations', 'tools', 'server'],
+		},
+	},
+	{
+		id: 'ai_engine',
+		group: 'AI Engine',
+		label: 'AI Engineering Engine',
+		icon: <Brain size={14} />,
+		keywordsOfGroup: {
+			'Two-Engine Unified Orchestrator': ['ai', 'orchestrator', 'dual engine', 'factory', 'ml', 'deep learning', 'compute', 'gpu', 'local', 'cloud'],
+			'RAG & knowledge indexing defaults': ['rag', 'chunk', 'overlap', 'top-k', 'vector', 'bm25', 'knowledge', 'retrieval'],
+			'AI security, governance & budget guardrails': ['prompt injection', 'pii', 'pickle', 'security', 'governance', 'hitl', 'budget', 'spending', 'future', 'capabilities'],
 		},
 	},
 	{
@@ -211,6 +224,7 @@ export const Settings = () => {
 			case 'models': return <ModelsSection />;
 			case 'features': return <FeaturesSection />;
 			case 'agent': return <AgentSection />;
+			case 'ai_engine': return <AIEngineSettingsSection onRecordChange={recordChange} />;
 			case 'design': return <DesignIntelligenceSection onRecordChange={recordChange} />;
 			case 'instructions': return <InstructionsSection />;
 			case 'operations': return <OperationsDiagnosticsSection />;

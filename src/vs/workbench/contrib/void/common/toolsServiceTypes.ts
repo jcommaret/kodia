@@ -45,6 +45,30 @@ import type {
 	VisualRepairPlan,
 	VisualRevisionComparison,
 } from './designIntelligenceTypes.js';
+import type {
+	AIArchitectureReport,
+	AICapabilityCatalogueEntry,
+	AIEvaluationReport,
+	AIEvaluationTaskType,
+	AIExperimentRecord,
+	AIFailureDiagnosisReport,
+	AIPerformanceCostEstimate,
+	AIResearchBrief,
+	AISecurityAuditReport,
+	AIWorkflowDefinition,
+	AIWorkflowRunResult,
+	ComputeHardwareProfile,
+	DatasetProfileReport,
+	EngineRoutingDecision,
+	ModelRegistryEntry,
+	ModelRegistryStage,
+	OneCommandFactoryBlueprint,
+	ProviderCapabilitySummary,
+	RagEvaluationReport,
+	RagIndexSummary,
+	RagQueryResult,
+	TrainingStrategyRecommendation,
+} from './aiEngineeringTypes.js';
 
 
 
@@ -227,6 +251,12 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'inspect_visual_quality': 'browser',
 	'audit_accessibility': 'browser',
 	'audit_frontend_performance': 'browser',
+	// Universal AI Engineering Engine (state-writing tools)
+	'ai_rag_build_index': 'edits',
+	'ai_experiment_manage': 'edits',
+	'ai_model_registry': 'edits',
+	'ai_create_workflow': 'edits',
+	'ai_run_workflow': 'terminal',
 }
 
 
@@ -461,6 +491,27 @@ export type BuiltinToolCallParams = {
 	'critique_interface_design': { session_id?: string, tab_id?: string, sub_path?: string, product_description?: string },
 	'repair_visual_defects': { session_id?: string, tab_id?: string, sub_path?: string },
 	'compare_visual_revisions': { baseline_path: string, current_path: string, diff_output_path?: string, pixel_threshold?: number },
+	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator (20 tools)
+	'ai_orchestrate_project': { request: string },
+	'ai_design_architecture': { project_title: string, requirements: string, compute_preference?: 'auto' | 'local-first' | 'hybrid' | 'cloud-first' },
+	'ai_probe_compute_hardware': {},
+	'ai_recommend_training_strategy': { task_type: string, dataset_rows: number, model_size_billions?: number, deployment_target?: string },
+	'ai_profile_dataset': { dataset_path: string, max_rows?: number },
+	'ai_rag_build_index': { index_name: string, source_paths?: string[], chunk_size?: number, chunk_overlap?: number, max_files?: number },
+	'ai_rag_query': { index_name: string, query: string, top_k?: number, source_filter?: string },
+	'ai_rag_evaluate': { index_name: string, top_k?: number, cases: Array<{ query: string, expected_sources: string[], expected_terms?: string[] }> },
+	'ai_experiment_manage': { action: 'list' | 'create' | 'log' | 'compare', id?: string, name?: string, discipline?: string, model_ref?: string, dataset_ref?: string, status?: 'running' | 'completed' | 'failed', hyperparameters?: Record<string, string | number | boolean>, metrics?: Record<string, number>, artifacts?: string[], notes?: string, metric_key?: string },
+	'ai_model_registry': { action: 'list' | 'register' | 'promote' | 'inspect', id?: string, name?: string, version?: string, framework?: string, task_type?: string, stage?: ModelRegistryStage, artifact_path?: string, dataset_ref?: string, experiment_id?: string, quantization?: string, metrics?: Record<string, number>, notes?: string },
+	'ai_evaluate_system': { name: string, task_type: AIEvaluationTaskType, records: Array<Record<string, unknown>>, min_pass_score?: number },
+	'ai_audit_security': { sub_path?: string },
+	'ai_estimate_performance_cost': { workload_name: string, monthly_requests: number, avg_input_tokens?: number, avg_output_tokens?: number },
+	'ai_create_workflow': { name: string, instruction: string, trigger?: 'manual' | 'schedule' | 'webhook' | 'event' },
+	'ai_run_workflow': { workflow_id: string, input_context?: string, approve_human_gates?: boolean },
+	'ai_research_analyze': { topic: string },
+	'ai_discover_capabilities': { query?: string, category?: AICapabilityCatalogueEntry['category'] },
+	'ai_scaffold_product_factory': { objective: string, project_title?: string, compute_preference?: 'auto' | 'local-first' | 'hybrid' | 'cloud-first' },
+	'ai_diagnose_failure': { error_summary: string, logs?: string, component?: string },
+	'ai_check_provider_capabilities': {},
 }
 
 // RESULT OF TOOL CALL
@@ -681,6 +732,27 @@ export type BuiltinToolResultType = {
 	'critique_interface_design': DesignCritiqueReport,
 	'repair_visual_defects': VisualRepairPlan,
 	'compare_visual_revisions': VisualRevisionComparison,
+	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator (20 tools)
+	'ai_orchestrate_project': EngineRoutingDecision,
+	'ai_design_architecture': AIArchitectureReport,
+	'ai_probe_compute_hardware': ComputeHardwareProfile,
+	'ai_recommend_training_strategy': TrainingStrategyRecommendation,
+	'ai_profile_dataset': DatasetProfileReport,
+	'ai_rag_build_index': RagIndexSummary,
+	'ai_rag_query': RagQueryResult,
+	'ai_rag_evaluate': RagEvaluationReport,
+	'ai_experiment_manage': { message: string, experiment?: AIExperimentRecord, experiments: AIExperimentRecord[], bestExperimentId?: string },
+	'ai_model_registry': { message: string, model?: ModelRegistryEntry, models: ModelRegistryEntry[] },
+	'ai_evaluate_system': AIEvaluationReport,
+	'ai_audit_security': AISecurityAuditReport,
+	'ai_estimate_performance_cost': AIPerformanceCostEstimate,
+	'ai_create_workflow': AIWorkflowDefinition,
+	'ai_run_workflow': AIWorkflowRunResult,
+	'ai_research_analyze': AIResearchBrief,
+	'ai_discover_capabilities': { entries: AICapabilityCatalogueEntry[] },
+	'ai_scaffold_product_factory': OneCommandFactoryBlueprint,
+	'ai_diagnose_failure': AIFailureDiagnosisReport,
+	'ai_check_provider_capabilities': { providers: ProviderCapabilitySummary[], configuredCount: number, localConfiguredCount: number },
 }
 
 

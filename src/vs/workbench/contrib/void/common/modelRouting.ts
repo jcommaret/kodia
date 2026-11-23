@@ -40,11 +40,11 @@ export function routingRoleForContext(opts: { chatMode?: ChatMode; subagentRole?
 	const role = opts.subagentRole?.toLowerCase();
 	if (role) {
 		if (role === 'explore') { return 'explore'; }
-		if (role === 'planner' || role === 'architect') { return 'planning'; }
-		if (role === 'security') { return 'security'; }
+		if (role === 'planner' || role === 'architect' || role === 'ai_architect' || role === 'ai_research') { return 'planning'; }
+		if (role === 'security' || role === 'ai_security') { return 'security'; }
 		if (role === 'debugging') { return 'debugging'; }
 		if (role === 'review' || role === 'performance') { return 'review'; }
-		if (role === 'testing' || role === 'browser') { return 'testing'; }
+		if (role === 'testing' || role === 'browser' || role === 'ai_eval') { return 'testing'; }
 		if (role === 'docs') { return 'docs'; }
 		return 'coding';
 	}

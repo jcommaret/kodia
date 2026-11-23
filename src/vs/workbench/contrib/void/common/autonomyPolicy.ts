@@ -197,6 +197,27 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'critique_interface_design',
 	'repair_visual_defects',
 	'compare_visual_revisions',
+	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator
+	'ai_orchestrate_project',
+	'ai_design_architecture',
+	'ai_probe_compute_hardware',
+	'ai_recommend_training_strategy',
+	'ai_profile_dataset',
+	'ai_rag_build_index',
+	'ai_rag_query',
+	'ai_rag_evaluate',
+	'ai_experiment_manage',
+	'ai_model_registry',
+	'ai_evaluate_system',
+	'ai_audit_security',
+	'ai_estimate_performance_cost',
+	'ai_create_workflow',
+	'ai_run_workflow',
+	'ai_research_analyze',
+	'ai_discover_capabilities',
+	'ai_scaffold_product_factory',
+	'ai_diagnose_failure',
+	'ai_check_provider_capabilities',
 ]);
 
 /**
@@ -520,6 +541,32 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		// Asset downloads and optimization write files into the workspace
 		case 'download_visual_assets':
 		case 'optimize_visual_assets':
+			return 'medium';
+
+		// Universal AI Engineering Engine — read/analyze/query/eval tools are low risk
+		case 'ai_orchestrate_project':
+		case 'ai_design_architecture':
+		case 'ai_probe_compute_hardware':
+		case 'ai_recommend_training_strategy':
+		case 'ai_profile_dataset':
+		case 'ai_rag_query':
+		case 'ai_rag_evaluate':
+		case 'ai_evaluate_system':
+		case 'ai_audit_security':
+		case 'ai_estimate_performance_cost':
+		case 'ai_research_analyze':
+		case 'ai_discover_capabilities':
+		case 'ai_scaffold_product_factory':
+		case 'ai_diagnose_failure':
+		case 'ai_check_provider_capabilities':
+			return 'low';
+
+		// AI Engine state-writing / execution tools
+		case 'ai_rag_build_index':
+		case 'ai_experiment_manage':
+		case 'ai_model_registry':
+		case 'ai_create_workflow':
+		case 'ai_run_workflow':
 			return 'medium';
 	}
 	return 'medium';

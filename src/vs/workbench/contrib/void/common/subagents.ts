@@ -31,7 +31,21 @@ export type BuiltinSubagentType =
 	| 'devops'
 	| 'performance'
 	| 'ui_ux'
-	| 'refactor';
+	| 'refactor'
+	// Kodia AI Engineering Engine specialist workforce
+	| 'ai_architect'
+	| 'ml_engineer'
+	| 'llm_engineer'
+	| 'rag_engineer'
+	| 'agentic_engineer'
+	| 'data_engineer'
+	| 'cv_engineer'
+	| 'speech_audio'
+	| 'mlops'
+	| 'ai_security'
+	| 'ai_eval'
+	| 'ai_research'
+	| 'robotics_iot';
 
 /** Either a built-in specialist role or a workspace/user custom agent name. */
 export type SubagentType = BuiltinSubagentType | (string & {});
@@ -141,6 +155,71 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 		canChangeFiles: true,
 		description: 'specialist in safe structural refactoring, deduplication, typing improvements, and preserving behavior',
 		guidance: 'Keep behavior identical while improving modularity and clarity. Run typechecks and existing tests to prove zero regressions.',
+	},
+	ai_architect: {
+		canChangeFiles: false,
+		description: 'read-only: AI system architect designing model-agnostic AI/data/RAG/agent/serving architectures and trade-offs',
+		guidance: 'Use ai_orchestrate_project, ai_design_architecture, ai_probe_compute_hardware, and ai_estimate_performance_cost. Compare alternatives with latency, cost, and risk trade-offs; never force AI into ordinary non-AI software.',
+	},
+	ml_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in classical ML, deep learning, PyTorch/scikit-learn/XGBoost, training pipelines, quantization, and ONNX',
+		guidance: 'Profile datasets first (ai_profile_dataset), probe hardware (ai_probe_compute_hardware), select optimal training strategy (ai_recommend_training_strategy), log experiments (ai_experiment_manage), and register verified artifacts (ai_model_registry).',
+	},
+	llm_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in LLMs, SLMs, structured outputs, prompt/context engineering, function calling, routing, and model serving',
+		guidance: 'Build model-agnostic BYOK/local integrations with streaming, structured output validation, caching, retries, and quantitative evaluations (ai_evaluate_system).',
+	},
+	rag_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in hybrid BM25+vector RAG, document ingestion, chunking, reranking, grounded citations, and retrieval evals',
+		guidance: 'Use ai_rag_build_index, ai_rag_query, and ai_rag_evaluate. Enforce source provenance, tenant access filtering, and automated Recall@K / MRR / Groundedness evaluation.',
+	},
+	agentic_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in autonomous agents, multi-agent orchestration, typed tool registries, durable checkpoints, and workflows',
+		guidance: 'Design bounded, observable, checkpointed agent runtimes and workflows (ai_create_workflow, ai_run_workflow) with explicit permission guards, retries, and recovery.',
+	},
+	data_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in AI data pipelines, dataset profiling, cleaning, validation, lineage, PII redaction, and feature engineering',
+		guidance: 'Run ai_profile_dataset to verify schemas, missing rates, duplicates, class balance, and PII before building reproducible, leakage-free data pipelines.',
+	},
+	cv_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in computer vision (classification, detection, segmentation, OCR, video analysis, OpenCV/PyTorch/ONNX)',
+		guidance: 'Build verifiable vision preprocessing, inference, evaluation (mAP/IoU/CER), and visualization pipelines with real test fixtures.',
+	},
+	speech_audio: {
+		canChangeFiles: true,
+		description: 'specialist in ASR, TTS, voice assistants, audio classification, diarization, and real-time multimodal audio pipelines',
+		guidance: 'Design low-latency streaming audio/speech pipelines with clear WER/RTF benchmarks and graceful fallbacks when microphones or audio runtimes are absent.',
+	},
+	mlops: {
+		canChangeFiles: true,
+		description: 'specialist in MLOps/LLMOps, model registries, experiment tracking, serving containers, monitoring, drift, and cost control',
+		guidance: 'Maintain reproducible artifacts in ai_model_registry and ai_experiment_manage, containerize inference cleanly, and document health checks, rollbacks, and cost limits.',
+	},
+	ai_security: {
+		canChangeFiles: false,
+		description: 'read-only: audits prompt injection, secret leaks, unsafe model deserialization, output validation, PII, and AI governance',
+		guidance: 'Run ai_audit_security and inspect prompt boundaries, tool permissions, pickle/torch.load safety, tenant isolation, and high-impact domain oversight requirements.',
+	},
+	ai_eval: {
+		canChangeFiles: true,
+		description: 'specialist in quantitative AI evaluation harnesses (F1/MAE/RAG Recall@K/Groundedness/Agent completion) and regression gates',
+		guidance: 'Build deterministic golden evaluation datasets and run ai_evaluate_system and ai_rag_evaluate. Never claim model quality without measured scores.',
+	},
+	ai_research: {
+		canChangeFiles: false,
+		description: 'read-only: AI research scientist comparing methods, designing controlled ablations, and evaluating emerging capabilities',
+		guidance: 'Use ai_research_analyze and ai_discover_capabilities. Clearly separate established literature, measured experiment outcomes, and unverified hypotheses.',
+	},
+	robotics_iot: {
+		canChangeFiles: true,
+		description: 'specialist in Edge AI, TinyML, IoT sensor fusion, predictive maintenance, MQTT/OPC-UA, Jetson/ESP32/RPi, and robotics simulation',
+		guidance: 'Optimize for edge latency/memory (ONNX/INT8) and verify strictly against available simulators/emulators — never claim physical hardware verification without real hardware.',
 	},
 };
 

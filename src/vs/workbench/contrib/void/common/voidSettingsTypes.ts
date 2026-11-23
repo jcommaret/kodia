@@ -10,6 +10,7 @@ import { ToolApprovalType } from './toolsServiceTypes.js';
 import { AutonomyMode, defaultAutonomyMode } from './autonomyPolicy.js';
 import { InstructionsFramework } from './instructionsFrameworks.js';
 import { DEFAULT_DESIGN_INTELLIGENCE_SETTINGS, DesignIntelligenceSettings } from './designIntelligenceTypes.js';
+import { AIEngineSettings, DEFAULT_AI_ENGINE_SETTINGS } from './aiEngineeringTypes.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
 
@@ -524,6 +525,8 @@ export type GlobalSettings = {
 	disabledTools: string[];
 	// Autonomous UI/UX Design Intelligence & Creative Direction Engine
 	designIntelligence: DesignIntelligenceSettings;
+	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator
+	aiEngine: AIEngineSettings;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -568,6 +571,8 @@ export const defaultGlobalSettings: GlobalSettings = {
 	disabledTools: [],
 	// Autonomous UI/UX Design Intelligence & Creative Direction Engine
 	designIntelligence: DEFAULT_DESIGN_INTELLIGENCE_SETTINGS,
+	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator
+	aiEngine: DEFAULT_AI_ENGINE_SETTINGS,
 }
 
 export type GlobalSettingName = keyof GlobalSettings

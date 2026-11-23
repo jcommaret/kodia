@@ -71,6 +71,8 @@ import { IVerificationLedgerService } from '../../../verificationLedgerService.j
 import { ISoftwareFactoryService } from '../../../softwareFactoryService.js';
 import { IDesignIntelligenceService } from '../../../designIntelligenceService.js';
 import { IDesignAssetMainService } from '../../../../common/designIntelligenceTypes.js';
+import { IAIEngineeringService } from '../../../aiEngineeringService.js';
+import { IKodiaAIEngineMainService } from '../../../../common/aiEngineeringTypes.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -263,6 +265,8 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		ISoftwareFactoryService: accessor.get(ISoftwareFactoryService),
 		IDesignIntelligenceService: accessor.get(IDesignIntelligenceService),
 		IDesignAssetMainService: (() => { try { return accessor.get(IDesignAssetMainService) } catch { return undefined } })(),
+		IAIEngineeringService: accessor.get(IAIEngineeringService),
+		IKodiaAIEngineMainService: (() => { try { return accessor.get(IKodiaAIEngineMainService) } catch { return undefined } })(),
 
 	} as const
 	return reactAccessor

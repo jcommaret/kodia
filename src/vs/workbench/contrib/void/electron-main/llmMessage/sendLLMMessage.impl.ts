@@ -235,6 +235,15 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 		const thisConfig = settingsOfProvider[providerName]
 		return new OpenAI({ baseURL: 'https://api.mistral.ai/v1', apiKey: thisConfig.apiKey, ...commonPayloadOpts })
 	}
+	else if (providerName === 'nineRouter') {
+		// Kodia: 9Router integration - smart router with auto-fallback
+		const thisConfig = settingsOfProvider[providerName]
+		return new OpenAI({
+			baseURL: `${thisConfig.endpoint}/v1`,
+			apiKey: thisConfig.apiKey || 'noop', // 9Router may not require API key for free tiers
+			...commonPayloadOpts
+		})
+	}
 
 	else throw new Error(`Kodia providerName was invalid: ${providerName}.`)
 }
@@ -1449,6 +1458,11 @@ export const sendLLMMessageToProviderImplementation = {
 		sendChat: (params) => _sendOpenAICompatibleChat(params),
 		sendFIM: null,
 		list: null,
+	},
+	nineRouter: { // Kodia: 9Router integration
+		sendChat: (params) => _sendOpenAICompatibleChat(params),
+		sendFIM: (params) => _sendOpenAICompatibleFIM(params),
+		list: (params) => _openaiCompatibleList(params),
 	},
 
 } satisfies CallFnOfProvider

@@ -69,6 +69,10 @@ export const defaultProviderSettings = {
 		region: 'us-east-1', // add region setting
 		endpoint: '', // optionally allow overriding default
 	},
+	nineRouter: { // Kodia: 9Router integration for unlimited free AI coding
+		endpoint: 'http://localhost:20128',
+		apiKey: '',
+	},
 
 } as const
 
@@ -123,6 +127,17 @@ export const catalogModelsOfProvider = {
 	deepseek: [ // https://api-docs.deepseek.com/quick_start/pricing
 		'deepseek-flash', // DeepSeek-V4.1-Flash, which also serves the retired deepseek-v4-flash's requests
 		'deepseek-v4-pro',
+	],
+	nineRouter: [ // Kodia: 9Router can route to any provider's models
+		// Common free/popular models through 9Router
+		'kr/claude-sonnet-4.5', // Kiro AI
+		'kr/glm-5', // Kiro AI
+		'kr/minimax', // Kiro AI
+		'opencode/claude-sonnet-4.5', // OpenCode Free
+		'opencode/gpt-4', // OpenCode Free
+		'google/gemini-3.8-flash', // Vertex AI
+		'anthropic/claude-sonnet-4.5', // Direct (if API key provided)
+		'openai/gpt-5', // Direct (if API key provided)
 	],
 	ollama: [ // autodetected
 	],

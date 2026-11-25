@@ -116,6 +116,9 @@ export const displayInfoOfProviderName = (providerName: ProviderName): DisplayIn
 	else if (providerName === 'awsBedrock') {
 		return { title: 'AWS Bedrock', }
 	}
+	else if (providerName === 'nineRouter') {
+		return { title: '9Router', desc: 'Smart router with auto-fallback and token savings' }
+	}
 
 	throw new Error(`descOfProviderName: Unknown provider name: "${providerName}"`)
 }
@@ -134,6 +137,7 @@ export const subTextMdOfProviderName = (providerName: ProviderName): string => {
 	if (providerName === 'googleVertex') return 'You must authenticate before using Vertex with Kodia. Read more about endpoints [here](https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library), and regions [here](https://cloud.google.com/vertex-ai/docs/general/locations#available-regions).'
 	if (providerName === 'microsoftAzure') return 'Read more about endpoints [here](https://learn.microsoft.com/en-us/rest/api/aifoundry/model-inference/get-chat-completions/get-chat-completions?view=rest-aifoundry-model-inference-2024-05-01-preview&tabs=HTTP), and get your API key [here](https://learn.microsoft.com/en-us/azure/search/search-security-api-keys?tabs=rest-use%2Cportal-find%2Cportal-query#find-existing-keys).'
 	if (providerName === 'awsBedrock') return 'Connect via a LiteLLM proxy or the AWS [Bedrock-Access-Gateway](https://github.com/aws-samples/bedrock-access-gateway). LiteLLM Bedrock setup docs are [here](https://docs.litellm.ai/docs/providers/bedrock).'
+	if (providerName === 'nineRouter') return '9Router is a smart AI router that provides unlimited free coding by auto-switching between 40+ providers. Install with `npm install -g 9router` and run `9router`. Get your dashboard API key from [http://localhost:20128](http://localhost:20128/dashboard). Learn more at [github.com/decolua/9router](https://github.com/decolua/9router).'
 	if (providerName === 'ollama') return 'Read more about custom [Endpoints here](https://github.com/ollama/ollama/blob/main/docs/faq.md#how-can-i-expose-ollama-on-my-network).'
 	if (providerName === 'vLLM') return 'Read more about custom [Endpoints here](https://docs.vllm.ai/en/latest/getting_started/quickstart.html#openai-compatible-server).'
 	if (providerName === 'lmStudio') return 'Read more about custom [Endpoints here](https://lmstudio.ai/docs/app/api/endpoints/openai).'
@@ -167,7 +171,8 @@ export const displayInfoOfSettingName = (providerName: ProviderName, settingName
 												providerName === 'googleVertex' ? 'AIzaSy...' :
 													providerName === 'microsoftAzure' ? 'key-...' :
 														providerName === 'awsBedrock' ? 'key-...' :
-															'',
+															providerName === 'nineRouter' ? 'Get from dashboard...' :
+																'',
 
 			isPasswordField: true,
 		}
@@ -183,7 +188,8 @@ export const displayInfoOfSettingName = (providerName: ProviderName, settingName
 								providerName === 'microsoftAzure' ? 'baseURL' :
 									providerName === 'liteLLM' ? 'baseURL' :
 										providerName === 'awsBedrock' ? 'Endpoint' :
-											'(never)',
+											providerName === 'nineRouter' ? 'Endpoint' :
+												'(never)',
 
 			placeholder: providerName === 'ollama' ? defaultProviderSettings.ollama.endpoint
 				: providerName === 'vLLM' ? defaultProviderSettings.vLLM.endpoint
@@ -192,7 +198,8 @@ export const displayInfoOfSettingName = (providerName: ProviderName, settingName
 							: providerName === 'mlx' ? defaultProviderSettings.mlx.endpoint
 							: providerName === 'liteLLM' ? 'http://localhost:4000'
 								: providerName === 'awsBedrock' ? 'http://localhost:4000/v1'
-									: '(never)',
+									: providerName === 'nineRouter' ? defaultProviderSettings.nineRouter.endpoint
+										: '(never)',
 
 
 		}
